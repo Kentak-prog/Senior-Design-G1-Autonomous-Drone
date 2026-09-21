@@ -10,10 +10,18 @@ Pipeline:
                                                     ->  approach waypoints
 
 GATE MODEL FRAME:
-    Origin at the center of the gate opening. The gate square lies in the
-    z = 0 plane, so +Z is the gate NORMAL, i.e. the direction of flight
-    through the gate. +X is right and +Y is up as seen by a pilot flying
-    through in the +Z direction.
+    Origin at the center of the gate opening, square lying in the z = 0
+    plane. +X right, +Y DOWN, +Z along the FLIGHT DIRECTION through the
+    gate. This is the same handedness convention as the OpenCV camera
+    frame, which is what makes T_cam_gate compose without surprises.
+
+    +Y is down rather than up on purpose. "+X right, +Y up, +Z flight
+    direction" is NOT right-handed from the pilot's point of view: with a
+    camera approaching along the gate's -Z, requiring the gate to appear
+    upright forces X_cam = -X_gate, so the gate's "+X right" is actually
+    the pilot's left. Defining +Y down removes the contradiction and makes
+    solvePnP return a normal that points the way the drone flies, rather
+    than back at the camera.
 
 CORNER ORDERING:
     Everything below assumes (top-left, top-right, bottom-right, bottom-left)
@@ -40,13 +48,21 @@ DEFAULT_GATE_SIDE = 1.5
 
 
 def gate_model_points(side: float = DEFAULT_GATE_SIDE) -> np.ndarray:
-    """4x3 gate corners in the gate frame, ordered TL, TR, BR, BL."""
+    """
+    4x3 gate corners in the gate frame, ordered TL, TR, BR, BL to match the
+    image-space ordering produced by order_corners().
+
+    Y is negated relative to the naive "+Y is up" layout so the frame is
+    right-handed with +Z along the flight direction (see module docstring).
+    Flipping these signs flips the recovered gate normal, which silently
+    reverses every approach waypoint. test_waypoint_ordering guards it.
+    """
     h = side / 2.0
     return np.array([
-        [-h, h, 0.0],   # top-left
-        [h, h, 0.0],    # top-right
-        [h, -h, 0.0],   # bottom-right
-        [-h, -h, 0.0],  # bottom-left
+        [-h, -h, 0.0],  # top-left      (+Y is DOWN in the gate frame)
+        [h, -h, 0.0],   # top-right
+        [h, h, 0.0],    # bottom-right
+        [-h, h, 0.0],   # bottom-left
     ], dtype=np.float64)
 
 
@@ -113,6 +129,8 @@ class GateDetection:
         return self.T_cam_gate[:3, 3]
 
     def normal_cam(self) -> np.ndarray:
+        """Unit gate normal, pointing along the flight direction (away from
+        the camera), expressed in the OpenCV camera frame."""
         return self.T_cam_gate[:3, 2]
 
 
@@ -199,8 +217,12 @@ def approach_waypoints(T_world_gate: np.ndarray,
     normal. Feeding these into a spline instead of bare gate centers is what
     stops the drone clipping a gate frame while cutting a corner.
 
-    Returns 3x3 in world coordinates. Check det.normal_is_reliable first; if
-    it is False, hand the planner the center alone.
+    Returns 3x3 in world coordinates, in FLIGHT ORDER: row 0 is reached
+    first, row 2 last. That ordering depends entirely on +Z of the gate
+    frame being the flight direction -- see gate_model_points().
+
+    Check det.normal_is_reliable first; if it is False, hand the planner the
+    center alone.
     """
     center = T_world_gate[:3, 3]
     normal = T_world_gate[:3, 2]
