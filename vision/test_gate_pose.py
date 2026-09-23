@@ -10,10 +10,16 @@ from gate_pose import (estimate_gate_pose, project_gate, order_corners,
 INTR = CameraIntrinsics.from_horizontal_fov(1280, 720, 90.0)
 SIDE = 1.5
 
+# Gate directly ahead, upright, facing away from the camera. Under the gate
+# frame convention in gate_pose.py (+X right, +Y down, +Z flight direction)
+# that is exactly the OpenCV camera frame, so the rotation is the identity.
+# It used to be diag(1, -1, -1) back when the gate frame had +Y up.
+HEAD_ON = np.eye(3)
+
 
 def test_zero_noise_roundtrip():
     """Perfect corners must recover the pose to solver precision."""
-    R = np.diag([1.0, -1.0, -1.0])
+    R = HEAD_ON
     T_true = make_transform(R, [0.4, -0.2, 5.0])
     corners = project_gate(T_true, INTR, SIDE)
     det = estimate_gate_pose(corners, INTR, SIDE, assume_ordered=True)
@@ -25,7 +31,7 @@ def test_zero_noise_roundtrip():
 
 def test_corner_ordering():
     """order_corners must recover TL,TR,BR,BL from a shuffled quad."""
-    R = np.diag([1.0, -1.0, -1.0])
+    R = HEAD_ON
     T_true = make_transform(R, [0.0, 0.0, 4.0])
     corners = project_gate(T_true, INTR, SIDE)
     rng = np.random.default_rng(3)
@@ -38,11 +44,11 @@ def test_corner_ordering():
 def test_world_transform_and_waypoints():
     """Gate at a known world spot, camera elsewhere, must come back correct."""
     gate_world = np.array([8.0, 2.0, 2.5])
-    # Gate normal (+Z of the gate frame) points along world -X, i.e. back at
-    # the drone; gate "up" (+Y) is world +Z.
-    R_world_gate = np.array([[0.0, 0.0, -1.0],
+    # Gate +Z is the FLIGHT DIRECTION: world +X, away from the drone.
+    # Gate +Y is down (world -Z) and gate +X is world -Y. Right-handed.
+    R_world_gate = np.array([[0.0, 0.0, 1.0],
                              [-1.0, 0.0, 0.0],
-                             [0.0, 1.0, 0.0]])
+                             [0.0, -1.0, 0.0]])
     T_world_gate_true = make_transform(R_world_gate, gate_world)
 
     # Camera at (0, 0, 2.5) in USD convention, looking along world +X,
@@ -67,6 +73,14 @@ def test_world_transform_and_waypoints():
     assert np.allclose(wps[1], gate_world, atol=1e-5)
     spacing = np.linalg.norm(wps[2] - wps[0])
     assert abs(spacing - 2.0) < 1e-6
+
+    # Ordering, not just spacing: row 0 must be the one the drone hits first.
+    cam_pos = np.array([0.0, 0.0, 2.5])
+    d_pre = np.linalg.norm(wps[0] - cam_pos)
+    d_post = np.linalg.norm(wps[2] - cam_pos)
+    assert d_pre < d_post, (
+        f"approach waypoints reversed: row0 at {d_pre:.2f} m, "
+        f"row2 at {d_post:.2f} m from the camera")
     print(f"  world-frame position error: {err:.2e} m, "
           f"waypoint spacing {spacing:.3f} m  OK")
 
@@ -95,7 +109,7 @@ def test_bootstrap_uncertainty():
     rng = np.random.default_rng(0)
     sigma = 1.0
     for rng_m in (4.0, 10.0):
-        R = np.diag([1.0, -1.0, -1.0])
+        R = HEAD_ON
         T_true = make_transform(R, [0.0, 0.0, rng_m])
         clean = project_gate(T_true, INTR, SIDE)
         actual, predicted = [], []
@@ -115,7 +129,7 @@ def test_bootstrap_uncertainty():
 
 def test_scale_sensitivity():
     """A wrong gate-size assumption shows up as a proportional range error."""
-    R = np.diag([1.0, -1.0, -1.0])
+    R = HEAD_ON
     T_true = make_transform(R, [0.0, 0.0, 6.0])
     corners = project_gate(T_true, INTR, SIDE)
     det = estimate_gate_pose(corners, INTR, SIDE * 1.05, assume_ordered=True)
@@ -124,10 +138,47 @@ def test_scale_sensitivity():
     print(f"  5% gate-size error -> {(ratio - 1) * 100:.1f}% range error  OK")
 
 
+def test_waypoint_ordering():
+    """
+    Regression guard for the gate-frame sign convention.
+
+    Built from PIXELS, not from a model round-trip: an upright square in the
+    middle of the image is unambiguously a gate the drone is flying toward,
+    whatever gate_model_points() happens to say. A round-trip test cannot
+    catch this class of bug, because projecting and solving with the same
+    wrong model stays perfectly self-consistent.
+
+    If the gate frame's Y signs are flipped, solvePnP returns a normal
+    pointing back at the camera and every approach waypoint reaches the path
+    generator in reverse order -- the drone threads each gate backwards.
+    """
+    rng_m, half_m = 5.0, SIDE / 2.0
+    half_px = INTR.fx * half_m / rng_m
+    cx, cy = INTR.cx, INTR.cy
+    corners = np.array([[cx - half_px, cy - half_px],   # top-left
+                        [cx + half_px, cy - half_px],   # top-right
+                        [cx + half_px, cy + half_px],   # bottom-right
+                        [cx - half_px, cy + half_px]])  # bottom-left
+
+    det = estimate_gate_pose(corners, INTR, SIDE, assume_ordered=True)
+    assert abs(det.range_m - rng_m) < 1e-6, det.range_m
+
+    n = det.normal_cam()
+    assert n[2] > 0.99, (
+        f"gate normal points back at the camera ({n}); gate frame +Z must be "
+        "the flight direction")
+
+    wps = approach_waypoints(det.T_cam_gate, standoff=1.0)
+    d = np.linalg.norm(wps, axis=1)
+    assert d[0] < d[1] < d[2], f"waypoints not in flight order: {d}"
+    print(f"  normal +Z_cam {n[2]:.4f}, waypoints {d[0]:.2f} -> {d[2]:.2f} m  OK")
+
+
 if __name__ == "__main__":
     print("test_zero_noise_roundtrip");      test_zero_noise_roundtrip()
     print("test_corner_ordering");           test_corner_ordering()
     print("test_world_transform_and_waypoints"); test_world_transform_and_waypoints()
     print("test_bootstrap_uncertainty");     test_bootstrap_uncertainty()
     print("test_scale_sensitivity");         test_scale_sensitivity()
+    print("test_waypoint_ordering");          test_waypoint_ordering()
     print("\nAll tests passed.")
