@@ -67,8 +67,8 @@ quaternion. Summary, but read the originals — they explain *why*:
 | `eval_isaac_gates.py` | **run live** — `optical_frame=False` settled 2026-09-28; re-run 2026-10-01 at 1280x720 / 60 deg: 5/5 gates, mean 0.21 m | gate-pose accuracy + `optical_frame` decision. `--camera-pose pose` reads `/drone00/state/pose` (best-effort QoS) because this sim publishes no TF. `--hfov-deg` builds intrinsics from the **real rgb image size** (fixed 2026-10-01; it used to take camera_info's stale width/height), and a WARNING prints whenever camera_info and the image disagree |
 | `test_color_gate_detector.py` | passing | run with plain `python3`, no ROS needed |
 | `test_eval_isaac_gates.py` | passing | run with plain `python3`, no ROS needed |
-| `test_gate_layout.py` | **FAILING** (known, not yet fixed) | `test_plan_layout_narrow_fov_drops_close_gate_keeps_nested_remainder` fails with "expected at least one gate to survive": the test imports `GATE_SPECS` and expects the old nested chain, but `GATE_SPECS` is now the staggered wide-FOV layout and the nested chain was renamed `NESTED_GATE_SPECS`. At the test's narrow 24 deg FOV every staggered gate is out of frame. The fix is to point the nested-chain tests at `NESTED_GATE_SPECS`. Needs no ROS/omni/pxr; the one file that imports across the `vision/`/`workspace/` boundary |
-| `gate_error_eval/` | **new 2026-10-01, offline-tested only**, never run against a real bag or PX4 | error-vs-ground-truth graphs, hover or moving: `fly_gate_approach.py` (pymavlink offboard straight-line flight) → `ros2 bag record` → `eval_gate_bag.py` (bag → `gate_errors.csv`, pose interpolated to each image stamp) → `plot_gate_errors.py` (4 report PNGs + summary table, runs on a Mac). `error_records.py` holds the shared CSV schema / `PoseBuffer` / summary. See "Gate-error graphs" below. `example_output/` is **synthetic** data |
+| `test_gate_layout.py` | passing (fixed 2026-10-01) | the narrow-FOV test now uses `NESTED_GATE_SPECS`; `test_approach_layout_level_and_fits_pitched_camera` covers `APPROACH_GATE_SPECS`. Needs no ROS/omni/pxr; the one file that imports across the `vision/`/`workspace/` boundary |
+| `gate_error_eval/` | **run live 2026-10-01** (hover bag, 1 m and 3 m approach flights) | error-vs-ground-truth graphs, hover or moving: `fly_gate_approach.py` (pymavlink offboard straight-line flight) → `ros2 bag record` → `eval_gate_bag.py` (bag → `gate_errors.csv`, pose interpolated to each image stamp) → `plot_gate_errors.py` (4 report PNGs + summary table, runs on a Mac). `error_records.py` holds the shared CSV schema / `PoseBuffer` / summary. See "Gate-error graphs" below. `example_output/` is **synthetic** data |
 | `workspace/spawn_test_gates.py` | run live (2026-10-01: 5 gates kept, 0 dropped at 1280x720 / 60 deg). `check_layout`'s clearance is still too loose: it once passed a layout whose gate bars were 1-2 px apart | reads the camera's live pose/FOV off the USD stage and places magenta test gates. Default `GATE_SPECS` is a **staggered** layout (ranges 6-14 m, scattered az/el) sized for a wide camera; the old on-axis nested chain is kept as `NESTED_GATE_SPECS` (at a wide FOV its frames touch and the mask merges them: detector found 0/5). Writes `/workspace/test_gates.json` (shared volume). **Run it only after the drone is hovering** |
 | `workspace/spawn_example.py` | run live | spawns Iris + PX4/ROS 2 backends + camera at `RESOLUTION=(1280,720)`, `HFOV_DEG=60`; after configuring the camera it calls `refresh_camera_info_helper()` (see "RESOLVED (2026-10-01)"). **Run it ONCE per Isaac Sim process** — see deployment notes |
 
@@ -82,8 +82,7 @@ python3 test_color_gate_detector.py
 python3 test_eval_isaac_gates.py
 python3 test_gate_layout.py
 ```
-Four of the five print `All tests passed.` today; `test_gate_layout.py` is the
-known failure (see its status row). None needs ROS, Isaac Sim, or
+All five print `All tests passed.` (plus the three in `gate_error_eval/`). None needs ROS, Isaac Sim, or
 omni/pxr installed — they only need `numpy` and `cv2` (opencv-python).
 `eval_isaac_gates.py` is different: it needs ROS 2 sourced and a live
 simulator, and is not runnable in this offline environment.
@@ -324,6 +323,28 @@ The bag can be re-evaluated whenever the detector changes. `evaluate_frame`
 takes a `detector=` callable, so Tye's detector can be dropped into
 `eval_gate_bag.evaluate_image_at` without re-flying.
 
+**Live results (2026-10-01).** Hover, 474 frames: 0.063 / 0.093 / 0.101 /
+0.443 / 0.279 m at 5.7-12.6 m, 100% detection, almost all of it a constant
+positive range bias (~1% of range for gates 0-2: estimates sit just BEHIND
+the gate). That points at a scale error (detected corners slightly inside
+the 1.5 m opening PnP assumes, or fx ~1% off), not noise. Not investigated.
+The 3 m approach at 1 m/s (overshot to 1.4 m/s): the flight script works
+against the cluster PX4 (udpin:0.0.0.0:14540, OFFBOARD entry, carrot), but
+with the staggered layout every gate left the TOP of the frame within ~1.5 s
+of moving. The gates sit 0.7-6 m above the camera and the drone pitches
+nose-down to accelerate, so almost no moving-frame data came back. In that
+1.5 s, error rose (gate_0 0.06 -> 0.085 m) while range shrank, so motion
+probably adds error, perhaps attitude timing: camera stamps are SIM time and
+pose stamps are WALL time, so pairing falls back to bag receive time. Fix
+for the layout: `SPAWN_LAYOUT = "approach"` (below).
+
+**Approach layout.** In the Script Editor, with the drone hovering:
+`SPAWN_LAYOUT = "approach"; exec(open("/workspace/scripts/spawn_test_gates.py").read())`.
+This gives 4 gates placed relative to the horizon, searched so they stay in
+frame along a 5 m approach (see `APPROACH_GATE_SPECS`). Then fly
+`--distance 5 --speed 1`. Without the variable, the default staggered layout
+is spawned as before.
+
 ## Interface contracts with teammates (unconfirmed — settle these)
 
 - **With Tye (detection → this code):** the input contract is **four
@@ -352,8 +373,7 @@ takes a `detector=` callable, so Tye's detector can be dropped into
    live toggle, then added to `spawn_example.py` afterwards. One clean
    process restart + spawn should show the `[init] camera_info helper
    re-initialized` line and a correct `camera_info` with no `--hfov-deg`.
-3. **Fix `test_gate_layout.py`** (point the nested-chain tests at
-   `NESTED_GATE_SPECS`; see its status row).
+3. ~~Fix `test_gate_layout.py`~~ done 2026-10-01.
 4. **Temporal fusion across frames.** Single-frame PnP is depth-dominated
    (range error ~2-3x lateral at 6-14 m, 0.06 m at 6 m up to 0.3-0.4 m at
    12-14 m in the 2026-10-01 run), and gate normals become unreliable past

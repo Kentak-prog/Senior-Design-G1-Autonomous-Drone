@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import numpy as np
 
 from spawn_test_gates import (gate_world_pose, check_layout, plan_layout,
-                              GATE_SPECS, GATE_SIDE, BAR_THICKNESS,
+                              GATE_SPECS, NESTED_GATE_SPECS, APPROACH_GATE_SPECS, GATE_SIDE, BAR_THICKNESS,
                               _hfov_vfov_from_aspect, RESOLUTION)
 
 
@@ -119,7 +119,7 @@ def test_plan_layout_narrow_fov_drops_close_gate_keeps_nested_remainder():
     too wide an angle up close) -- plan_layout must drop it and leave a
     remainder with no further problems."""
     cam = _axis_cam(hfov_deg=24.0)
-    plan = plan_layout(GATE_SPECS, cam, GATE_SIDE, BAR_THICKNESS)
+    plan = plan_layout(NESTED_GATE_SPECS, cam, GATE_SIDE, BAR_THICKNESS)
     kept_names = {g["name"] for g in plan["gates"]}
     dropped_names = {note.split(":")[0].removeprefix("dropped ") for note in plan["dropped"]}
 
@@ -133,7 +133,39 @@ def test_plan_layout_narrow_fov_drops_close_gate_keeps_nested_remainder():
          f"remainder has no problems  OK")
 
 
+def _pitched_cam(pitch_up_deg, position=(4.3, -0.5, 2.6), heading_deg=-7.4):
+    """Camera pitched up by pitch_up_deg about its right axis, heading in
+    the world x-y plane -- like the real Iris mount (15 deg up)."""
+    yaw, p = np.radians(heading_deg), np.radians(pitch_up_deg)
+    h = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+    right = np.cross(h, [0.0, 0.0, 1.0])
+    fwd = np.cos(p) * h + np.sin(p) * np.array([0.0, 0.0, 1.0])
+    up = np.cross(right, fwd)
+    cam = {"position": np.asarray(position, dtype=float), "right": right, "up": up, "fwd": fwd}
+    cam["hfov_deg"], cam["vfov_deg"] = _hfov_vfov_from_aspect(60.0, *RESOLUTION)
+    return cam
+
+
+def test_approach_layout_level_and_fits_pitched_camera():
+    """APPROACH_GATE_SPECS (level=True): gate positions must not depend on
+    camera pitch, and from the real 15-deg-up mount all four gates must be
+    kept by plan_layout with no problems."""
+    a = [gate_world_pose(s, _pitched_cam(15.0), level=True) for s in APPROACH_GATE_SPECS]
+    b = [gate_world_pose(s, _pitched_cam(0.0), level=True) for s in APPROACH_GATE_SPECS]
+    for ga, gb in zip(a, b):
+        assert np.allclose([ga["x"], ga["y"], ga["z"]], [gb["x"], gb["y"], gb["z"]]), (ga, gb)
+    # Every approach gate sits above the camera (positive level elevation).
+    assert all(g["z"] > 2.6 for g in a), a
+    cam = _pitched_cam(15.0)
+    plan = plan_layout(APPROACH_GATE_SPECS, cam, GATE_SIDE, BAR_THICKNESS, level=True)
+    assert len(plan["gates"]) == len(APPROACH_GATE_SPECS) and not plan["dropped"], plan["dropped"]
+    print(f"  approach layout: pitch-independent, all {len(plan['gates'])} gates kept "
+          f"from a 15 deg-up camera  OK")
+
+
 if __name__ == "__main__":
+    print("test_approach_layout_level_and_fits_pitched_camera")
+    test_approach_layout_level_and_fits_pitched_camera()
     print("test_gate_world_pose_axis_aligned_camera")
     test_gate_world_pose_axis_aligned_camera()
     print("test_gate_world_pose_yawed_camera");        test_gate_world_pose_yawed_camera()

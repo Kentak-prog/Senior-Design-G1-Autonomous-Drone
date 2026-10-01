@@ -129,6 +129,27 @@ GATE_SPECS = [
     (14.0, -19.7, 12.1, 10.0),
 ]
 
+# APPROACH layout, for vision/gate_error_eval/fly_gate_approach.py's straight
+# approach run (opt in: SPAWN_LAYOUT = "approach" before exec'ing this file).
+# Unlike the two lists above, az/el here are relative to the camera's LEVEL
+# heading (horizon), not its optical axis -- see gate_world_pose(level=True)
+# -- because the camera is pitched ~15 deg up and the drone pitches during
+# the flight, and what has to stay fixed is the gates' height above the
+# drone. In the 2026-10-01 3 m run with the staggered layout, gates 0.7-6 m
+# above the camera climbed out of the top of the frame within ~1 m of
+# motion. These were found by random search (2026-10-01): with the camera at
+# 1280x720 / 60 deg, mount pitch 15 deg up, flying 5 m along the heading,
+# body pitch 8 deg nose-down accelerating and 8 deg nose-up braking, all four
+# are fully in frame at the start, never overlap in the image, and stay fully
+# in frame for 39% / 100% / 83% / 83% of the run, with path clearance >= 2.3 m.
+# Ranges then sweep ~15 m down to ~5 m.
+APPROACH_GATE_SPECS = [
+    (7.87, 19.6, 7.5, 15.0),
+    (10.99, -11.0, 9.4, -15.0),
+    (14.58, 0.3, 2.9, -15.0),
+    (15.09, 9.2, 4.6, 10.0),
+]
+
 
 # ---------------------------------------------------------------------------
 # Pure geometry -- no omni/pxr imports below this point until read_camera().
@@ -143,7 +164,7 @@ def _hfov_vfov_from_aspect(hfov_deg: float, width: int, height: int):
     return hfov_deg, vfov_deg
 
 
-def gate_world_pose(spec, cam: dict, name: str = "gate") -> dict:
+def gate_world_pose(spec, cam: dict, name: str = "gate", level: bool = False) -> dict:
     """
     (range_m, az_deg, el_deg, yaw_rel_deg) + a camera dict (with "position",
     "right", "up", "fwd" world-frame vectors) -> {"name", "x", "y", "z",
@@ -155,6 +176,11 @@ def gate_world_pose(spec, cam: dict, name: str = "gate") -> dict:
     added on top of the gate's "face the camera" heading yaw, so yaw_rel=0
     always produces a gate pointed straight back down its own line of
     sight regardless of where az/el put it.
+
+    level=True measures az/el from the camera's horizontal heading (world
+    up, heading x up as "right") instead of its optical axis, so the gates'
+    height above the camera does not depend on the camera's pitch -- used by
+    APPROACH_GATE_SPECS.
     """
     range_m, az_deg, el_deg, yaw_rel_deg = spec
     az, el = math.radians(az_deg), math.radians(el_deg)
@@ -163,11 +189,6 @@ def gate_world_pose(spec, cam: dict, name: str = "gate") -> dict:
     up = np.asarray(cam["up"], dtype=float)
     fwd = np.asarray(cam["fwd"], dtype=float)
 
-    direction = (math.cos(el) * math.cos(az) * fwd
-                + math.cos(el) * math.sin(az) * right
-                + math.sin(el) * up)
-    center = position + range_m * direction
-
     h = np.array([fwd[0], fwd[1], 0.0])
     if np.linalg.norm(h) < 1e-6:
         # Camera looking (near-)straight up or down: fall back to a
@@ -175,6 +196,15 @@ def gate_world_pose(spec, cam: dict, name: str = "gate") -> dict:
         # degenerate/undefined heading.
         h = np.cross(right, np.array([0.0, 0.0, 1.0]))
     h = h / np.linalg.norm(h)
+
+    if level:
+        world_up = np.array([0.0, 0.0, 1.0])
+        fwd, right, up = h, np.cross(h, world_up), world_up
+
+    direction = (math.cos(el) * math.cos(az) * fwd
+                + math.cos(el) * math.sin(az) * right
+                + math.sin(el) * up)
+    center = position + range_m * direction
     yaw_deg = math.degrees(math.atan2(h[1], h[0])) + yaw_rel_deg
 
     return {"name": name, "x": float(center[0]), "y": float(center[1]),
@@ -345,7 +375,7 @@ def camera_low_warning(cam: dict, min_z: float = 1.0):
 
 def plan_layout(specs: list, cam: dict, gate_side: float = GATE_SIDE,
                 bar_thickness: float = BAR_THICKNESS, margin_deg: float = 0.3,
-                ground_clearance: float = 0.05) -> dict:
+                ground_clearance: float = 0.05, level: bool = False) -> dict:
     """
     Build gates from `specs` relative to `cam`, ground-clamp each, then
     repeatedly check_layout() and drop the FARTHEST gate involved in any
@@ -358,7 +388,7 @@ def plan_layout(specs: list, cam: dict, gate_side: float = GATE_SIDE,
     gates = []
     clamp_notes = []
     for i, spec in enumerate(specs):
-        g = gate_world_pose(spec, cam, name=f"gate_{i}")
+        g = gate_world_pose(spec, cam, name=f"gate_{i}", level=level)
         g, note = clamp_to_ground(g, gate_side, bar_thickness, ground_clearance)
         if note:
             clamp_notes.append(note)
@@ -584,7 +614,19 @@ def main():
     if warn:
         print(f"[spawn_test_gates] WARNING: {warn}")
 
-    plan = plan_layout(GATE_SPECS, cam, GATE_SIDE, BAR_THICKNESS)
+    # Opt-in layout choice: set SPAWN_LAYOUT = "approach" in the Script
+    # Editor before exec'ing this file (exec shares the editor's globals).
+    layout = globals().get("SPAWN_LAYOUT", "staggered")
+    if layout == "approach":
+        specs, level = APPROACH_GATE_SPECS, True
+    elif layout == "staggered":
+        specs, level = GATE_SPECS, False
+    else:
+        print(f"[spawn_test_gates] FATAL: unknown SPAWN_LAYOUT {layout!r} "
+             f"(use 'staggered' or 'approach')")
+        return
+    print(f"[spawn_test_gates] layout: {layout}")
+    plan = plan_layout(specs, cam, GATE_SIDE, BAR_THICKNESS, level=level)
     gates = plan["gates"]
     if not gates:
         print("[spawn_test_gates] FATAL: no gates survived layout planning -- "
