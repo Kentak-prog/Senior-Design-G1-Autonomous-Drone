@@ -331,6 +331,23 @@ def _fly(args) -> int:
             print(f"WARNING: PX4 yaw differs from the manifest camera heading by "
                   f"{diff:.0f} deg -- the drone yawed since the gates were spawned, so the "
                   f"clearance check above does not describe this flight.")
+        # Re-check from where the drone actually is: the manifest start goes
+        # stale after any earlier flight (2026-10-01: a 3 m run began 1 m
+        # forward of it). Pegasus world and PX4 local share an origin (pose
+        # topic x matched PX4 NED y to 2 cm), so NED -> ENU is enough.
+        live_start = ned_to_enu(v.pos_ned)
+        live_dir = ned_to_enu(heading_dir_ned(yaw))
+        ok, report = check_clearance(live_start, live_dir, args.distance, gates,
+                                     args.min_gate_clearance)
+        worst = min(report, key=lambda r: r["min_dist_m"])
+        print(f"live clearance check from ENU {np.round(live_start, 2)}: closest is "
+              f"{worst['name']} at {worst['min_dist_m']:.2f} m")
+        if not ok:
+            safe = max_safe_distance(live_start, live_dir, gates, args.min_gate_clearance)
+            print(f"REFUSING: from the current position, --distance {args.distance} m comes "
+                  f"within {args.min_gate_clearance} m of {worst['name']}. Max safe "
+                  f"distance: {safe:.2f} m.")
+            return 2
 
     airborne = v.pos_ned[2] < -0.5
     hold = {"pos": v.pos_ned.copy()}
