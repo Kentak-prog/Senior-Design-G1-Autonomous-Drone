@@ -193,7 +193,8 @@ def T_world_cam_raw_at(pose_buffer: PoseBuffer, t: float):
 # --------------------------------------------------------------------------
 
 def frame_rows(t_s, frame_idx, intr: CameraIntrinsics, T_world_cam_raw,
-               manifest: list, eval_result: dict, drone_pos, drone_speed) -> list:
+               manifest: list, eval_result: dict, drone_pos, drone_speed,
+               gate_side: float = None, in_view_margin_px: int = 3) -> list:
     """
     One row dict per manifest gate for one evaluated frame.
 
@@ -206,10 +207,16 @@ def frame_rows(t_s, frame_idx, intr: CameraIntrinsics, T_world_cam_raw,
 
     range_true_m is truth depth along camera +Z (OpenCV frame); off_axis_deg
     is the angle between the optical axis and the ray to the true gate
-    center; in_view means the center projects inside the image in front of
-    the camera.
+    center; in_view means all four true corners of the gate opening project
+    inside the image (by in_view_margin_px) in front of the camera. Not just
+    the center: in the first moving run (2026-10-01) gates above the drone
+    climbed out of the top of the frame on approach, center still in view,
+    and a center-only test counted those cut-off gates as detector misses.
     """
     from ros_camera import T_world_cam_from_transform
+    from eval_isaac_gates import T_world_gate_from_spec
+    from gate_pose import gate_model_points, DEFAULT_GATE_SIDE
+    model = gate_model_points(DEFAULT_GATE_SIDE if gate_side is None else gate_side)
     T_world_cam = T_world_cam_from_transform(np.asarray(T_world_cam_raw, dtype=float), False)
     T_cam_world = invert_transform(T_world_cam)
     matches = {m["gate"]: m for m in eval_result["per_convention"][False]["matches"]}
@@ -222,8 +229,11 @@ def frame_rows(t_s, frame_idx, intr: CameraIntrinsics, T_world_cam_raw,
         dist = float(np.linalg.norm(p_cam))
         off_axis = (float(np.degrees(np.arccos(np.clip(p_cam[2] / dist, -1.0, 1.0))))
                     if dist > 1e-9 else 0.0)
-        px = project_points(p_cam.reshape(1, 3), intr)
-        visible = bool(p_cam[2] > 0.0 and in_frame(px, intr)[0])
+        T_world_gate = T_world_gate_from_spec(g["x"], g["y"], g["z"], g["yaw_deg"])
+        corners_cam = transform_points(T_cam_world @ T_world_gate, model)
+        visible = bool(np.all(corners_cam[:, 2] > 0.0) and
+                       np.all(in_frame(project_points(corners_cam, intr), intr,
+                                       margin=in_view_margin_px)))
 
         m = matches.get(g["name"])
         row = {

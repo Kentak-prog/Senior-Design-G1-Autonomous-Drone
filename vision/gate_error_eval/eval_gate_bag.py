@@ -176,7 +176,8 @@ def evaluate_image_at(rgb, t_query: float, t_s: float, frame_idx: int, intr,
     pos, _quat = pose_buffer.interpolate(t_query)
     vel = pose_buffer.velocity(t_query)
     speed = float(np.linalg.norm(vel)) if vel is not None else None
-    return er.frame_rows(t_s, frame_idx, intr, T_world_cam_raw, manifest, result, pos, speed)
+    return er.frame_rows(t_s, frame_idx, intr, T_world_cam_raw, manifest, result, pos, speed,
+                         gate_side=gate_side)
 
 
 # --------------------------------------------------------------------------

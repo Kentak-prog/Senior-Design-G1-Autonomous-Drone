@@ -167,6 +167,29 @@ def test_frame_rows_synthetic():
     return rows
 
 
+def test_in_view_requires_all_corners():
+    """A gate whose CENTER is just inside the top edge but whose top bar is
+    cut off must not count as in view -- the case the first moving run hit
+    (gates above the drone climbing out of frame on approach)."""
+    T_raw, T_cv, _ = make_scene()
+    pos, down, fwd = T_cv[:3, 3], T_cv[:3, 1], T_cv[:3, 2]
+    yaw = float(np.degrees(np.arctan2(fwd[1], fwd[0])))
+    rng = 5.0
+    # Center ~20 px below the top edge: y_px = cy - fy * up / rng.
+    up = (INTR.cy - 20.0) * rng / INTR.fy
+    ctr = pos + rng * fwd - up * down
+    manifest = [{"name": "cut", "x": float(ctr[0]), "y": float(ctr[1]), "z": float(ctr[2]),
+                 "yaw_deg": yaw, "side": DEFAULT_GATE_SIDE}]
+    result = evaluate_frame(BLANK, INTR, T_raw, manifest, detector=lambda _rgb: [])
+    r = er.frame_rows(0.0, 0, INTR, T_raw, manifest, result, [0.0, 0.0, 0.0], None,
+                      gate_side=DEFAULT_GATE_SIDE)[0]
+    from camera import project_points, in_frame, transform_points
+    c_px = project_points(transform_points(invert_transform(T_cv), ctr), INTR)
+    assert in_frame(c_px, INTR)[0], c_px  # center really is inside
+    assert not r["in_view"], r
+    print("  in_view is False when the center is inside but the top bar is cut off  OK")
+
+
 def test_csv_roundtrip():
     T_raw, T_cv, manifest = make_scene()
     result = evaluate_frame(BLANK, INTR, T_raw, manifest, detector=make_fake_detector(T_cv, manifest))
