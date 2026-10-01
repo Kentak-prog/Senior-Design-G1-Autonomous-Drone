@@ -10,17 +10,21 @@ T_world_cam_from_transform() and verify_optical_convention() are all plain
 numpy/cv2 and fully testable on a machine with no ROS whatsoever (see
 test_ros_camera.py). Only instantiating GatePoseNode requires rclpy.
 
-TWO THINGS IN THIS FILE ARE UNVERIFIED IN THE ACTUAL SIMULATOR AND MUST BE
-CHECKED BEFORE TRUSTING DOWNSTREAM OUTPUT:
+TWO THINGS TO KEEP IN MIND (BOTH NOW VERIFIED AGAINST A LIVE SIM):
 
   1. Quaternion component order. ROS messages (geometry_msgs/Quaternion,
      tf2) are always (x, y, z, w). camera.quat_to_rot expects (w, x, y, z).
      Feeding one straight into the other silently produces a wrong-but-
      plausible-looking rotation -- see quat_xyzw_to_wxyz()'s docstring.
 
-  2. Which frame convention the published TF transform actually uses. See
-     T_world_cam_from_transform()'s docstring and verify_optical_convention()
-     for the empirical check.
+  2. Frame convention: VERIFIED 2026-09-28 by eval_isaac_gates.py against
+     the live Isaac Sim + Pegasus stack: optical_frame=False is correct
+     (confident, 3/3 gates matched at 0.07-0.21 m; optical_frame=True
+     matched nothing). NOTE what was actually verified: the camera pose
+     built as  /drone00/state/pose (PoseStamped, frame "map")  @  the
+     static body->camera mount in spawn_example.py, in the USD convention.
+     This sim publishes NO /tf, so a TF lookup of "front_cam" (what
+     GatePoseNode does today) has never been exercised against it.
 """
 
 from typing import Callable, Sequence
@@ -192,20 +196,13 @@ def T_world_cam_from_transform(transform, optical_frame: bool) -> np.ndarray:
         camera.usd_camera_pose_to_cv() applies to a USD camera pose
         (R_world_cv = R_world_usd @ R_CV_FROM_USD.T).
 
-    WHICH ONE IS CORRECT HERE IS UNVERIFIED. ROS image pipelines
-    conventionally publish camera TF under a frame_id ending in
-    `_optical_frame` specifically to flag "this one is already OpenCV/REP-103
-    optical convention"; every other TF frame in a ROS system is expected to
-    follow the REP-103 body convention (+X forward, +Y left, +Z up) or, for
-    USD/Isaac-native prims, the USD camera convention this module treats
-    optical_frame=False as. But workspace/spawn_example.py configures
-    ROS2CameraGraph with `"tf_frame_id": "front_cam"` -- no `_optical_frame`
-    suffix -- so Pegasus's ROS2CameraGraph may or may not be following that
-    naming convention faithfully. DO NOT TRUST either branch until you have
-    run verify_optical_convention() (or isaac_camera.debug_check_projection
-    equivalent) against a live simulator with a gate at a known world
-    position, with both optical_frame=True and optical_frame=False, and
-    confirmed which one puts the gate at a plausible pixel.
+    VERIFIED (2026-09-28, eval_isaac_gates.py against live Isaac Sim +
+    Pegasus): for the Isaac/Pegasus camera pose (vehicle pose composed with
+    the static USD-convention camera mount) use optical_frame=False. The
+    optical_frame=True control matched zero gates. Do not flip this without
+    re-running eval_isaac_gates.py: a wrong value raises no error, it just
+    puts every gate meters from where it is. A real camera driver that
+    publishes an *_optical_frame TF would be the case for True.
     """
     T = transform if isinstance(transform, np.ndarray) else transform_to_matrix(
         transform.translation, transform.rotation)
@@ -279,9 +276,12 @@ class GatePoseNode:
     namespace: ROS namespace the camera publishes under, e.g. "/iris_0"
         (matches workspace/spawn_example.py's ROS2CameraGraph "namespace"
         config). Subscribes under f"{namespace}/front_cam/...".
-    optical_frame: forwarded verbatim to T_world_cam_from_transform() --
-        see that function's docstring for why this has no default and why
-        it is UNVERIFIED against the live simulator.
+    optical_frame: forwarded verbatim to T_world_cam_from_transform().
+        Defaults to False, the value VERIFIED against the live simulator
+        (see that function's docstring). Caveat: this node still looks the
+        camera pose up via TF, and the current sim publishes no TF -- it
+        needs a pose-topic mode (see eval_isaac_gates.py --camera-pose pose)
+        before it can run against Isaac Sim.
     gate_side: physical gate opening side length in meters, forwarded to
         estimate_gate_pose / gate_model_points.
     corner_sigma_px: detector corner-localization uncertainty in pixels,
@@ -291,7 +291,7 @@ class GatePoseNode:
 
     def __init__(self, detector: Callable[[np.ndarray], Sequence[np.ndarray]],
                 namespace: str = "/iris_0",
-                optical_frame: bool = True,
+                optical_frame: bool = False,
                 gate_side: float = DEFAULT_GATE_SIDE,
                 corner_sigma_px: float = 1.5,
                 camera_frame: str = "front_cam",

@@ -33,7 +33,8 @@ MAGENTA_HSV_HI = (170, 255, 255)
 
 def gate_mask(rgb: np.ndarray,
              hsv_lo: Tuple[int, int, int] = MAGENTA_HSV_LO,
-             hsv_hi: Tuple[int, int, int] = MAGENTA_HSV_HI) -> np.ndarray:
+             hsv_hi: Tuple[int, int, int] = MAGENTA_HSV_HI,
+             close_px: int = 0) -> np.ndarray:
     """
     RGB (NOT BGR) image -> uint8 0/255 mask of magenta pixels.
 
@@ -48,8 +49,15 @@ def gate_mask(rgb: np.ndarray,
     lo = np.array(hsv_lo, dtype=np.uint8)
     hi = np.array(hsv_hi, dtype=np.uint8)
     mask = cv2.inRange(hsv, lo, hi)
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # NO morphological close by default. A 3x3 close used to run here to
+    # fill pinholes, but in the live sim the nested test gates' bars sit
+    # 1-2 px apart in the image; the close bridged that gap, fused three
+    # gates into one blob, and the contour hierarchy then produced zero
+    # valid quads (see HANDOFF.md, 2026-09-28). Pass close_px>0 only for
+    # imagery that genuinely has pinholes AND well-separated gates.
+    if close_px > 0:
+        kernel = np.ones((close_px, close_px), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     return mask
 
 

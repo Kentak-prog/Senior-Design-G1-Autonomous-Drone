@@ -494,9 +494,15 @@ def main():
     ap.add_argument("--body-frame", default="drone0_base_link",
                     help="TF frame for the vehicle body (default: drone0_base_link, i.e. "
                         "'drone' + vehicle_id=0 from spawn_example.py's PX4MavlinkBackendConfig)")
-    ap.add_argument("--camera-pose", choices=["tf", "manifest"], default="tf",
+    ap.add_argument("--pose-topic", default="/drone00/state/pose",
+                    help="PoseStamped topic used by --camera-pose pose (default: "
+                        "/drone00/state/pose, what Pegasus's ROS2Backend publishes when no "
+                        "TF is broadcast)")
+    ap.add_argument("--camera-pose", choices=["tf", "pose", "manifest"], default="tf",
                     help="'tf' (default): build the camera pose from live map->body TF plus "
-                        "the static mount. 'manifest': use the camera pose "
+                        "the static mount. 'pose': same, but from a PoseStamped topic "
+                        "(--pose-topic) -- use this when the sim publishes no TF. "
+                        "'manifest': use the camera pose "
                         "spawn_test_gates.py recorded from the live USD stage when it spawned "
                         "the gates -- use this if map->body TF isn't available")
     ap.add_argument("--timeout", type=float, default=10.0,
@@ -508,6 +514,12 @@ def main():
     ap.add_argument("--gate-side", type=float, default=None,
                     help="override gate opening side (m); default: read from the manifest, "
                         "falling back to gate_pose.DEFAULT_GATE_SIDE")
+    ap.add_argument("--hfov-deg", type=float, default=None,
+                    help="OVERRIDE the intrinsics: build them from this horizontal FOV and the "
+                        "size of the rgb IMAGE (not camera_info's width/height), ignoring "
+                        "camera_info's fx/fy/cx/cy. Diagnostic for when "
+                        "camera_info is stale (e.g. it still reports the FOV from before "
+                        "spawn_example.py changed focalLength).")
     ap.add_argument("--corner-sigma-px", type=float, default=1.0)
     ap.add_argument("--max-match-dist", type=float, default=2.0,
                     help="max distance (m) between an estimated and a truth gate center to "
@@ -545,6 +557,7 @@ def main():
         import rclpy
         from rclpy.node import Node
         from sensor_msgs.msg import Image, CameraInfo
+        from geometry_msgs.msg import PoseStamped
         from tf2_ros import Buffer, TransformListener
         from cv_bridge import CvBridge
     except ImportError as e:
@@ -556,17 +569,26 @@ def main():
     tf_buffer = Buffer()
     TransformListener(tf_buffer, node)
 
-    state = {"info": None, "rgb": None}
+    state = {"info": None, "rgb": None, "pose": None}
+    # Pegasus publishes state topics BEST_EFFORT; a default (RELIABLE)
+    # subscription is QoS-incompatible and silently receives nothing.
+    from rclpy.qos import qos_profile_sensor_data
+    node.create_subscription(PoseStamped, args.pose_topic,
+                             lambda m: state.__setitem__("pose", m),
+                             qos_profile_sensor_data)
     node.create_subscription(CameraInfo, f"{args.namespace}/camera_info",
                              lambda m: state.__setitem__("info", m), 10)
     node.create_subscription(Image, f"{args.namespace}/rgb",
                              lambda m: state.__setitem__("rgb", m), 10)
 
     need_tf = args.camera_pose == "tf"
+    need_pose = args.camera_pose == "pose"
     deadline = time.time() + args.timeout
 
     def ready():
         base_ready = state["info"] is not None and state["rgb"] is not None
+        if need_pose:
+            return base_ready and state["pose"] is not None
         if not need_tf:
             return base_ready
         return base_ready and tf_buffer.can_transform(args.world_frame, args.body_frame, rclpy.time.Time())
@@ -579,6 +601,9 @@ def main():
                  f"is spawn_example.py running with PX4 SITL connected?")
     if state["rgb"] is None:
         sys.exit(f"no image on {args.namespace}/rgb in {args.timeout}s")
+    if need_pose and state["pose"] is None:
+        sys.exit(f"no PoseStamped on {args.pose_topic} in {args.timeout}s -- check "
+                 f"`ros2 topic list` for the vehicle's state/pose topic")
     if need_tf and not tf_buffer.can_transform(args.world_frame, args.body_frame, rclpy.time.Time()):
         sys.exit(f"no TF from {args.world_frame} to {args.body_frame} in {args.timeout}s -- "
                  f"known frames:\n{tf_buffer.all_frames_as_string()}\n"
@@ -586,6 +611,22 @@ def main():
                  f"'drone0_base_link'), or --camera-pose manifest to skip TF entirely")
 
     intr = intrinsics_from_camera_info(state["info"])
+    # The rgb image is the ground truth for the pixel grid. camera_info can be
+    # stale (Pegasus' camera-info publisher kept reporting the old 320x240 /
+    # fx=763 after spawn_example.py changed the resolution to 1280x720 and the
+    # focal length for a 60 deg hFOV), so never take the image size from it.
+    img_w, img_h = int(state["rgb"].width), int(state["rgb"].height)
+    if (intr.width, intr.height) != (img_w, img_h):
+        print(f"\nWARNING: camera_info says {intr.width}x{intr.height} but the rgb image "
+              f"is {img_w}x{img_h}. camera_info is stale, so its fx/cx/cy do not describe "
+              f"this image and PnP results from it will be wrong. Pass --hfov-deg <the "
+              f"hFOV spawn_example.py set> to build the intrinsics from the real image size.")
+    if args.hfov_deg is not None:
+        from camera import CameraIntrinsics
+        print(f"\nNOTE: --hfov-deg {args.hfov_deg} given: IGNORING camera_info's "
+              f"fx={intr.fx:.1f} and size {intr.width}x{intr.height}; using the rgb image "
+              f"size {img_w}x{img_h} and fx from the FOV instead")
+        intr = CameraIntrinsics.from_horizontal_fov(img_w, img_h, args.hfov_deg)
     print(f"\ncamera_info: {intr.width}x{intr.height}, fx={intr.fx:.1f} fy={intr.fy:.1f}")
     if intr.width <= 320:
         print(f"  NOTE: {intr.width}x{intr.height} is low resolution for range accuracy "
@@ -610,6 +651,12 @@ def main():
 
         if args.camera_pose == "manifest":
             T_world_cam_raw = manifest_camera_T
+        elif args.camera_pose == "pose":
+            # Latest pose, not stamp-matched: the topic is a live state
+            # estimate and the drone is (nearly) stationary during a check.
+            pm = state["pose"]
+            T_map_body = ros_camera.transform_to_matrix(pm.pose.position, pm.pose.orientation)
+            T_world_cam_raw = T_map_body @ T_body_cam_usd_from_mount()
         else:
             try:
                 t = tf_buffer.lookup_transform(args.world_frame, args.body_frame,
@@ -635,6 +682,7 @@ def main():
             T_map_body = ros_camera.transform_to_matrix(t.translation, t.rotation)
             T_world_cam_raw = T_map_body @ T_body_cam_usd_from_mount()
 
+        if args.camera_pose != "manifest":
             if manifest_camera_T is not None and not cross_checked:
                 # This is what separates "mount wrong" from "convention
                 # wrong": if the TF+mount pose disagrees with the pose

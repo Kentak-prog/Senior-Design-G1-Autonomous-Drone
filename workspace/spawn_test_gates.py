@@ -73,7 +73,7 @@ import os
 import numpy as np
 
 ROOT_PATH = "/World/TestGates"
-MANIFEST_PATH = os.path.expanduser("~/test_gates.json")
+MANIFEST_PATH = "/workspace/test_gates.json"
 
 GATE_SIDE = 1.5           # opening, inner edge to inner edge, meters
 BAR_THICKNESS = 0.10       # meters
@@ -83,7 +83,7 @@ GATE_COLOR = (1.0, 0.0, 1.0)  # magenta, linear RGB
 # ("resolution": [320, 240]) -- KEEP IN SYNC WITH IT. Used only to derive
 # vfov from hfov (Isaac derives the vertical FOV from the render aspect
 # ratio, not a separate verticalAperture attribute -- see read_camera()).
-RESOLUTION = (320, 240)
+RESOLUTION = (1280, 720)   # KEEP IN SYNC with spawn_example.RESOLUTION
 
 CAMERA_PRIM_PATH = "/World/Iris/body/front_cam"
 
@@ -101,12 +101,32 @@ FALLBACK_HFOV_DEG = 60.0
 # camera up); yaw_rel_deg is added to the gate's heading yaw (see
 # gate_world_pose). All on-axis (az=el=0) here, which is what makes them
 # nest: only yaw varies, to still exercise the normal-direction estimate.
-GATE_SPECS = [
+NESTED_GATE_SPECS = [
     (3.0, 0.0, 0.0, 0.0),
     (4.2, 0.0, 0.0, 20.0),
     (5.9, 0.0, 0.0, 0.0),
     (8.2, 0.0, 0.0, -25.0),
     (11.5, 0.0, 0.0, 0.0),
+]
+# The nested on-axis chain above is NOT the default any more. At a wide FOV
+# (60 deg, 1280x720) its frames touch in the image (a yawed near gate's
+# corner lands on the previous gate's bar), touching bars merge in the color
+# mask, and the detector then finds 0 of 5 gates -- see HANDOFF.md,
+# 2026-09-28. It is kept for tests and for narrow-FOV, range-only runs.
+#
+# DEFAULT: a staggered layout spread across the field of view so no two
+# gates come near each other in the image. Ranges 6-14 m give a range sweep;
+# the az/el offsets add lateral/vertical offset cases the on-axis chain
+# never exercised. Found by search + verified offline at 1280x720 / 60 deg
+# hFOV (5/5 detected, corners < 0.8 px, >150 px between any two gates).
+# Sized for a WIDE camera: at a narrow FOV most of these fall outside the
+# frame and plan_layout() will drop them.
+GATE_SPECS = [
+    (6.0, -13.9, -7.7, 20.0),
+    (8.0, 22.3, -8.8, 0.0),
+    (10.0, 6.9, 10.6, -10.0),
+    (12.0, 24.0, 10.7, 0.0),
+    (14.0, -19.7, 12.1, 10.0),
 ]
 
 
