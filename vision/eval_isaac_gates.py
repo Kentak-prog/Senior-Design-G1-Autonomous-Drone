@@ -279,7 +279,7 @@ def evaluate_frame(rgb: np.ndarray, intr, T_world_cam_raw: np.ndarray, manifest:
     each match dict has "gate", "est_idx", "truth_idx", "pos_err_m",
     "range_err_m", "lateral_err_m", "normal_err_deg",
     "normal_err_deg_folded", "reproj_rms_px", "normal_is_reliable",
-    "sigma_pos_m".
+    "sigma_pos_m", "est_center_world".
     """
     detections_px = detector(rgb)
     dets = []
@@ -345,6 +345,9 @@ def evaluate_frame(rgb: np.ndarray, intr, T_world_cam_raw: np.ndarray, manifest:
                 "normal_is_reliable": bool(det.normal_is_reliable),
                 "sigma_pos_m": (None if np.isnan(det.center_std_m)
                                else float(det.center_std_m)),
+                # Estimated gate center in the world frame, so callers (e.g.
+                # gate_error_eval/) can plot where the estimate landed.
+                "est_center_world": [float(v) for v in est_T[:3, 3]],
             })
 
         unmatched_truth = [truth_names[j] for j in range(len(truth_names))

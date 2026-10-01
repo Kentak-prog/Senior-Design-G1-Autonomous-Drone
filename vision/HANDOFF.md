@@ -68,6 +68,7 @@ quaternion. Summary, but read the originals — they explain *why*:
 | `test_color_gate_detector.py` | passing | run with plain `python3`, no ROS needed |
 | `test_eval_isaac_gates.py` | passing | run with plain `python3`, no ROS needed |
 | `test_gate_layout.py` | **FAILING** (known, not yet fixed) | `test_plan_layout_narrow_fov_drops_close_gate_keeps_nested_remainder` fails with "expected at least one gate to survive": the test imports `GATE_SPECS` and expects the old nested chain, but `GATE_SPECS` is now the staggered wide-FOV layout and the nested chain was renamed `NESTED_GATE_SPECS`. At the test's narrow 24 deg FOV every staggered gate is out of frame. The fix is to point the nested-chain tests at `NESTED_GATE_SPECS`. Needs no ROS/omni/pxr; the one file that imports across the `vision/`/`workspace/` boundary |
+| `gate_error_eval/` | **new 2026-10-01, offline-tested only**, never run against a real bag or PX4 | error-vs-ground-truth graphs, hover or moving: `fly_gate_approach.py` (pymavlink offboard straight-line flight) → `ros2 bag record` → `eval_gate_bag.py` (bag → `gate_errors.csv`, pose interpolated to each image stamp) → `plot_gate_errors.py` (4 report PNGs + summary table, runs on a Mac). `error_records.py` holds the shared CSV schema / `PoseBuffer` / summary. See "Gate-error graphs" below. `example_output/` is **synthetic** data |
 | `workspace/spawn_test_gates.py` | run live (2026-10-01: 5 gates kept, 0 dropped at 1280x720 / 60 deg). `check_layout`'s clearance is still too loose: it once passed a layout whose gate bars were 1-2 px apart | reads the camera's live pose/FOV off the USD stage and places magenta test gates. Default `GATE_SPECS` is a **staggered** layout (ranges 6-14 m, scattered az/el) sized for a wide camera; the old on-axis nested chain is kept as `NESTED_GATE_SPECS` (at a wide FOV its frames touch and the mask merges them: detector found 0/5). Writes `/workspace/test_gates.json` (shared volume). **Run it only after the drone is hovering** |
 | `workspace/spawn_example.py` | run live | spawns Iris + PX4/ROS 2 backends + camera at `RESOLUTION=(1280,720)`, `HFOV_DEG=60`; after configuring the camera it calls `refresh_camera_info_helper()` (see "RESOLVED (2026-10-01)"). **Run it ONCE per Isaac Sim process** — see deployment notes |
 
@@ -279,6 +280,49 @@ instead (no pose topic needed, but only valid if the drone hasn't moved since
 the gates were spawned). Check the cross-check line: a large position or
 rotation delta between the live pose and the manifest means the drone moved
 or the mount constants disagree with `spawn_example.py`.
+
+## Gate-error graphs (`gate_error_eval/`)
+
+Graphs of PnP gate-position error against the manifest, with the drone
+hovering or flying. Gates are static, so truth is always the manifest; only
+the camera pose changes. Tests (no ROS, Mac: use `/usr/local/bin/python3.12`):
+```
+cd vision/gate_error_eval
+python3 test_error_records.py && python3 test_plot_gate_errors.py && python3 test_fly_gate_approach.py
+```
+
+Runbook. Steps 1-5 of "Running the sim test" come first, so the drone is hovering and
+`/workspace/test_gates.json` exists:
+
+1. `ros2-eval` shell A: `ros2 bag record -o /workspace/bags/run1
+   /iris_0/front_cam/rgb /iris_0/front_cam/camera_info /drone00/state/pose`.
+   Raw 1280x720 rgb is ~90 MB/s: keep runs to ~20-30 s and check that the bag's
+   image count (`ros2 bag info`) is close to 30 Hz x duration (sqlite3 may drop
+   frames at that rate).
+2. Shell B: `pip install pymavlink` once (abort if pip wants to touch
+   numpy), then `python3 /workspace/vision/gate_error_eval/fly_gate_approach.py
+   --gates /workspace/test_gates.json --distance 3 --speed 1`. It hovers 5 s,
+   flies 3 m along the current heading, hovers 5 s, then goes to AUTO.LOITER.
+   It refuses if the path comes within 2 m of a gate. **Untested:** the PX4
+   mode numbers and `type_mask`s were checked against the MAVLink/PX4 docs, but
+   the default link `udpin:0.0.0.0:14540` assumes PX4 SITL's stock onboard
+   MAVLink instance. Try a 1 m flight first. Stop the bag after "done".
+3. `python3 eval_gate_bag.py --bag /workspace/bags/run1 --gates
+   /workspace/test_gates.json --out-dir /workspace/gate_eval/run1` (add
+   `--hfov-deg 60` if it prints the stale-camera_info WARNING). Check the
+   `time base used` line. Header stamps are preferred. If the image and pose
+   stamps don't overlap (different clocks), it falls back to bag receive
+   time, which adds transport latency to the pairing. A median image-pose
+   gap of more than a few ms means the pairing is suspect for moving frames.
+4. Copy `gate_errors.csv` to the Mac and run `python3 plot_gate_errors.py
+   gate_errors.csv --out-dir figs`. This gives fig1 (error vs range,
+   3D | depth+lateral), fig2 (error vs time with speed shaded), fig3
+   (top-down), fig4 (detection rate vs range, in-view frames only) and
+   `summary_table.csv`.
+
+The bag can be re-evaluated whenever the detector changes. `evaluate_frame`
+takes a `detector=` callable, so Tye's detector can be dropped into
+`eval_gate_bag.evaluate_image_at` without re-flying.
 
 ## Interface contracts with teammates (unconfirmed — settle these)
 
