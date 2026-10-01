@@ -5,7 +5,7 @@ Scope: `vision/` only. If you're Claude Code, read this whole file before
 touching anything in this directory — several of the decisions below are
 non-obvious and easy to silently undo.
 
-Last updated: 2026-09-28.
+Last updated: 2026-10-01.
 
 ## Project context (one paragraph)
 
@@ -22,7 +22,9 @@ code) and path generation (downstream); Antek owns the NMPC controller.
 ```
 control/    MPC / control stack (Antek's — not covered here)
 vision/     this directory
-workspace/  spawn_example.py — Isaac Sim + Pegasus drone spawn script
+workspace/  spawn_example.py (Isaac Sim + Pegasus drone/camera spawn) and
+            spawn_test_gates.py (magenta test gates + ground-truth manifest);
+            both run inside Isaac Sim's Script Editor, not plain python3
 ```
 
 ## The one rule that matters most: frame conventions
@@ -61,12 +63,13 @@ quaternion. Summary, but read the originals — they explain *why*:
 | `verify_isaac_pipeline.py` | **superseded** | waits for a `front_cam` TF that Pegasus never publishes (see OPEN BLOCKING QUESTION below) — kept for reference, do not run it against this sim |
 | `test_gate_pose.py` | passing | run with plain `python3`, no ROS needed |
 | `test_ros_camera.py` | passing | run with plain `python3`, no ROS needed |
-| `color_gate_detector.py` | working live (3/3 gates, 2026-09-28) | sim-only solid-color detector; Tye's real detector replaces this. The 3x3 morphological close is now OFF by default (`close_px=0`): it fused the nested gates into one blob |
-| `eval_isaac_gates.py` | **run live, 2026-09-28** — settled `optical_frame=False` | gate-pose accuracy + `optical_frame` decision. New `--camera-pose pose` mode (reads `/drone00/state/pose`, best-effort QoS) because this sim publishes no TF |
+| `color_gate_detector.py` | working live (3/3 gates 2026-09-28; 5/5 at 1280x720 2026-10-01) | sim-only solid-color detector; Tye's real detector replaces this. The 3x3 morphological close is now OFF by default (`close_px=0`): it fused the nested gates into one blob |
+| `eval_isaac_gates.py` | **run live** — `optical_frame=False` settled 2026-09-28; re-run 2026-10-01 at 1280x720 / 60 deg: 5/5 gates, mean 0.21 m | gate-pose accuracy + `optical_frame` decision. `--camera-pose pose` reads `/drone00/state/pose` (best-effort QoS) because this sim publishes no TF. `--hfov-deg` builds intrinsics from the **real rgb image size** (fixed 2026-10-01; it used to take camera_info's stale width/height), and a WARNING prints whenever camera_info and the image disagree |
 | `test_color_gate_detector.py` | passing | run with plain `python3`, no ROS needed |
 | `test_eval_isaac_gates.py` | passing | run with plain `python3`, no ROS needed |
-| `test_gate_layout.py` | passing | run with plain `python3`, no ROS/omni/pxr needed; the one file that imports across the `vision/`/`workspace/` boundary (see its own docstring) |
-| `workspace/spawn_test_gates.py` | run live; manifest path must be `/workspace/test_gates.json` (shared PVC), not `~/`. `check_layout`'s clearance is too loose: passed a layout whose gate bars were 1-2 px apart | reads the camera's live pose/FOV off the USD stage and lays out a nested chain of magenta test gates accordingly; writes `~/test_gates.json`; run in the Isaac Sim script editor after `spawn_example.py` |
+| `test_gate_layout.py` | **FAILING** (known, not yet fixed) | `test_plan_layout_narrow_fov_drops_close_gate_keeps_nested_remainder` fails with "expected at least one gate to survive": the test imports `GATE_SPECS` and expects the old nested chain, but `GATE_SPECS` is now the staggered wide-FOV layout and the nested chain was renamed `NESTED_GATE_SPECS`. At the test's narrow 24 deg FOV every staggered gate is out of frame. The fix is to point the nested-chain tests at `NESTED_GATE_SPECS`. Needs no ROS/omni/pxr; the one file that imports across the `vision/`/`workspace/` boundary |
+| `workspace/spawn_test_gates.py` | run live (2026-10-01: 5 gates kept, 0 dropped at 1280x720 / 60 deg). `check_layout`'s clearance is still too loose: it once passed a layout whose gate bars were 1-2 px apart | reads the camera's live pose/FOV off the USD stage and places magenta test gates. Default `GATE_SPECS` is a **staggered** layout (ranges 6-14 m, scattered az/el) sized for a wide camera; the old on-axis nested chain is kept as `NESTED_GATE_SPECS` (at a wide FOV its frames touch and the mask merges them: detector found 0/5). Writes `/workspace/test_gates.json` (shared volume). **Run it only after the drone is hovering** |
+| `workspace/spawn_example.py` | run live | spawns Iris + PX4/ROS 2 backends + camera at `RESOLUTION=(1280,720)`, `HFOV_DEG=60`; after configuring the camera it calls `refresh_camera_info_helper()` (see "RESOLVED (2026-10-01)"). **Run it ONCE per Isaac Sim process** — see deployment notes |
 
 Run the test files exactly like this before and after any change in this
 directory:
@@ -78,7 +81,8 @@ python3 test_color_gate_detector.py
 python3 test_eval_isaac_gates.py
 python3 test_gate_layout.py
 ```
-All five must print `All tests passed.` None needs ROS, Isaac Sim, or
+Four of the five print `All tests passed.` today; `test_gate_layout.py` is the
+known failure (see its status row). None needs ROS, Isaac Sim, or
 omni/pxr installed — they only need `numpy` and `cv2` (opencv-python).
 `eval_isaac_gates.py` is different: it needs ROS 2 sourced and a live
 simulator, and is not runnable in this offline environment.
@@ -129,6 +133,62 @@ T_world_cam     = T_world_cam_from_transform(T_world_cam_usd, optical_frame=Fals
 
 KEEP the mount constants in sync with `spawn_example.py`.
 
+## RESOLVED (2026-10-01): stale `camera_info`
+
+**Symptom.** After `spawn_example.py` moved the camera to 1280x720 / 60 deg
+hFOV, the images were 1280x720 but `/iris_0/front_cam/camera_info` still said
+320x240, `fx=763.5`, `cx=160`, `cy=120`. `eval_isaac_gates.py` built PnP
+intrinsics from it and got a 1.99 m error with 1 of 5 gates matched
+(the detector found all 5). Anything that reads `camera_info` — including
+`GatePoseNode` — is wrong at this FOV until it is fixed.
+
+**Cause.** `ROS2CameraGraph` publishes camera_info through
+`OgnROS2CameraHelper` (`type=camera_info`, deprecated since Isaac Sim 4.1;
+the replacement `OgnROS2CameraInfoHelper` behaves the same way). On its
+first compute the node calls `read_camera_info()` **once** and bakes
+width/height/k/p into its writer. That first compute happens before
+`spawn_example.py` sets the focalLength and resolution, so it snapshots the
+USD defaults: `fx=763.54` at 320 px with `horizontalAperture=20.955` is
+exactly `focalLength = 50 mm`. It never re-reads. (Not understood: why the
+baked size was 320x240 rather than the configured 1280x720.) It is not a
+leaked second graph: one publisher per topic, and 12/12 samples identical.
+
+**Fix.** `spawn_example.py::refresh_camera_info_helper()` toggles the helper
+node's `inputs:enabled` False -> True (10 frames each), which runs
+`custom_reset()` and re-initializes it against the configured camera. Node
+path: `/World/Iris/body/front_cam_pub/camera_helper_camera_info`. Verified by
+hand on a live sim: camera_info became `1280x720, fx=1108.5, cx=640,
+cy=360` with the rgb stream unaffected (33 Hz, one publisher).
+**Not yet verified from a fresh spawn** — the call was added after that
+test. On the next fresh spawn, `spawn_example.py` should print
+`[init] camera_info helper re-initialized`; if it prints a WARNING instead,
+camera_info is stale again. `probe_camera_info_reset.py` (the one-off probe,
+in `/workspace/scripts` on the cluster) does the same toggle on a running sim.
+
+**Workaround / backstop.** `eval_isaac_gates.py --hfov-deg 60` ignores
+camera_info's fx/size and uses the real image size. It should no longer be
+needed after a fresh spawn with the fix, and the evaluator warns when the
+two disagree, so a regression is visible.
+
+**Re-run at 1280x720 / 60 deg (2026-10-01), drone hovering at ~2.6 m, 5
+frames, `--camera-pose pose --hfov-deg 60`:** `optical_frame=False`,
+`confident=True`, 5/5 gates matched, mean position error 0.210 m (std 0.150,
+n=25). `optical_frame=True` matched nothing. Manifest cross-check 0.05 m /
+0.14 deg. The 25 matches are 5 frames of one static scene, not independent
+samples.
+
+| Gate | Range | Pos err | Range err | Lateral err | Normal err |
+|---|---|---|---|---|---|
+| gate_0 | 6 m | 0.063 m | 0.058 m | 0.023 m | 0.6 deg |
+| gate_1 | 8 m | 0.099 m | 0.091 m | 0.037 m | 2.1 deg |
+| gate_2 | 10 m | 0.122 m | 0.120 m | 0.026 m | 3.1 deg |
+| gate_3 | 12 m (24 deg off-axis) | 0.409 m | 0.369 m | 0.175 m | 0.8 deg |
+| gate_4 | 14 m | 0.334 m | 0.307 m | 0.132 m | 2.5 deg |
+
+Error grows with range and is mostly depth (about 2-3x lateral). gate_3 is
+the worst despite not being the farthest; it is far off-axis, but this was
+not investigated.
+
 ## Live-sim deployment notes (Kubernetes, namespace `fake-isaac`)
 
 - Pod has three containers: `isaac-sim`, `px4-sitl`, `ros2-eval`
@@ -144,36 +204,81 @@ KEEP the mount constants in sync with `spawn_example.py`.
   wheels pull NumPy 2.x, which breaks ROS Humble's `cv_bridge`. Use the apt
   versions (NumPy 1.21.5, OpenCV 4.5.4) — the repo tests pass on them.
 - The timeline must be **playing** or the camera graph publishes nothing.
+- **Separate filesystems.** `/workspace` is shared; each container's `/root`
+  is not. Anything written to `~/` by a script in Isaac Sim is invisible to
+  your shell. Use `/workspace/...`. Run sim scripts straight from the
+  shared volume in the Script Editor:
+  `exec(open("/workspace/scripts/spawn_example.py").read())`.
+- **ROS 2 is in `ros2-eval`**, not `px4-sitl` (`/opt/ros/humble` is only
+  there). `isaac-sim` Kit log: `/workspace/logs/isaac-sim.log`
+  (also `kubectl logs deploy/isaac-sim -c isaac-sim`). The GUI is noVNC on
+  port 6080 via a `kubectl port-forward`; it drops whenever the pod restarts.
+- **Pegasus blocks the whole sim until PX4 connects.** The PX4 backend loops
+  on `Waiting for first hearbeat` in the physics step, so with no PX4 the
+  sim, `/drone00/state/pose` and the camera all stay silent even though the
+  timeline says "playing". Start PX4 after Play (it is the TCP client of
+  Isaac's port 4560):
+  `cd /workspace/PX4-Autopilot && PX4_SIM_MODEL=none_iris
+  ./build/px4_sitl_default/bin/px4 ./ROMFS/px4fmu_common/ -s
+  ./ROMFS/px4fmu_common/init.d-posix/rcS -i 0` (build with
+  `make px4_sitl_default none`; the model string is the airframe file
+  `10016_none_iris`, not a make target). Then `commander takeoff` at the
+  `pxh>` prompt.
+- **A PX4 left over from an earlier spawn is useless:** it stays connected
+  to a dead backend and prints `poll timeout` forever; a second PX4 refuses
+  to start ("server already running for instance 0"). Kill the old
+  `bin/px4` process (it survives closing the terminal that launched it)
+  before relaunching.
+- **Never run `spawn_example.py` twice in one Isaac Sim process, and
+  File -> New does not reset it.** The second run deletes `/World/Iris` and
+  rebuilds it, which fails (`'NoneType' object has no attribute
+  'link_names'`: the physx simulation view was invalidated), and the old
+  PX4 backend keeps TCP port 4560 bound (`OSError: Address already in use`
+  on the next Play). Restart the process instead:
+  `kubectl exec deploy/isaac-sim -c isaac-sim -- kill <kit pid>` (find it
+  with `ps -eo pid,args | grep kit/kit`), wait a few minutes for it to boot,
+  add a ground plane, then spawn once.
+- `[init] Done` only means the scene was built, not that the PX4 link works.
+  Check the log for `Received first hearbeat` and no `Address already in use`.
+- Someone scaling the deployment down wipes the pod: hover, spawned gates,
+  PX4 and the GUI session are all lost. `/workspace` survives.
 
 ## Running the sim test
 
-Four steps, in order, resolve the `optical_frame` question above (and give
-a first real accuracy number) in one run:
+In order, on a freshly started Isaac Sim process (see the deployment notes
+for why "fresh" matters):
 
-1. In the Isaac Sim script editor: run `workspace/spawn_example.py`.
-2. Press Play, and take off / hover if you want the drone airborne — under
-   physics the drone otherwise just falls to the ground. (This matters:
-   `spawn_test_gates.py` reads the camera's LIVE pose off the USD stage,
-   so gates land in front of wherever the camera actually ends up looking.)
-3. In the same script editor session: run `workspace/spawn_test_gates.py`
-   (spawns a nested chain of magenta test gates along the camera's actual
-   optical axis, writes `~/test_gates.json` with their ground-truth poses
-   plus the camera pose used to place them).
-4. In the `ros2-eval` container (ROS 2 sourced): `python3 eval_isaac_gates.py --gates
-   /workspace/test_gates.json --camera-pose pose --frames 5`.
+1. Add a ground plane (or the Simple Room environment) to the stage.
+2. Script Editor: `exec(open("/workspace/scripts/spawn_example.py").read())`,
+   **once**. Expect `[init] camera 1280x720, hFOV 60.0 deg ...` and
+   `[init] camera_info helper re-initialized`, then `[init] Done`.
+3. Press Play. The sim may appear frozen (Pegasus is waiting for PX4).
+4. Start PX4 (command in the deployment notes), confirm the Isaac log shows
+   `Received first hearbeat`, then `commander takeoff` and let it settle at
+   ~2.5 m. From `ros2-eval`, `ros2 topic hz /drone00/state/pose` should show
+   ~130 Hz and `/iris_0/front_cam/camera_info` ~30 Hz.
+5. Only now, Script Editor:
+   `exec(open("/workspace/scripts/spawn_test_gates.py").read())`. Expect a
+   camera height of ~2.5 m, no on-the-ground warning, and
+   `wrote /workspace/test_gates.json (5 gate(s) kept, 0 dropped)`. It is safe
+   to re-run (it clears its own `/World/TestGates` group).
+6. In `ros2-eval`: `cd /workspace/vision && source /opt/ros/humble/setup.bash
+   && python3 eval_isaac_gates.py --gates /workspace/test_gates.json
+   --camera-pose pose --frames 5 --out-dir <new dir>`. Use a new `--out-dir`
+   so you don't overwrite the previous run's `annotated_frame.png`/CSV. Add
+   `--hfov-deg 60` if the run prints the camera_info-vs-image WARNING.
 
 `eval_isaac_gates.py` detects the test gates with `color_gate_detector.py`,
-solves a real PnP problem per gate, builds `T_world_cam_usd` from live
-`map -> drone0_base_link` TF plus the static mount, lifts each detection
-into the world frame under BOTH `optical_frame` values, and matches the
-results against the manifest's known positions. The decision block at the
-end names the winning `optical_frame` value, whether it's `confident` (low
-absolute error and a wide margin over the other convention), and a
-one-line reason. If TF isn't available for some reason, pass `--camera-pose
-manifest` to use the camera pose `spawn_test_gates.py` recorded instead
-(no TF needed, but only valid if the drone hasn't moved since gates were
-spawned). `annotated_frame.png` and `gate_mask.png` are written alongside
-the CSV for a closer look if the numbers look off.
+solves a real PnP problem per gate, builds `T_world_cam_usd` from the pose
+topic plus the static mount, lifts each detection into the world frame under
+BOTH `optical_frame` values, and matches the results against the manifest's
+known positions. The decision block at the end names the winning
+`optical_frame` value, whether it's `confident`, and a one-line reason.
+`--camera-pose manifest` uses the camera pose `spawn_test_gates.py` recorded
+instead (no pose topic needed, but only valid if the drone hasn't moved since
+the gates were spawned). Check the cross-check line: a large position or
+rotation delta between the live pose and the manifest means the drone moved
+or the mount constants disagree with `spawn_example.py`.
 
 ## Interface contracts with teammates (unconfirmed — settle these)
 
@@ -195,39 +300,43 @@ the CSV for a closer look if the numbers look off.
    (False), but `GatePoseNode` still gets the camera pose from a TF lookup
    of `front_cam`, and this sim publishes no TF. It needs to subscribe to
    `/drone00/state/pose` (BEST_EFFORT QoS) and compose the static mount, as
-   `eval_isaac_gates.py --camera-pose pose` already does. This is the step
-   between "evaluated offline against the sim" and "runs live as a ROS 2
-   node".
-2. **Widen the FOV and raise the resolution.** Camera is 320x240 at
-   fx=763.5 (~24 deg hFOV). That is why `spawn_test_gates.py` drops 2 of 5
-   gates as out of FOV, and it limits depth accuracy (see item 4). A
-   racing camera is far wider.
-3. **Tighten `check_layout`'s clearance** in `spawn_test_gates.py` so it
+   `eval_isaac_gates.py --camera-pose pose` already does. It also reads
+   `camera_info`, so it depends on the stale-camera_info fix holding. This
+   is the step between "evaluated offline against the sim" and "runs live as
+   a ROS 2 node".
+2. **Verify the camera_info fix from a fresh spawn.** It was proven by a
+   live toggle, then added to `spawn_example.py` afterwards. One clean
+   process restart + spawn should show the `[init] camera_info helper
+   re-initialized` line and a correct `camera_info` with no `--hfov-deg`.
+3. **Fix `test_gate_layout.py`** (point the nested-chain tests at
+   `NESTED_GATE_SPECS`; see its status row).
+4. **Temporal fusion across frames.** Single-frame PnP is depth-dominated
+   (range error ~2-3x lateral at 6-14 m, 0.06 m at 6 m up to 0.3-0.4 m at
+   12-14 m in the 2026-10-01 run), and gate normals become unreliable past
+   ~8 m (`GateDetection.normal_is_reliable`). Gates are static, so a
+   per-gate filter (e.g. a small EKF with a constant-position model,
+   association by predicted reprojection) fusing repeated sightings should
+   collapse this substantially. Not yet built — probably the single
+   highest-value next module in `vision/`.
+5. **Tighten `check_layout`'s clearance** in `spawn_test_gates.py` so it
    rejects layouts whose gate bars come within a few pixels of each other
    (it passed a layout with 1-2 px gaps; the detector's close used to fuse
    them). The detector is fixed, but any mask-based detector will have the
    same weakness.
-4. **Temporal fusion across frames.** Single-frame PnP has a ~6:1
-   depth-to-lateral error ratio at ~12 m (see `eval_pnp.py` /
-   project memory for the full characterization), and gate normals become
-   unreliable past ~8 m (`GateDetection.normal_is_reliable`). Gates are
-   static, so a per-gate filter (e.g. a small EKF with a constant-position
-   model, association by predicted reprojection) fusing repeated
-   sightings should collapse this substantially. Not yet built — this is
-   probably the single highest-value next module in `vision/`.
-5. **Resolution check (see item 2).** `spawn_example.py`'s `ROS2CameraGraph` currently
-   publishes at 320×240. `eval_isaac_gates.py` will print a warning if it
-   detects this — at that resolution a 1.5 m gate at 12 m spans roughly
-   20 px, so one pixel of corner error is already a large fraction of the
-   gate, which the 6:1 depth amplification then makes worse. Worth raising
-   to something like 1280×720 if compute allows.
-6. **`eval_pnp.py` re-grounding.** Currently characterizes error against
-   synthetic corner noise. Once the sim loop is closed, re-run it against
+6. **Investigate gate_3's error** (0.41 m at 12 m, 24 deg off-axis, worse
+   than the 14 m gate). Possibly off-axis geometry or corner quantization;
+   not looked at.
+7. **`eval_pnp.py` re-grounding.** Currently characterizes error against
+   synthetic corner noise. The sim loop is closed now, so re-run it against
    Isaac Sim ground truth (`isaac_camera.capture_labeled_frame()` is a
-   template for generating labeled samples, though it uses the
-   superseded USD path — may need porting to the ROS 2 path, or kept as
-   an offline labeling tool since it doesn't need to run live).
-7. **`workspace/spawn_example.py` placement.** It's currently the only
+   template for generating labeled samples, though it uses the superseded
+   USD path — may need porting to the ROS 2 path, or kept as an offline
+   labeling tool since it doesn't need to run live).
+8. **Replace the deprecated camera_info helper.** Pegasus still uses
+   `ROS2CameraHelper type=camera_info`; the toggle in `spawn_example.py` is
+   a workaround, not a fix. The real fix is upstream (or in the installed
+   Pegasus copy) so the node initializes after the camera is configured.
+9. **`workspace/spawn_example.py` placement.** It's currently the only
    file outside the `control/`/`vision/` layout the rest of the repo has
    settled into. Not urgent, but worth a decision.
 
@@ -250,5 +359,15 @@ the CSV for a closer look if the numbers look off.
   a regression by deliberately reverting the fix and confirming it fails.
 - `c1d6b0d` "Add ROS 2 camera adapters for the Isaac Sim perception path" —
   `ros_camera.py` / `test_ros_camera.py`, described above.
-- `verify_isaac_pipeline.py` — written but not yet committed as of this
-  handoff; not yet run against a live sim.
+- `8096c55` "End-to-end vision update and test" — teammate's commit:
+  `color_gate_detector.py`, `eval_isaac_gates.py`, `spawn_test_gates.py`,
+  `test_*` and `verify_isaac_pipeline.py` (now committed, but superseded).
+- 2026-09-28 — teammate ran `eval_isaac_gates.py` live and settled
+  `optical_frame=False`; found `/drone00/state/pose` is the only pose source
+  and the sim publishes no TF; widened the camera to 1280x720 / 60 deg and
+  replaced the nested gate layout with a staggered one.
+- `e8ef802` / PR #1 (`089b979`), 2026-10-01 — synced the cluster working
+  copies into the repo; fixed `--hfov-deg` to use the real image size and
+  added the stale-camera_info warning; added
+  `refresh_camera_info_helper()` to `spawn_example.py` after tracing the
+  stale camera_info to the helper baking its values on first compute.
