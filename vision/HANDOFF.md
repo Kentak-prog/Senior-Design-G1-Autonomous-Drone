@@ -338,6 +338,32 @@ probably adds error, perhaps attitude timing: camera stamps are SIM time and
 pose stamps are WALL time, so pairing falls back to bag receive time. Fix
 for the layout: the approach layout (below).
 
+**Camera mount moved (found 2026-10-01, cause unknown).** After the
+flights, the live camera prim sat at (-0.040, 0, -0.041) m from
+`/World/Iris/body`, not at the (0.30, 0, 0.05) `spawn_example.py` sets. Its
+rotation still matched the mount to 0.1 deg. The body prim and
+`/drone00/state/pose` agreed to 2 cm. The first hover run and both early
+flights were consistent with the original mount, so the camera moved later;
+the Kit log shows nothing that explains it. With the hardcoded mount, the
+5 m approach scored ~0.5 m on every gate, a false 0.35 m offset. Anything
+using the mount constants is wrong while this holds: `eval_isaac_gates.py`,
+`GatePoseNode`, and the default `eval_gate_bag.py`. **Check the mount
+before trusting a run.** Script Editor, while hovering:
+```
+from pxr import UsdGeom, Usd; import omni.usd; s = omni.usd.get_context().get_stage(); B = UsdGeom.Xformable(s.GetPrimAtPath("/World/Iris/body")).ComputeLocalToWorldTransform(Usd.TimeCode.Default()); C = UsdGeom.Xformable(s.GetPrimAtPath("/World/Iris/body/front_cam")).ComputeLocalToWorldTransform(Usd.TimeCode.Default()); print("cam in body frame:", (C * B.GetInverse()).ExtractTranslation())
+```
+If it is not about (0.30, 0, 0.05), pass the printed value to
+`eval_gate_bag.py --mount-xyz X Y Z`. Finding what moves the prim is open.
+
+**5 m approach at 1 m/s, measured mount (2026-10-01).** 4 approach-layout
+gates, 719 frames, ~100% detection when fully in frame. Hover 0.13-0.21 m
+(0.9-2.2% of range); moving (>0.5 m/s) 0.17-0.25 m (1.6-3.1%), i.e. +0.04-0.07 m.
+The extra error peaks while the drone ACCELERATES (pitching) and drops while
+it is still at speed. That suggests attitude/timing (image vs pose pairing
+falls back to bag receive time because camera stamps are sim time and pose
+stamps wall time), not motion blur. Figures: `gate_error_eval/runs/
+approach_run5m_measured_mount/` (not committed).
+
 **Approach layout.** In the Script Editor, with the drone hovering:
 `import os; os.environ["SPAWN_LAYOUT"] = "approach"; exec(open("/workspace/scripts/spawn_test_gates.py").read())`. Check that it prints `layout: approach` (a plain Script Editor variable is NOT seen, so it silently spawned the staggered layout once).
 This gives 4 gates placed relative to the horizon, searched so they stay in

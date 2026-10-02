@@ -169,12 +169,13 @@ class PoseBuffer:
         return (ps[hi] - ps[lo]) / dt
 
 
-def T_world_cam_raw_at(pose_buffer: PoseBuffer, t: float):
+def T_world_cam_raw_at(pose_buffer: PoseBuffer, t: float, T_body_cam=None):
     """
     4x4 raw (USD-convention) camera pose at time t: the interpolated
     /drone00/state/pose composed with the static body->camera mount, exactly
     as eval_isaac_gates.py --camera-pose pose does. None if t is outside the
-    buffer (beyond its extrapolation tolerance).
+    buffer (beyond its extrapolation tolerance). T_body_cam overrides the
+    mount constants (see eval_gate_bag.py --mount-xyz).
     """
     # Lazy: pulls in cv2 via eval_isaac_gates -> gate_pose; see module docstring.
     from eval_isaac_gates import T_body_cam_usd_from_mount
@@ -185,7 +186,7 @@ def T_world_cam_raw_at(pose_buffer: PoseBuffer, t: float):
     pos, quat_xyzw = got
     # transform_to_matrix takes plain length-3 / length-4 (xyzw) sequences.
     T_map_body = transform_to_matrix(pos, quat_xyzw)
-    return T_map_body @ T_body_cam_usd_from_mount()
+    return T_map_body @ (T_body_cam_usd_from_mount() if T_body_cam is None else T_body_cam)
 
 
 # --------------------------------------------------------------------------
