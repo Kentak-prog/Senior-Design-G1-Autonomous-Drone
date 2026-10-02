@@ -130,7 +130,7 @@ GATE_SPECS = [
 ]
 
 # APPROACH layout, for vision/gate_error_eval/fly_gate_approach.py's straight
-# approach run (opt in: SPAWN_LAYOUT = "approach" before exec'ing this file).
+# approach run (opt in: os.environ["SPAWN_LAYOUT"] = "approach" before exec'ing this file; see main()).
 # Unlike the two lists above, az/el here are relative to the camera's LEVEL
 # heading (horizon), not its optical axis -- see gate_world_pose(level=True)
 # -- because the camera is pitched ~15 deg up and the drone pitches during
@@ -614,9 +614,13 @@ def main():
     if warn:
         print(f"[spawn_test_gates] WARNING: {warn}")
 
-    # Opt-in layout choice: set SPAWN_LAYOUT = "approach" in the Script
-    # Editor before exec'ing this file (exec shares the editor's globals).
-    layout = globals().get("SPAWN_LAYOUT", "staggered")
+    # Opt-in layout choice via a ONE-SHOT environment variable:
+    #     import os; os.environ["SPAWN_LAYOUT"] = "approach"; exec(open(...).read())
+    # Not a Script Editor variable: on 2026-10-01 `SPAWN_LAYOUT = "approach";
+    # exec(...)` was not visible from main()'s globals in Isaac's editor and
+    # the staggered layout was spawned silently. The variable is popped so a
+    # later plain run of this file is not silently affected.
+    layout = os.environ.pop("SPAWN_LAYOUT", "staggered")
     if layout == "approach":
         specs, level = APPROACH_GATE_SPECS, True
     elif layout == "staggered":
