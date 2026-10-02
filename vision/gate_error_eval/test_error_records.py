@@ -85,7 +85,14 @@ def test_T_world_cam_raw_at_matches_manual():
     T_manual = transform_to_matrix(pos, quat_z(20.0)) @ T_body_cam_usd_from_mount()
     assert np.allclose(T, T_manual, atol=1e-9)
     assert er.T_world_cam_raw_at(buf, 3.0) is None
-    print("  T_world_cam_raw_at == transform_to_matrix(interp) @ mount; None out of range  OK")
+    # Mount override (eval_gate_bag --mount-xyz): only the translation changes.
+    T_mount = T_body_cam_usd_from_mount().copy()
+    T_mount[:3, 3] = [-0.04, 0.0, -0.041]
+    T_o = er.T_world_cam_raw_at(buf, 0.25, T_mount)
+    assert np.allclose(T_o, transform_to_matrix(pos, quat_z(20.0)) @ T_mount, atol=1e-9)
+    assert np.allclose(T_o[:3, :3], T[:3, :3]) and not np.allclose(T_o[:3, 3], T[:3, 3])
+    print("  T_world_cam_raw_at == transform_to_matrix(interp) @ mount; None out of range; "
+          "mount override  OK")
 
 
 # --- synthetic scene ------------------------------------------------------

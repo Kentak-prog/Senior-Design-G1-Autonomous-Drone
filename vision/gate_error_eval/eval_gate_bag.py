@@ -158,7 +158,7 @@ def evaluate_image_at(rgb, t_query: float, t_s: float, frame_idx: int, intr,
                       pose_buffer: "er.PoseBuffer", manifest: list,
                       gate_side: float = DEFAULT_GATE_SIDE,
                       corner_sigma_px: float = 1.0, max_match_dist_m: float = 2.0,
-                      detector=detect_gates_color):
+                      detector=detect_gates_color, T_body_cam=None):
     """
     One image + the pose buffer -> list of CSV row dicts (one per manifest
     gate), or None if no pose is available within the buffer's tolerance
@@ -167,7 +167,7 @@ def evaluate_image_at(rgb, t_query: float, t_s: float, frame_idx: int, intr,
     t_query: image time on the same clock as pose_buffer; t_s: the same time
     expressed as seconds since the first frame, for the CSV.
     """
-    T_world_cam_raw = er.T_world_cam_raw_at(pose_buffer, t_query)
+    T_world_cam_raw = er.T_world_cam_raw_at(pose_buffer, t_query, T_body_cam)
     if T_world_cam_raw is None:
         return None
     result = evaluate_frame(rgb, intr, T_world_cam_raw, manifest, gate_side=gate_side,
@@ -225,6 +225,11 @@ def main():
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--stamp-source", choices=["auto", "header", "bag"], default="auto")
     ap.add_argument("--max-match-dist", type=float, default=2.0)
+    ap.add_argument("--mount-xyz", type=float, nargs=3, default=None, metavar=("X", "Y", "Z"),
+                    help="body->camera translation (m) to use instead of the mount constants "
+                         "in eval_isaac_gates.py. Measure it in the Script Editor (HANDOFF, "
+                         "'Camera mount check'): on 2026-10-01 the live camera prim sat at "
+                         "(-0.040, 0, -0.041), not the (0.30, 0, 0.05) spawn_example.py sets")
     ap.add_argument("--corner-sigma-px", type=float, default=1.0)
     ap.add_argument("--gate-side", type=float, default=None,
                     help="gate opening side (m); default: from the manifest, else "
@@ -244,6 +249,14 @@ def main():
         gate_side = float(manifest[0]["side"]) if manifest and "side" in manifest[0] \
             else DEFAULT_GATE_SIDE
     print(f"loaded {len(manifest)} gate(s) from {args.gates}, gate_side={gate_side} m")
+
+    T_body_cam = None
+    if args.mount_xyz is not None:
+        from eval_isaac_gates import T_body_cam_usd_from_mount
+        T_body_cam = T_body_cam_usd_from_mount().copy()
+        T_body_cam[:3, 3] = args.mount_xyz
+        print(f"NOTE: --mount-xyz {args.mount_xyz}: overriding the mount translation "
+              f"(rotation unchanged)")
 
     # ---- pass 1: poses, first camera_info, image headers (no pixel data kept)
     reader = _open_reader(args.bag)
@@ -323,7 +336,8 @@ def main():
         frame_rows = evaluate_image_at(rgb, t_query, t_query - t0, idx, intr, buf, manifest,
                                        gate_side=gate_side,
                                        corner_sigma_px=args.corner_sigma_px,
-                                       max_match_dist_m=args.max_match_dist)
+                                       max_match_dist_m=args.max_match_dist,
+                                       T_body_cam=T_body_cam)
         if frame_rows is None:
             n_nopose += 1
             continue
