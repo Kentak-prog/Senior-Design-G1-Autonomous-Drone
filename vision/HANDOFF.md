@@ -336,10 +336,10 @@ nose-down to accelerate, so almost no moving-frame data came back. In that
 1.5 s, error rose (gate_0 0.06 -> 0.085 m) while range shrank, so motion
 probably adds error, perhaps attitude timing: camera stamps are SIM time and
 pose stamps are WALL time, so pairing falls back to bag receive time. Fix
-for the layout: `SPAWN_LAYOUT = "approach"` (below).
+for the layout: the approach layout (below).
 
 **Approach layout.** In the Script Editor, with the drone hovering:
-`SPAWN_LAYOUT = "approach"; exec(open("/workspace/scripts/spawn_test_gates.py").read())`.
+`import os; os.environ["SPAWN_LAYOUT"] = "approach"; exec(open("/workspace/scripts/spawn_test_gates.py").read())`. Check that it prints `layout: approach` (a plain Script Editor variable is NOT seen, so it silently spawned the staggered layout once).
 This gives 4 gates placed relative to the horizon, searched so they stay in
 frame along a 5 m approach (see `APPROACH_GATE_SPECS`). Then fly
 `--distance 5 --speed 1`. Without the variable, the default staggered layout
