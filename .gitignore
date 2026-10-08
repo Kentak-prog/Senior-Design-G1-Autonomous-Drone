@@ -1,4 +1,5 @@
 __pycache__/
 *.py[cod]
 .DS_Store
-trajectory/sim_output/
+trajectory/sim_output/min_snap_reference.csv
+control/__pycache__
