@@ -9,6 +9,7 @@ import sympy as sp
 import numpy as np
 import scipy.signal as signal
 import matplotlib.pyplot as plt
+from drone_constraints import drone_constraints
 
 # Define States Symbolically 
 x, y, z, phi, theta, psi = sp.symbols('x y z phi theta psi')
@@ -20,8 +21,9 @@ U1, U2, U3, U4 = sp.symbols('U1 U2 U3 U4')
 inputs = [U1, U2, U3, U4] # U1 is total torque, U2, U3, U4, are directional torques (x,y,z)
 
 #Define Physical Constants
-g, m, Ix, Iy, Iz = sp.symbols('g m Ix Iy Iz')
-constants = {g: 9.81, m: 1.0, Ix: 0.01, Iy: 0.01, Iz: 0.02}
+m = drone_constraints["mass"] #kg (set in drone_constraints.py)
+g, Ix, Iy, Iz = sp.symbols('g Ix Iy Iz')
+constants = {g: 9.81, Ix: 0.01, Iy: 0.01, Iz: 0.02}
 
 #Define Body Roll Rates p,q,r
 p = phi_dot - (sp.sin(theta))*psi_dot
@@ -39,10 +41,11 @@ eqs=[
     q*sp.cos(phi) - r*sp.sin(phi), # dtheta/dt
     (r*sp.cos(phi))/sp.cos(theta) + (q*sp.sin(phi))/sp.cos(theta), #dpsi/dt
 
-    #Translational Equations of Motion
-    -(U1/m)*(sp.cos(phi)*sp.sin(theta)*sp.cos(psi) + sp.sin(phi)*sp.sin(psi)), #d_dx/dt
-    -(U1/m)*(sp.cos(phi)*sp.sin(theta)*sp.sin(psi) - sp.sin(phi)*sp.cos(psi)), #d_dy/dt
-    g - U1*(sp.cos(phi)*sp.cos(theta)), #d_dz/dt
+    #fixed bug where z axis were not consistent between programs
+    #Translational Equations of Motion (world Z-up, thrust along body +Z)
+    (U1/m)*(sp.cos(phi)*sp.sin(theta)*sp.cos(psi) + sp.sin(phi)*sp.sin(psi)), #d_dx/dt
+    (U1/m)*(sp.cos(phi)*sp.sin(theta)*sp.sin(psi) - sp.sin(phi)*sp.cos(psi)), #d_dy/dt
+    (U1/m)*(sp.cos(phi)*sp.cos(theta)) - g, #d_dz/dt
 
     #Rotational Equations of Motion
     (U2 + Iy*q*r - Iz*q*r)/Ix, #d_dphi/dt

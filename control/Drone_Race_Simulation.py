@@ -29,6 +29,7 @@ from MPC_Optimizer import create_drone_mpc_optimizer
 from New_Drone_State_Equations import get_drone_dynamics
 from Runge_Kutta_4_Discretizer import get_rk4_discretizer
 from Kalman_Filter_MPC import DroneCasadiEKF12D
+from drone_constraints import drone_constraints
 
 
 # ---------------------------------------------------------------------------
@@ -76,27 +77,27 @@ def build_reference_horizon(t0, N, dt):
 # ---------------------------------------------------------------------------
 # Closed-loop simulation
 # ---------------------------------------------------------------------------
-def run_race_simulation(num_laps=1.5, dt=0.02, N=10, add_noise=True, seed=0):
+def run_race_simulation(num_laps=1.5, dt=0.02, N=10, add_noise=True, seed=0, m = drone_constraints["mass"]): #kg
     rng = np.random.default_rng(seed)
 
     sim_time = LAP_TIME * num_laps
     steps = int(sim_time / dt)
 
     # NMPC controller (Opti instance is solved repeatedly with updated parameters)
-    opti, X, U, X_init, U_prev, X_ref = create_drone_mpc_optimizer(N=N, dt=dt)
+    opti, X, U, X_init, U_prev, X_ref = create_drone_mpc_optimizer(N=N, dt=dt, m=m)
 
     # "True" plant model, integrated with the same RK4 discretizer the MPC uses internally
-    f_continuous, states, controls = get_drone_dynamics()
+    f_continuous, states, controls = get_drone_dynamics(m)
     f_plant = get_rk4_discretizer(f_continuous, states, controls, dt)
 
     # State estimator
-    ekf = DroneCasadiEKF12D(dt=dt)
+    ekf = DroneCasadiEKF12D(dt=dt, m=m)
 
     x_true = reference_state(0.0).reshape(12, 1)
     ekf.x = x_true.copy()
     u_prev = np.zeros((4, 1))
 
-    hover_thrust = 9.81  # m=1kg -> hover thrust roughly equals g
+    hover_thrust = m * 9.81  # thrust that balances gravity
     X_guess = np.tile(x_true, (1, N + 1))
     U_guess = np.tile(np.array([[hover_thrust], [0.0], [0.0], [0.0]]), (1, N))
 

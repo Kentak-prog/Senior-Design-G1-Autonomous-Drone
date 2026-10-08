@@ -2,8 +2,9 @@
 #State equations using casADI
 import casadi as ca
 import numpy as np
+from drone_constraints import drone_constraints
 
-def get_drone_dynamics():
+def get_drone_dynamics(m = drone_constraints["mass"]): #kg
     #1. Define Symbolic State
     # Pos: x, y, z 
     # Att: phi (roll), theta (pitch), psi (yaw)
@@ -36,7 +37,7 @@ def get_drone_dynamics():
     
     #3. Constant Parameters
     g = 9.81           # m/s^2
-    m = 1.0            # kg (Adjust based on your drone)
+    # m (kg) defaults to the mass in drone_constraints.py
     Ix = 0.0081        # kg*m^2
     Iy = 0.0081        # kg*m^2
     Iz = 0.0142        # kg*m^2
@@ -48,9 +49,13 @@ def get_drone_dynamics():
     dpsi_dt   = (r * ca.cos(phi)) / ca.cos(theta) + (q * ca.sin(phi)) / ca.cos(theta)
     
     # Translational Accelerations
-    dx_ddot = -(U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.cos(psi) + ca.sin(phi) * ca.sin(psi))
-    dy_ddot = -(U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.sin(psi) - ca.sin(phi) * ca.cos(psi))
-    dz_ddot = g - (U1 / m) * (ca.cos(phi) * ca.cos(theta)) # Included normalized mass adjustment
+    #fixed bug where z axis were not consistent between programs
+    # World frame is Z-UP (matches Isaac Sim, the vision stack and the altitude
+    # limits in drone_constraints.py). Thrust U1 acts along body +Z, so the
+    # acceleration is (U1/m) * (third column of R = Rz(psi) Ry(theta) Rx(phi)) - g * e_z.
+    dx_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.cos(psi) + ca.sin(phi) * ca.sin(psi))
+    dy_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.sin(psi) - ca.sin(phi) * ca.cos(psi))
+    dz_ddot = (U1 / m) * (ca.cos(phi) * ca.cos(theta)) - g
     
     # Rotational Accelerations
     dp_dt = (U2 + (Iy - Iz) * q * r) / Ix

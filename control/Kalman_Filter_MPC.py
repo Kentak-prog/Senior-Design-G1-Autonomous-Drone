@@ -7,13 +7,14 @@ Kalman filter (ekf) which will help in predicting the drones non-linear movement
 import numpy as np
 import casadi as ca
 from New_Drone_State_Equations import get_drone_dynamics
+from drone_constraints import drone_constraints
 
 class DroneCasadiEKF12D:
-    def __init__(self, dt=0.02):
+    def __init__(self, dt=0.02, m = drone_constraints["mass"]): #kg
         self.dt = dt
         
         #Load CasADI Model 
-        f_continuous, states, controls = get_drone_dynamics()
+        f_continuous, states, controls = get_drone_dynamics(m)
         
         #Calculate Jacobian Model
         # This takes the derivative of f_continuous with respect to the 12 states

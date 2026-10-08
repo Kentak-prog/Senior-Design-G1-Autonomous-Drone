@@ -6,7 +6,7 @@ from Runge_Kutta_4_Discretizer import get_rk4_discretizer
 from drone_constraints import drone_constraints
 from MPC_Cost_Function import compute_mpc_cost_with_rk4
 
-def create_drone_mpc_optimizer(N=10, dt=0.02):
+def create_drone_mpc_optimizer(N=10, dt=0.02, m = drone_constraints["mass"]): #kg
 
     opti = ca.Opti()
 
@@ -23,11 +23,11 @@ def create_drone_mpc_optimizer(N=10, dt=0.02):
     X_ref = opti.parameter(nx, N + 1)
 
     #Use Physics & Discretizer
-    f_continuous, states, controls = get_drone_dynamics()
+    f_continuous, states, controls = get_drone_dynamics(m)
     f_discrete = get_rk4_discretizer(f_continuous, states, controls, dt)
 
     #Objective Cost Function
-    cost = compute_mpc_cost_with_rk4(X_init, U, X_ref, U_prev, f_discrete, N)
+    cost = compute_mpc_cost_with_rk4(X_init, U, X_ref, U_prev, f_discrete, N, m)
     opti.minimize(cost)
 
     #Initial State Equality Constraint

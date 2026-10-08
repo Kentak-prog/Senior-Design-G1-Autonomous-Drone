@@ -6,7 +6,14 @@
 #Aaron Arnold
 #physical constraints of a drone
 
+# Drone mass -- the single place to change it. Used by the state equations,
+# the MPC cost/optimizer, the EKF, the race sim and the trajectory reference.
+m = 1.0 #kg
+
 drone_constraints = {
+    # 0. Mass
+    "mass": m, #kg
+
     # 1. Attitude Angles (in radians)
     "roll_limits": {
         "min": -1.2,  # approx. -68 degrees
