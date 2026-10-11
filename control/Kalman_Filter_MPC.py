@@ -8,6 +8,7 @@ import numpy as np
 import casadi as ca
 from New_Drone_State_Equations import get_drone_dynamics
 from drone_constraints import drone_constraints
+from scipy.linalg import expm
 
 class DroneCasadiEKF12D:
     def __init__(self, dt=0.02, m = drone_constraints["mass"]): #kg
@@ -29,9 +30,26 @@ class DroneCasadiEKF12D:
         #Tune weights if needed, these are initial values. Lower = certain Higher = uncertain
         self.x = np.zeros((12, 1))  # Current state estimate
         self.P = np.eye(12) * 0.1   # State uncertainty
-        self.Q = np.eye(12) * 0.01  # Process noise
-        self.R = np.eye(12) * 0.05  # Measurement noise
+        # --- TUNING PROCESS NOISE (Q) ---
+        # Lower values mean = higher trust in physics model
+        q_diag = np.array([
+            0.001, 0.001, 0.05,   # X, Y, Z positions (Increased Z to keep bounds open)
+            0.01,  0.01,  0.01,   # X, Y, Z velocities
+            0.001, 0.001, 0.05,   # Roll, Pitch, Yaw angles (Increased Yaw)
+            0.01,  0.01,  0.01    # Roll, Pitch, Yaw angular rates
+        ])
+        self.Q = np.diag(q_diag)
 
+        # --- TUNING MEASUREMENT NOISE (R) ---
+        # Higher values force the EKF to smooth out jerky sensor noise
+        r_diag = np.array([
+            0.5,   0.5,   0.1,    # X, Y, Z positions (Increased X/Y to smooth tracking)
+            0.1,   0.1,   0.1,    # X, Y, Z velocities
+            0.8,   0.8,   0.1,    # Roll, Pitch, Yaw angles (Increased Roll/Pitch)
+            0.2,   0.2,   0.2     # Roll, Pitch, Yaw angular rates
+        ])
+        self.R = np.diag(r_diag)
+        
     def predict(self, u_numeric):
         """
         u_numeric: A 4x1 numpy array or list [U1, U2, U3, U4] of Thrust Inputs
@@ -54,9 +72,7 @@ class DroneCasadiEKF12D:
         Ac = np.array(self.J_eval(self.x, u_numeric))
         
         #Convert continuous-time Jacobian (Ac) to discrete-time Jacobian (F)
-        #Exact conversion: F = I + Ac*dt (First-order Taylor approximation)
-        F = np.eye(12) + Ac * dt #state transition matrix
-
+        F = expm(Ac * dt) #matrix exponential conversion to prevent stability blowup
         #Project Covariance Forward
         self.P = F @ self.P @ F.T + self.Q
         
@@ -64,7 +80,7 @@ class DroneCasadiEKF12D:
 
     def update(self, z):
         """
-        z: 12x1 numpy array containing your current sensor measurements
+        z: 12x1 numpy array containing current sensor measurements
         """
         H = np.eye(12) 
         y = z - (H @ self.x) #Current Innovation (actual - expected)
