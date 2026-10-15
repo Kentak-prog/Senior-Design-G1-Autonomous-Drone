@@ -37,6 +37,8 @@ from race_env import CoursePool, build_obs, ACT_DIM
 
 
 class RlPolicyController:
+    command = "ctbr"
+
     def __init__(self, params: QuadParams, course: Course, model_dir: str = None,
                  policy=None, vecnorm=None):
         self.p = params

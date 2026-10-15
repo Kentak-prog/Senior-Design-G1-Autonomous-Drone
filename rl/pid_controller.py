@@ -62,6 +62,7 @@ class PidGains:
 
 class PidController:
     """Batched. Call reset() once, then act() every control step."""
+    command = "ctbr"
 
     def __init__(self, params: QuadParams, course: Course, gains: PidGains = None):
         self.p = params
