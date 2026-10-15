@@ -211,14 +211,22 @@ def check_gate(p_prev: torch.Tensor, p_now: torch.Tensor, gates: GateBatch,
 # ----------------------------------------------------------------------
 def random_course(rng: np.random.Generator, n_gates: int, name: str = "random",
                   spacing=(5.0, 12.0), max_turn_deg: float = 60.0,
-                  height=(1.5, 4.0), min_gate_dist: float = 3.0) -> Course:
+                  height=(1.5, 4.0), min_gate_dist: float = 3.0,
+                  yaw_jitter_deg: float = 0.0) -> Course:
     """Random course. Each leg is `spacing` metres long (HORIZONTAL distance),
     its heading differs from the previous leg by at most max_turn_deg, heights
     are uniform in `height` (so vertical steps are up to 2.5 m), and gate yaw is
     the circular mean of the incoming and outgoing leg headings (the last gate
     keeps its incoming heading), i.e. approximately the direction of travel.
     Candidate gates closer than min_gate_dist (3D) to an earlier gate are
-    rejected, so gates never overlap."""
+    rejected, so gates never overlap.
+
+    yaw_jitter_deg adds a uniform +-jitter to every gate's yaw, so the gate no
+    longer faces the direction of travel and the drone has to turn INTO it
+    (e.g. rl/tracks/slalom5.json arrives ~65 deg off a gate's normal). Without
+    it a trained policy only ever sees gates within ~30 deg of its path. The
+    jitter is drawn after the layout, so jitter = 0 reproduces the old courses
+    for the same seed exactly."""
     for _attempt in range(200):
         heading = rng.uniform(-math.pi, math.pi)
         pts = [np.array([rng.uniform(5, 12), 0.0, rng.uniform(*height)])]
@@ -242,6 +250,8 @@ def random_course(rng: np.random.Generator, n_gates: int, name: str = "random",
     else:
         raise RuntimeError("random_course: could not place gates")
 
+    jitter = (rng.uniform(-yaw_jitter_deg, yaw_jitter_deg, len(pts)) if yaw_jitter_deg > 0
+              else np.zeros(len(pts)))
     gates = []
     for i, p in enumerate(pts):
         h_in = headings[i]
@@ -249,7 +259,7 @@ def random_course(rng: np.random.Generator, n_gates: int, name: str = "random",
         # circular mean of the two headings (they differ by < pi)
         yaw = h_in + 0.5 * math.atan2(math.sin(h_out - h_in), math.cos(h_out - h_in))
         gates.append(Gate(f"gate_{i:02d}", float(p[0]), float(p[1]), float(p[2]),
-                          math.degrees(yaw)))
+                          math.degrees(yaw) + float(jitter[i])))
     return Course(gates, name)
 
 

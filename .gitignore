@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 trajectory/sim_output/min_snap_reference.csv
 control/__pycache__
+rl/runs/
