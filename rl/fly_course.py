@@ -2,8 +2,10 @@
 Run a controller on a course in QuadSim and summarise the flight.
 
 A "controller" is anything with reset(n_envs, device, dtype) and
-act(pos, vel, quat, gate_idx, dt) -> (thrust_N (N,), body_rate_ref (N,3)),
-i.e. the CTBR interface shared by the PID baseline and the future RL policy.
+act(pos, vel, quat, gate_idx, dt, omega=None) -> (thrust_N (N,), body_rate_ref (N,3)),
+i.e. the CTBR interface shared by the PID baseline and the RL policy. The
+runner passes omega=sim.omega (body rates) as a keyword because the RL
+observation needs it; the PID ignores it.
 
 Each control step the runner checks the CURRENT target gate with
 course.check_gate (segment p_prev -> p_now). A pass advances that env's gate
@@ -12,6 +14,7 @@ Only the current target gate is tested for collisions, which is enough for
 the tracks here (gates are >= 5 m apart). Positions are ENU, z up.
 
 CLI:  python3 fly_course.py --track tracks/oval6.json --controller pid [--plot out.png]
+      python3 fly_course.py --track tracks/oval6.json --controller rl --model runs/<name>
 """
 
 import argparse
@@ -57,7 +60,7 @@ def run_controller(course, controller, params=None, max_time=60.0, n_envs=1,
 
     ts, ps, vs = [0.0], [sim.pos.clone()], [sim.vel.clone()]
     for k in range(n_steps):
-        thrust, rates = controller.act(sim.pos, sim.vel, sim.quat, gate_idx, dt)
+        thrust, rates = controller.act(sim.pos, sim.vel, sim.quat, gate_idx, dt, omega=sim.omega)
         p_prev = sim.pos.clone()
         sim.step_ctbr(thrust, rates)
         p_now = sim.pos
@@ -131,24 +134,31 @@ def plot_log(log, path):
     fig.tight_layout(); fig.savefig(path, dpi=120)
 
 
-def make_controller(kind, params, course):
+def make_controller(kind, params, course, model=None):
     if kind == "pid":
         from pid_controller import PidController
         return PidController(params, course)
+    if kind == "rl":
+        if model is None:
+            raise ValueError("--controller rl needs --model <run dir>")
+        from rl_policy import RlPolicyController
+        return RlPolicyController(params, course, model_dir=model)
     raise ValueError(f"unknown controller {kind!r}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", required=True)
-    ap.add_argument("--controller", default="pid", choices=["pid"])
+    ap.add_argument("--controller", default="pid", choices=["pid", "rl"])
+    ap.add_argument("--model", default=None,
+                    help="run directory with model.zip + vecnormalize.pkl (for --controller rl)")
     ap.add_argument("--max-time", type=float, default=60.0)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--plot", default=None)
     a = ap.parse_args()
     course = Course.load(a.track)
     params = QuadParams()
-    log, summ = run_controller(course, make_controller(a.controller, params, course),
+    log, summ = run_controller(course, make_controller(a.controller, params, course, a.model),
                                params, max_time=a.max_time, seed=a.seed)
     print(format_summary(course.name, summ))
     if a.plot:

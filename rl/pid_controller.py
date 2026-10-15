@@ -104,9 +104,10 @@ class PidController:
         target = torch.where(st == 0, pre, torch.where(st == 1, c, post))
         return target, c, n
 
-    def act(self, pos, vel, quat, gate_idx, dt):
+    def act(self, pos, vel, quat, gate_idx, dt, omega=None):
         """pos, vel (N,3), quat (N,4) wxyz, gate_idx (N,) long -> (thrust (N,) [N],
-        body-rate setpoint (N,3) [rad/s])."""
+        body-rate setpoint (N,3) [rad/s]). `omega` is accepted for interface
+        parity with the RL policy (which observes it) and ignored."""
         g, p = self.g, self.p
         target, c, n = self._target(pos, gate_idx)
 

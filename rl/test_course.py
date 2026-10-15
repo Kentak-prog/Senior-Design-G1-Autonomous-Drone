@@ -157,6 +157,23 @@ def test_random_course_constraints():
     print("  random_course spacing/heading/height/overlap over 60 seeds  OK")
 
 
+def test_random_course_yaw_jitter():
+    """Jitter only changes gate yaw (same seed -> same layout), stays within
+    +-jitter of the un-jittered yaw, and actually produces gates that face well
+    away from the travel direction."""
+    big = 0
+    for seed in range(30):
+        a = random_course(np.random.default_rng(seed), 6)
+        b = random_course(np.random.default_rng(seed), 6, yaw_jitter_deg=60.0)
+        for ga, gb in zip(a.gates, b.gates):
+            assert np.allclose(ga.center, gb.center)
+            d = abs(np.degrees(np.angle(np.exp(1j * np.radians(gb.yaw_deg - ga.yaw_deg)))))
+            assert d <= 60.0 + 1e-9, d
+            big += d > 40.0
+    assert big > 20, big
+    print(f"  yaw jitter: layout unchanged, |delta yaw| <= 60 deg, {big} gates > 40 deg  OK")
+
+
 if __name__ == "__main__":
     print("test_T_world_gate_matches_spawn");   test_T_world_gate_matches_spawn()
     print("test_gate_axes_hand_vectors");       test_gate_axes_hand_vectors()
@@ -164,4 +181,5 @@ if __name__ == "__main__":
     print("test_json_roundtrip_and_manifest_format"); test_json_roundtrip_and_manifest_format()
     print("test_fixed_tracks_on_disk");         test_fixed_tracks_on_disk()
     print("test_random_course_constraints");    test_random_course_constraints()
+    print("test_random_course_yaw_jitter");      test_random_course_yaw_jitter()
     print("\nAll tests passed.")
