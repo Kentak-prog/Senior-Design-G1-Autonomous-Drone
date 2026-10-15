@@ -1,0 +1,54 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "oval6",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 10.0,
+      "y": 0.0,
+      "z": 2.0,
+      "yaw_deg": 90.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_1",
+      "x": 5.000000000000001,
+      "y": 5.196152422706632,
+      "z": 3.5,
+      "yaw_deg": 160.8933946491309,
+      "side": 1.5
+    },
+    {
+      "name": "gate_2",
+      "x": -4.999999999999998,
+      "y": 5.196152422706632,
+      "z": 2.0,
+      "yaw_deg": -160.8933946491309,
+      "side": 1.5
+    },
+    {
+      "name": "gate_3",
+      "x": -10.0,
+      "y": 7.347880794884119e-16,
+      "z": 3.5,
+      "yaw_deg": -90.00000000000001,
+      "side": 1.5
+    },
+    {
+      "name": "gate_4",
+      "x": -5.000000000000004,
+      "y": -5.19615242270663,
+      "z": 2.0,
+      "yaw_deg": -19.106605350869117,
+      "side": 1.5
+    },
+    {
+      "name": "gate_5",
+      "x": 5.000000000000001,
+      "y": -5.196152422706632,
+      "z": 3.5,
+      "yaw_deg": 19.106605350869103,
+      "side": 1.5
+    }
+  ]
+}
