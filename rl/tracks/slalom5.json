@@ -1,0 +1,46 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "slalom5",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 8.0,
+      "y": 4.0,
+      "z": 2.5,
+      "yaw_deg": -20.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_1",
+      "x": 16.0,
+      "y": -4.0,
+      "z": 2.5,
+      "yaw_deg": 20.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_2",
+      "x": 24.0,
+      "y": 4.0,
+      "z": 2.5,
+      "yaw_deg": -20.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_3",
+      "x": 32.0,
+      "y": -4.0,
+      "z": 2.5,
+      "yaw_deg": 20.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_4",
+      "x": 40.0,
+      "y": 4.0,
+      "z": 2.5,
+      "yaw_deg": -20.0,
+      "side": 1.5
+    }
+  ]
+}
