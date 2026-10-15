@@ -4,7 +4,7 @@ import casadi as ca
 import numpy as np
 from drone_constraints import drone_constraints
 
-def get_drone_dynamics(m = drone_constraints["mass"]): #kg
+def get_drone_dynamics(m = drone_constraints["mass"], inertia=None): #kg
     #1. Define Symbolic State
     # Pos: x, y, z 
     # Att: phi (roll), theta (pitch), psi (yaw)
@@ -41,6 +41,9 @@ def get_drone_dynamics(m = drone_constraints["mass"]): #kg
     Ix = 0.0081        # kg*m^2
     Iy = 0.0081        # kg*m^2
     Iz = 0.0142        # kg*m^2
+    # inertia=None keeps the values above; pass (Ix, Iy, Iz) in kg*m^2 to model another airframe
+    if inertia is not None:
+        Ix, Iy, Iz = inertia
 
     #4. Non-linear Differential Equations (f(x, u))
     #Attitude Kinematics (Body rates p,q,r to Euler rate changes)

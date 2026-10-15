@@ -41,6 +41,8 @@ and a PID baseline speaking the same command interface as the future policy
 | `race_env.py` | done, untrained | batched torch `RaceEnv` + SB3 `RaceVecEnv`, shared `build_obs`, `CoursePool` |
 | `train.py` | done, untrained | PPO + VecNormalize CLI, checkpoints, periodic eval on the fixed tracks |
 | `rl_policy.py` | done | `RlPolicyController`: trained policy behind the PID's controller interface |
+| `mpc_controller.py` | done | `MpcController`: Antek's NMPC + Trajectory/ min-snap planner on QuadSim, wrench command (`step_wrench`) |
+| `compare.py` | done | PID vs MPC vs RL table + plot |
 | `test_*.py` | done | plain-function tests, no pytest (`test_race_env.py` ~10 s incl. a smoke training run) |
 
 ## Running
@@ -134,11 +136,10 @@ baseline to beat, not a tuned racer.
 4. Vision noise model from `vision/gate_error_eval/runs/*/gate_errors.csv`,
    injected into the gate observations.
 
-## Caveat before any MPC comparison
+## Caveat before any MPC comparison (resolved, see "Three-way comparison")
 
-Antek's `control/` model uses z-DOWN equations while its race sim treats z as
-height, and uses m = 1 kg (not the Iris's 1.5 kg). Reconcile frames and
-parameters (ideally via `QuadParams`) before comparing lap times.
+The z-down issue is already fixed in `control/` (z-up now). Mass is passed via
+`m=params.mass`; inertia via the new optional `inertia=` keyword.
 
 ## Training results so far (2026-10-15, Iris params, no noise)
 
@@ -165,3 +166,67 @@ alone has not fixed it. Next ideas:
 - reward passing near the gate centre;
 - start from a slower policy;
 - a curriculum on the jitter.
+
+## Three-way comparison (PID vs NMPC vs RL), 2026-10-15
+
+```
+cd rl
+/usr/local/bin/python3.12 compare.py --model runs/best [--tracks straight3 oval6 slalom5] \
+    [--mpc-vmax 4 8] [--mpc-amax 6] [--envs 16] [--mpc-envs 4] [--out runs/compare]
+/usr/local/bin/python3.12 fly_course.py --track tracks/oval6.json --controller mpc [--mpc-vmax 4 --mpc-amax 6]
+/usr/local/bin/python3.12 test_mpc_controller.py     # ~1 min (flies the real NMPC on straight3)
+```
+Writes `results.csv`, `results.md`, `comparison.png` (paths + speed per track). The full run
+with `--mpc-vmax 4 8` takes ~50 min, nearly all of it the MPC.
+
+How the MPC is wired: `Course` gates -> `gate_path.Gate` -> `plan_gate_trajectory`
+(min-snap, from `course.start_pose()`) -> `TrajectoryReference` -> `create_drone_mpc_optimizer`
+(N=10, dt=0.02) solved each step like `Drone_Race_Simulation` (warm start, fall back to the last
+IPOPT iterate), output = collective thrust + body torque, flown through `QuadSim.step_wrench`
+(mixer + rotors, no rate loop). Only change in `control/`: optional `inertia=None` keyword on
+`get_drone_dynamics` / `create_drone_mpc_optimizer` (default unchanged; we pass the Iris inertia).
+The reference is time-parametrised (t = step * dt) and the measured yaw is unwrapped to the 2 pi
+branch nearest the reference psi.
+
+Caveats:
+- All three controllers get the TRUE state (no EKF, no vision noise): isolates control only.
+- Different command levels: PID/RL send thrust + body rates (QuadSim's rate loop is underneath),
+  the MPC sends thrust + torques. The MPC's model has no drag and no mixer clipping.
+- PID is capped at 4 m/s, RL is not, the MPC follows a plan limited by `--mpc-vmax/--mpc-amax`.
+  The plan is ACCELERATION-limited here: with the default a_max = 6 the plan peaks at ~3.7 m/s,
+  so `--mpc-vmax 8` alone changes nothing on straight3/oval6 (identical rows below). Raise
+  `--mpc-amax` too (second table).
+- MPC compute is ~100 ms per solve (max ~270 ms) on an M-series CPU vs the 20 ms control period:
+  it is NOT real-time as built (IPOPT via CasADi Opti, max 50 iterations). Fine in sim
+  (time is simulated), not for deployment. Per-env solves are sequential.
+- Noisy-start robustness: start_noise 0.3, seed 0, 16 envs (PID/RL) vs 4 envs (MPC): the MPC
+  percentages have a coarse 25% granularity. Min margin = distance from the crossing point to the
+  opening edge (>= 0.30 m needed to pass; 0.75 m = dead centre).
+
+Results (`--mpc-vmax 4 8`, a_max 6, 2026-10-15, RL = `runs/best`):
+
+| Track | Controller | Done | Lap [s] | Gates | Crash | Vmax [m/s] | Vmean [m/s] | Min margin [m] | Ctrl ms mean/max | Solver fails | Noisy-start completion |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| straight3 | PID | yes | 8.24 | 3/3 | - | 3.95 | 2.43 | 0.73 | 0.28 / 0.6 | - | 100% (16 envs) |
+| straight3 | MPC v4 | yes | 9.56 | 3/3 | - | 3.29 | 2.10 | 0.71 | 103.21 / 263.2 | 0 | 100% (4 envs) |
+| straight3 | MPC v8 | yes | 9.56 | 3/3 | - | 3.29 | 2.10 | 0.71 | 104.43 / 276.2 | 0 | 100% (4 envs) |
+| straight3 | RL | yes | 3.06 | 3/3 | - | 8.89 | 6.55 | 0.55 | 0.32 / 0.6 | - | 100% (16 envs) |
+| oval6 | PID | yes | 18.70 | 6/6 | - | 3.93 | 2.56 | 0.68 | 0.29 / 0.3 | - | 100% (16 envs) |
+| oval6 | MPC v4 | yes | 22.68 | 6/6 | - | 3.35 | 2.19 | 0.61 | 104.56 / 258.1 | 0 | 100% (4 envs) |
+| oval6 | MPC v8 | yes | 22.68 | 6/6 | - | 3.35 | 2.19 | 0.61 | 104.61 / 248.3 | 0 | 100% (4 envs) |
+| oval6 | RL | yes | 7.46 | 6/6 | - | 9.86 | 6.62 | 0.31 | 0.33 / 0.8 | - | 94% (16 envs) |
+| slalom5 | PID | yes | 18.88 | 5/5 | - | 3.94 | 2.80 | 0.68 | 0.29 / 0.4 | - | 100% (16 envs) |
+| slalom5 | MPC v4 | yes | 28.46 | 5/5 | - | 3.73 | 1.95 | 0.62 | 107.25 / 250.2 | 0 | 100% (4 envs) |
+| slalom5 | MPC v8 | yes | 24.64 | 5/5 | - | 4.30 | 2.23 | 0.55 | 104.84 / 260.8 | 0 | 100% (4 envs) |
+| slalom5 | RL | no | - | 2/5 | gate | 10.95 | 7.08 | 0.28 | 0.33 / 0.8 | - | 0% (16 envs) |
+
+Higher MPC limits (`--mpc-vmax 8 --mpc-amax 15 --mpc-envs 2`, tracks straight3 / oval6):
+
+| Track | Controller | Done | Lap [s] | Gates | Crash | Vmax [m/s] | Vmean [m/s] | Min margin [m] | Ctrl ms mean/max | Solver fails | Noisy-start completion |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| straight3 | PID | yes | 8.24 | 3/3 | - | 3.95 | 2.43 | 0.73 | 0.30 / 0.6 | - | 100% (16 envs) |
+| straight3 | MPC v8 | yes | 6.08 | 3/3 | - | 5.42 | 3.30 | 0.64 | 104.51 / 257.9 | 0 | 100% (2 envs) |
+| straight3 | RL | yes | 3.06 | 3/3 | - | 8.89 | 6.55 | 0.55 | 0.32 / 0.8 | - | 100% (16 envs) |
+| oval6 | PID | yes | 18.70 | 6/6 | - | 3.93 | 2.56 | 0.68 | 0.29 / 0.6 | - | 100% (16 envs) |
+| oval6 | MPC v8 | yes | 14.38 | 6/6 | - | 5.32 | 3.41 | 0.31 | 105.13 / 263.5 | 0 | 100% (2 envs) |
+| oval6 | RL | yes | 7.46 | 6/6 | - | 9.86 | 6.62 | 0.31 | 0.34 / 0.6 | - | 94% (16 envs) |

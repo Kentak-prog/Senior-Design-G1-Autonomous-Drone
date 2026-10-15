@@ -219,3 +219,18 @@ class QuadSim:
             torque = self.rate_ctrl(self.omega, body_rate_ref, dt)
             f = self.mix(thrust_total_N, torque)
             self.step_rotor_speeds(self.thrust_to_rotor_speed(f), dt)
+
+    def step_wrench(self, thrust_total_N: torch.Tensor, torque_body: torch.Tensor):
+        """Advance one CONTROL step (control_dt) with collective thrust [N] and
+        body torque [N m] (N,3) held constant (zero-order hold). The rate
+        loop is bypassed: the wrench goes straight through the mixer and motors
+        at physics_dt. This is the interface of a torque-level controller such
+        as the NMPC in control/, which replaces the rate loop."""
+        p = self.p
+        n_sub = max(1, int(round(p.control_dt / p.physics_dt)))
+        dt = p.control_dt / n_sub
+        thrust_total_N = thrust_total_N.reshape(-1).to(self.dtype)
+        torque_body = torque_body.to(self.dtype)
+        w_ref = self.thrust_to_rotor_speed(self.mix(thrust_total_N, torque_body))
+        for _ in range(n_sub):
+            self.step_rotor_speeds(w_ref, dt)
