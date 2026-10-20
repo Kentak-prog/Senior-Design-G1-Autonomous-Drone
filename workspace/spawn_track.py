@@ -3,7 +3,8 @@ Spawns a whole race track (rl/tracks/*.json) in Isaac Sim as solid-magenta gates
 and writes /workspace/track_gates.json so the vision tools can read the ground
 truth later.
 
-RUN (Isaac Sim Script Editor, after spawn_example.py; the drone may be anywhere):
+RUN (Isaac Sim Script Editor, after spawn_example.py; the drone may be anywhere),
+either set TRACK below and Run this file, or in a separate tab:
     import os; os.environ["SPAWN_TRACK"] = "straight3"
     exec(open("/workspace/scripts/spawn_track.py").read())
 SPAWN_TRACK is a path to a track json, or a bare name resolved to
@@ -40,6 +41,11 @@ import importlib.util
 import json
 import os
 import sys
+
+# Opened and Run directly in the Script Editor (no exec one-liner)? Type the
+# track name here instead, e.g. TRACK = "straight3". SPAWN_TRACK wins if set.
+# (2026-10-20: running the file directly left SPAWN_TRACK unset -> FATAL.)
+TRACK = ""
 
 TRACK_ROOT = "/World/RaceTrack"
 MANIFEST_PATH = "/workspace/track_gates.json"
@@ -106,10 +112,12 @@ def build_manifest(course_dict, specs, yaw_convention):
 
 
 def main():
-    value = os.environ.pop("SPAWN_TRACK", None)
+    value = os.environ.pop("SPAWN_TRACK", None) or TRACK
     if not value:
-        msg = ("[spawn_track] FATAL: SPAWN_TRACK is not set. Run "
-               "os.environ['SPAWN_TRACK'] = 'straight3' (or a path) first.")
+        msg = ("[spawn_track] FATAL: no track given. Either set TRACK = 'straight3' at the top "
+               "of this file, or run in a Script Editor tab: import os; "
+               "os.environ['SPAWN_TRACK'] = 'straight3'; "
+               "exec(open('/workspace/scripts/spawn_track.py').read())")
         print(msg)
         raise RuntimeError(msg)
     sgt = load_spawn_test_gates()
