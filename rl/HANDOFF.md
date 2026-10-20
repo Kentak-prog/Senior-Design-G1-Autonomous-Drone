@@ -43,6 +43,7 @@ and a PID baseline speaking the same command interface as the future policy
 | `rl_policy.py` | done | `RlPolicyController`: trained policy behind the PID's controller interface |
 | `mpc_controller.py` | done | `MpcController`: Antek's NMPC + Trajectory/ min-snap planner on QuadSim, wrench command (`step_wrench`) |
 | `compare.py` | done | PID vs MPC vs RL table + plot |
+| `isaac/` | Phase 1 written, **not yet run against the live sim** | fly PID / RL on PX4 in Isaac Sim over MAVLink (CTBR via `SET_ATTITUDE_TARGET`), offline `SimVehicle`, calibration CLI, `workspace/spawn_track.py`; see `isaac/README.md` |
 | `test_*.py` | done | plain-function tests, no pytest (`test_race_env.py` ~10 s incl. a smoke training run) |
 
 ## Running
