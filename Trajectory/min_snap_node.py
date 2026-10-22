@@ -3,16 +3,21 @@
 ROS 2 node for min-snap trajectory generation.
 
 Input:
-  configurable gate pose topic (default: /iris_0/front_cam/gate_poses)
-  /isaac/odometry (optional, used to set start pose)
+  /gate_poses        geometry_msgs/PoseArray
 
 Output:
   /min_snap/trajectory  custom message: drone_msgs/MinSnapTrajectory
+
+This wraps the repo's trajectory generator:
+  - gate_path.plan_gate_trajectory(...)
+  - trajectory_reference.TrajectoryReference(...)
+
+It does NOT change the trajectory math.
 """
 
 import os
 import sys
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 import numpy as np
 
@@ -29,44 +34,24 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import PoseArray
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Pose
 
-try:
-    from drone_msgs.msg import MinSnapPoint, MinSnapTrajectory
-except Exception:
-    class MinSnapPoint:
-        pass
-
-    class MinSnapTrajectory:
-        pass
+from drone_msgs.msg import MinSnapPoint, MinSnapTrajectory
 
 
 def quat_to_yaw(x: float, y: float, z: float, w: float) -> float:
-    norm = np.linalg.norm([x, y, z, w])
-    if norm < 1e-9:
-        return 0.0
-    x, y, z, w = x / norm, y / norm, z / norm, w / norm
     return np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
 def pose_array_to_gate_poses(msg: PoseArray) -> List[Dict[str, Any]]:
-    gates: List[Dict[str, Any]] = []
-
+    gates = []
     for i, pose in enumerate(msg.poses):
-        # Some vision packets may have identity orientation if normal is unreliable
-        if pose is None:
-            continue
-
-        try:
-            yaw = quat_to_yaw(
-                pose.orientation.x,
-                pose.orientation.y,
-                pose.orientation.z,
-                pose.orientation.w,
-            )
-        except Exception:
-            yaw = 0.0
-
+        yaw = quat_to_yaw(
+            pose.orientation.x,
+            pose.orientation.y,
+            pose.orientation.z,
+            pose.orientation.w,
+        )
         gates.append({
             "name": f"gate_{i}",
             "x": float(pose.position.x),
@@ -75,7 +60,6 @@ def pose_array_to_gate_poses(msg: PoseArray) -> List[Dict[str, Any]]:
             "yaw": yaw,
             "side": 1.5,
         })
-
     return gates
 
 
@@ -108,36 +92,21 @@ class MinSnapRosNode(Node):
             durability=DurabilityPolicy.VOLATILE,
         )
 
-        self.gate_topic = os.environ.get("GATE_POSE_TOPIC", "/iris_0/front_cam/gate_poses")
-        self.create_subscription(PoseArray, self.gate_topic, self.gate_cb, qos)
-
-        # Use odometry for the current drone pose; this is far better than zeros.
-        self.create_subscription(Odometry, "/isaac/odometry", self.odom_cb, qos)
+        # Default vision topic from ros_camera.py
+        self.create_subscription(PoseArray, "/iris_0/front_cam/gate_poses", self.gate_cb, qos)
 
         self.pub = self.create_publisher(MinSnapTrajectory, "/min_snap/trajectory", 10)
         self.timer = self.create_timer(0.05, self.publish_trajectory)
 
-        self.start_pose = np.zeros(3, dtype=float)
+        self.start_pose = np.zeros(3)
         self.latest_gate_poses: List[Dict[str, Any]] = []
-        self.last_gate_time = None
-
-    def odom_cb(self, msg: Odometry):
-        p = msg.pose.pose.position
-        self.start_pose = np.array([p.x, p.y, p.z], dtype=float)
 
     def gate_cb(self, msg: PoseArray):
         self.latest_gate_poses = pose_array_to_gate_poses(msg)
-        self.last_gate_time = self.get_clock().now().nanoseconds * 1e-9
 
     def publish_trajectory(self):
         if len(self.latest_gate_poses) == 0:
             return
-
-        # Prevent stale gate data from producing bad trajectories
-        if self.last_gate_time is not None:
-            now = self.get_clock().now().nanoseconds * 1e-9
-            if now - self.last_gate_time > 0.5:
-                return
 
         gates = [gate_dict_to_gate(g) for g in self.latest_gate_poses]
         start = self.start_pose.copy()
@@ -164,7 +133,6 @@ class MinSnapRosNode(Node):
 
             ts = np.arange(0.0, ref.duration + 1e-9, 0.05)
             points = []
-
             for t in ts:
                 s = ref.reference_state(float(t))
                 p = MinSnapPoint()
