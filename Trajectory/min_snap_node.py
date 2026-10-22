@@ -99,7 +99,7 @@ class MinSnapRosNode(Node):
             durability=DurabilityPolicy.VOLATILE,
         )
 
-        self.create_subscription(PoseArray, "/gate_poses", self.gate_cb, qos)
+        self.create_subscription(PoseArray, "/iris_0/front_cam/gate_poses", self.gate_cb, qos)
 
         self.pub = self.create_publisher(MinSnapTrajectory, "/min_snap/trajectory", 10)
         self.timer = self.create_timer(0.05, self.publish_trajectory)
