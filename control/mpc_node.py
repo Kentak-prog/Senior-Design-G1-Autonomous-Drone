@@ -3,11 +3,11 @@
 MPC bridge node.
 
 Input topics:
-  /isaac/odometry   nav_msgs/Odometry
-  /min_snap/trajectory  custom message from min_snap node
+  /isaac/odometry         nav_msgs/Odometry
+  /min_snap/trajectory     custom message from min_snap node
 
 Output:
-  /mpc/command      geometry_msgs/Twist
+  /mpc/command            geometry_msgs/Twist
 
 Uses the repo's existing optimizer:
   control/MPC_Optimizer.py
@@ -34,16 +34,24 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
-from geometry_msgs.msg import PoseArray
 
 try:
     from drone_msgs.msg import MinSnapPoint, MinSnapTrajectory
 except Exception:
-    class MinSnapPoint: pass
-    class MinSnapTrajectory: pass
+    class MinSnapPoint:
+        pass
+
+    class MinSnapTrajectory:
+        pass
+
 
 def quat_to_yaw(x: float, y: float, z: float, w: float) -> float:
+    norm = np.linalg.norm([x, y, z, w])
+    if norm < 1e-9:
+        return 0.0
+    x, y, z, w = x / norm, y / norm, z / norm, w / norm
     return np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+
 
 class IsaacMpcBridge(Node):
     def __init__(self):
@@ -55,6 +63,7 @@ class IsaacMpcBridge(Node):
 
         self.state = np.zeros((12, 1), dtype=float)
         self.min_snap_points: List[Dict[str, float]] = []
+        self.last_min_snap_time = None
 
         self.opti, self.X, self.U, self.X_init, self.U_prev, self.X_ref = create_drone_mpc_optimizer(
             N=self.N, dt=self.dt, m=self.mass
@@ -75,33 +84,64 @@ class IsaacMpcBridge(Node):
         self.control_timer = self.create_timer(0.02, self.control_loop)
 
     def odom_cb(self, msg: Odometry):
-        pos = np.array([msg.pose.pose.position.x, msg.pose.pose.position.y, msg.pose.pose.position.z], dtype=float)
-        vel = np.array([msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z], dtype=float)
-        ang = np.array([msg.twist.twist.angular.x, msg.twist.twist.angular.y, msg.twist.twist.angular.z], dtype=float)
+        pos = np.array([
+            msg.pose.pose.position.x,
+            msg.pose.pose.position.y,
+            msg.pose.pose.position.z
+        ], dtype=float)
+
+        vel = np.array([
+            msg.twist.twist.linear.x,
+            msg.twist.twist.linear.y,
+            msg.twist.twist.linear.z
+        ], dtype=float)
+
+        ang = np.array([
+            msg.twist.twist.angular.x,
+            msg.twist.twist.angular.y,
+            msg.twist.twist.angular.z
+        ], dtype=float)
 
         q = msg.pose.pose.orientation
         yaw = quat_to_yaw(q.x, q.y, q.z, q.w)
 
         self.state = np.array([
-            [pos[0]], [pos[1]], [pos[2]],
-            [0.0], [0.0], [yaw],
-            [vel[0]], [vel[1]], [vel[2]],
-            [ang[0]], [ang[1]], [ang[2]],
+            [pos[0]],
+            [pos[1]],
+            [pos[2]],
+            [0.0],
+            [0.0],
+            [yaw],
+            [vel[0]],
+            [vel[1]],
+            [vel[2]],
+            [ang[0]],
+            [ang[1]],
+            [ang[2]],
         ], dtype=float)
 
     def min_snap_cb(self, msg):
+        if msg is None or not hasattr(msg, "points"):
+            self.min_snap_points = []
+            return
+
         self.min_snap_points = []
         for p in msg.points:
-            self.min_snap_points.append({
-                "t": float(p.t),
-                "x": float(p.x),
-                "y": float(p.y),
-                "z": float(p.z),
-                "vx": float(p.vx),
-                "vy": float(p.vy),
-                "vz": float(p.vz),
-                "yaw": float(p.yaw),
-            })
+            try:
+                self.min_snap_points.append({
+                    "t": float(p.t),
+                    "x": float(p.x),
+                    "y": float(p.y),
+                    "z": float(p.z),
+                    "vx": float(p.vx),
+                    "vy": float(p.vy),
+                    "vz": float(p.vz),
+                    "yaw": float(p.yaw),
+                })
+            except Exception:
+                continue
+
+        self.last_min_snap_time = self.get_clock().now().nanoseconds * 1e-9
 
     def _reference_from_min_snap(self, t0: float) -> Optional[np.ndarray]:
         if len(self.min_snap_points) < 2:
@@ -123,7 +163,7 @@ class IsaacMpcBridge(Node):
             vx = np.interp(t, times, pts[:, 4])
             vy = np.interp(t, times, pts[:, 5])
             vz = np.interp(t, times, pts[:, 6])
-            yaw = np.interp(t, times, pts[:, 7], period=2*np.pi)
+            yaw = np.interp(t, times, pts[:, 7], period=2 * np.pi)
 
             ref[0, k] = x
             ref[1, k] = y
@@ -144,6 +184,13 @@ class IsaacMpcBridge(Node):
         return ref
 
     def build_reference_horizon(self, t0: float) -> np.ndarray:
+        # If min-snap is stale or empty, hover at the current state.
+        if self.last_min_snap_time is not None:
+            now = self.get_clock().now().nanoseconds * 1e-9
+            if now - self.last_min_snap_time > 0.5:
+                self.min_snap_points = []
+                self.last_min_snap_time = None
+
         if len(self.min_snap_points) >= 2:
             ref = self._reference_from_min_snap(t0)
             if ref is not None:
@@ -162,7 +209,7 @@ class IsaacMpcBridge(Node):
 
             try:
                 self.opti.set_initial(self.X, np.tile(self.state, (1, self.N + 1)))
-                self.opti.set_initial(self.U, np.tile(np.array([[0.0],[0.0],[0.0],[0.0]]), (1, self.N)))
+                self.opti.set_initial(self.U, np.tile(np.array([[0.0], [0.0], [0.0], [0.0]]), (1, self.N)))
             except Exception:
                 pass
 
@@ -171,7 +218,13 @@ class IsaacMpcBridge(Node):
             u0 = np.asarray(U_sol[:, 0]).reshape(4, 1)
 
         except Exception:
-            u0 = np.array([[self.mass * 9.81], [0.0], [0.0], [0.0]])
+            # Graceful fallback: small hover thrust + zero lateral/heading commands
+            u0 = np.array([
+                [self.mass * 9.81],
+                [0.0],
+                [0.0],
+                [0.0],
+            ], dtype=float)
 
         cmd = Twist()
         cmd.linear.x = float(u0[0, 0] / 10.0)
@@ -181,12 +234,14 @@ class IsaacMpcBridge(Node):
 
         self.cmd_pub.publish(cmd)
 
+
 def main():
     rclpy.init()
     node = IsaacMpcBridge()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()
