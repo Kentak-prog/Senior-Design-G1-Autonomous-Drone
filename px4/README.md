@@ -55,6 +55,29 @@ container: it has numpy and OpenCV, and sees the repo on `/workspace`.
    - `summary.json`: status, gate passes of the flown path, tracking error.
    - `test_gates.json`: a copy of the manifest that was flown.
 
+## Sim slower than real time: `--time-scale`
+
+The first cluster run (2026-10-23, 15:07) aborted 2.2 s into the trajectory
+with 1.52 m tracking error, for two reasons:
+
+- **Isaac ran at 0.42x real time.** The drone covered only 0.42 of the
+  distance its own reported velocity implies.
+- **Everything else used the wall clock.** PX4 lockstep is off in
+  `spawn_example.py`, so PX4 and this script run on wall time, and the
+  setpoints outran the drone.
+
+`--time-scale S` advances the trajectory at S x wall time, so the setpoints
+move at the sim's pace. Every run prints the measured sim speed and, if it
+differs, the value to use next:
+
+```
+[flight] measured sim speed: 0.42x real time (this run used --time-scale 1)
+[flight] -> next run: --time-scale 0.42
+```
+
+The ratio depends on Isaac's frame rate (~28 FPS that day), so re-measure it
+whenever the scene or the rendering load changes.
+
 ## Defaults and safety
 
 - **Speed limits:** `--v-max 2 --a-max 2` makes a slow, ~17 s run for the

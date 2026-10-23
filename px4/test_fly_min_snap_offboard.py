@@ -61,7 +61,7 @@ class FakePX4:
     target_component = 1
 
     def __init__(self, start_enu=START_ENU, heading_enu_deg=HEADING_ENU_DEG, gain=4.0,
-                 freeze_after=None, mode_switch_after=None, other_component=False):
+                 freeze_after=None, mode_switch_after=None, other_component=False, rtf=1.0):
         self.now = 1000.0
         self.pos = fms.enu_to_ned(start_enu)
         self.vel = np.zeros(3)
@@ -75,6 +75,10 @@ class FakePX4:
         self.freeze_after = freeze_after          # vehicle stops responding N s after OFFBOARD
         self.mode_switch_after = mode_switch_after  # "pilot" switches to POSCTL N s after OFFBOARD
         self.other_component = other_component      # also emit a non-autopilot heartbeat (mode 0, disarmed)
+        # Sim speed vs the wall clock. Velocity is reported in sim units but the
+        # position only advances rtf x as fast per wall second (Isaac at 0.42x,
+        # PX4 lockstep off, 2026-10-23).
+        self.rtf = rtf
         self.loiter_commands = 0
         self.offboard_commands = 0
         self.queue = []
@@ -106,7 +110,7 @@ class FakePX4:
             self.yaw = yaw
         else:
             self.vel = np.zeros(3)
-        self.pos = self.pos + self.vel * h
+        self.pos = self.pos + self.vel * h * self.rtf
 
     # pymavlink master API ----------------------------------------------
     def recv_match(self, blocking=False):
@@ -281,6 +285,41 @@ def test_ignores_other_components_heartbeats():
     assert rc == 0 and s["status"] == "completed" and s["gates_passed"], (s["status"], log[-500:])
     assert "armed=True" in log
     print("  non-autopilot heartbeats interleaved: still armed, completes  OK")
+
+
+def test_slow_sim_reproduces_the_abort():
+    # 2026-10-23 cluster run: sim at 0.42x real time, setpoints on the wall
+    # clock -> tracking error 1.52 m at t=2.24 s -> abort. gain 1.0 ~ PX4's
+    # MPC_XY_P (0.95); the default fake gain of 4 catches up and hides it.
+    fake = FakePX4(rtf=0.42, gain=1.0)
+    (rc, out_dir), log = _quiet(_fly, fake)
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 1 and s["status"].startswith("aborted: tracking error"), s["status"]
+    assert abs(s["sim_speed_ratio"] - 0.42) < 0.05, s["sim_speed_ratio"]
+    assert "--time-scale 0.4" in log
+    print(f"  sim at 0.42x, no time scale -> '{s['status'][:30]}...', measured ratio "
+          f"{s['sim_speed_ratio']:.2f}, suggests --time-scale  OK")
+
+
+def test_time_scale_matches_slow_sim():
+    fake = FakePX4(rtf=0.42, gain=1.0)
+    (rc, out_dir), _ = _quiet(_fly, fake, extra=("--yes", "--time-scale", "0.42"))
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 0 and s["status"] == "completed" and s["gates_passed"], s
+    assert s["err_max_m"] < 0.5 and abs(s["sim_speed_ratio"] - 0.42) < 0.05, s
+    print(f"  sim at 0.42x with --time-scale 0.42 -> completed, all gates, err max {s['err_max_m']:.2f} m  OK")
+
+
+def test_sim_speed_ratio():
+    t = np.arange(0.0, 2.0, 0.02)
+    v = np.tile([1.0, 0.0, 0.5], (len(t), 1))
+    p = 0.42 * t[:, None] * v                    # covers 0.42x what the velocity implies
+    assert abs(fms.sim_speed_ratio(t, p, v) - 0.42) < 1e-6
+    assert abs(fms.sim_speed_ratio(t, t[:, None] * v, v) - 1.0) < 1e-6
+    assert fms.sim_speed_ratio(t, np.zeros_like(v), np.zeros_like(v)) is None   # hovering: no signal
+    print("  sim speed ratio: 0.42 / 1.0 / None when not moving  OK")
 
 
 def test_refuses_on_ground():

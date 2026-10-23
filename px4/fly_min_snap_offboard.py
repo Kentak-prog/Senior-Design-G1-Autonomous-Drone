@@ -21,6 +21,15 @@ WHAT IT DOES:
     setpoint/measurement log and a summary to --out-dir, and reports how the
     FLOWN path crossed each true gate.
 
+SIM SLOWER THAN REAL TIME (--time-scale): Pegasus runs with PX4 lockstep
+off, so PX4 and this script run on the wall clock while Isaac's physics may
+run slower. On 2026-10-23 it ran at 0.42x real time: streamed on the wall
+clock, the setpoint outran the drone and the run aborted at t=2.2 s with
+1.5 m error. --time-scale S advances the trajectory at S x wall time
+(velocity / acceleration feed-forward stay in sim units, which is what PX4
+measures). After every run the measured sim speed ratio is printed; use it
+as --time-scale for the next run.
+
 ABORTS (hold the measured position briefly, then AUTO.LOITER): tracking
 error above --max-error, PX4 leaving OFFBOARD (e.g. someone switched mode),
 no LOCAL_POSITION_NED for --stale-s, or Ctrl-C.
@@ -169,12 +178,33 @@ def tracking_error(meas_enu, sp_enu) -> float:
     return float(np.linalg.norm(np.asarray(meas_enu, dtype=float) - np.asarray(sp_enu, dtype=float)))
 
 
+def sim_speed_ratio(t_wall, pos_enu, vel_enu, min_path_m: float = 0.3):
+    """
+    How fast the simulation runs relative to the wall clock: the distance the
+    drone actually covered per wall second, divided by the distance its
+    reported velocity (sim units) implies. 1.0 = real time. None if the drone
+    barely moved (not enough signal).
+    """
+    t = np.asarray(t_wall, dtype=float)
+    p = np.asarray(pos_enu, dtype=float)
+    v = np.asarray(vel_enu, dtype=float)
+    if len(t) < 3:
+        return None
+    implied = np.sum(0.5 * (v[1:] + v[:-1]) * np.diff(t)[:, None], axis=0)
+    observed = p[-1] - p[0]
+    n = float(np.linalg.norm(implied))
+    if n < min_path_m:
+        return None
+    return float(np.dot(observed, implied) / n ** 2)
+
+
 def flight_summary(rows, gates):
-    """Gate passes and tracking error of the logged 'trajectory' phase."""
+    """Gate passes, tracking error and sim speed ratio of the logged 'trajectory' phase."""
     traj_rows = [r for r in rows if r["phase"] == "trajectory" and r["x"] is not None]
     if len(traj_rows) < 2:
         return {"gates_passed": False, "crossings": ["no trajectory samples logged"],
-                "err_mean_m": None, "err_max_m": None, "samples": len(traj_rows)}
+                "err_mean_m": None, "err_max_m": None, "samples": len(traj_rows),
+                "sim_speed_ratio": None}
     t = np.array([r["t"] for r in traj_rows])
     pos = np.array([[r["x"], r["y"], r["z"]] for r in traj_rows])
     vel = np.array([[r["vx"], r["vy"], r["vz"]] for r in traj_rows])
@@ -182,7 +212,8 @@ def flight_summary(rows, gates):
     err = np.linalg.norm(pos - sp, axis=1)
     ok, lines = crossing_report(t, pos, vel, gates)
     return {"gates_passed": bool(ok), "crossings": lines, "err_mean_m": float(err.mean()),
-            "err_max_m": float(err.max()), "samples": len(traj_rows)}
+            "err_max_m": float(err.max()), "samples": len(traj_rows),
+            "sim_speed_ratio": sim_speed_ratio(t, pos, vel)}
 
 
 def write_plan_csv(path, setpoints: Setpoints, dt: float = 0.02):
@@ -256,9 +287,11 @@ class OffboardRun:
     """
 
     def __init__(self, link: PX4Link, setpoints: Setpoints, rate_hz=50.0, hover_s=3.0,
-                 max_error=1.5, stale_s=0.5, clock=time.monotonic, sleep=time.sleep, out=print):
+                 max_error=1.5, stale_s=0.5, time_scale=1.0, clock=time.monotonic, sleep=time.sleep,
+                 out=print):
         self.v = link
         self.sp = setpoints
+        self.time_scale = time_scale    # trajectory seconds per wall second (sim speed)
         self.dt = 1.0 / rate_hz
         self.hover_s = hover_s
         self.max_error = max_error
@@ -353,13 +386,16 @@ class OffboardRun:
             if reason:
                 return self._abort(reason)
 
-            self.out(f"flying the min-snap trajectory ({self.sp.duration:.2f} s) ...")
+            wall_s = self.sp.duration / self.time_scale
+            self.out(f"flying the min-snap trajectory ({self.sp.duration:.2f} s of trajectory time, "
+                     f"time scale {self.time_scale:g} -> {wall_s:.1f} s wall) ...")
 
             def follow(t):
-                s = self.sp.at(t)
+                # Position advances at the sim's pace; vel/acc feed-forward stay in sim units.
+                s = self.sp.at(self.time_scale * t)
                 return s["pos_enu"], s["vel_enu"], s["acc_enu"], s["yaw_enu"], TYPE_MASK_POS_VEL_ACC_YAW
 
-            _, reason = self._stream("trajectory", self.sp.duration, follow, check=self._trajectory_check)
+            _, reason = self._stream("trajectory", wall_s, follow, check=self._trajectory_check)
             if reason:
                 return self._abort(reason)
 
@@ -481,12 +517,13 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
 
     # ---- fly ----
     if not args.yes:
-        reply = ask(f"Fly this {traj.duration:.1f} s trajectory in OFFBOARD? [y/N] ").strip().lower()
+        reply = ask(f"Fly this {traj.duration:.1f} s trajectory in OFFBOARD (time scale {args.time_scale:g}, "
+                    f"~{traj.duration / args.time_scale:.0f} s wall)? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
             print("not flying.")
             return 0
     runner = OffboardRun(link, sp, rate_hz=args.rate, hover_s=args.hover_s, max_error=args.max_error,
-                         stale_s=args.stale_s, clock=clock, sleep=sleep)
+                         stale_s=args.stale_s, time_scale=args.time_scale, clock=clock, sleep=sleep)
     status = runner.execute()
     print(f"\n[flight] {status}")
 
@@ -495,7 +532,8 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
     summary.update({"status": status, "start_enu": start_enu.tolist(),
                     "heading_enu_deg": math.degrees(heading_enu), "plan_duration_s": traj.duration,
                     "plan_peak_speed": v_pk, "plan_peak_accel": a_pk,
-                    "v_max": args.v_max, "a_max": args.a_max, "rate_hz": args.rate})
+                    "v_max": args.v_max, "a_max": args.a_max, "rate_hz": args.rate,
+                    "time_scale": args.time_scale})
     with open(os.path.join(args.out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print("[flight] FLOWN path vs TRUE gates:")
@@ -503,6 +541,12 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
         print("  " + line)
     if summary["err_mean_m"] is not None:
         print(f"[flight] tracking error mean {summary['err_mean_m']:.3f} m, max {summary['err_max_m']:.3f} m")
+    ratio = summary["sim_speed_ratio"]
+    if ratio is not None:
+        print(f"[flight] measured sim speed: {ratio:.2f}x real time (this run used --time-scale "
+              f"{args.time_scale:g})")
+        if abs(ratio - args.time_scale) > 0.1 * max(ratio, 1e-6):
+            print(f"[flight] -> next run: --time-scale {ratio:.2f}")
     print(f"[flight] {'ALL GATES PASSED' if summary['gates_passed'] else 'NOT ALL GATES PASSED'}; "
           f"log in {args.out_dir}")
     return 0 if status == "completed" else 1
@@ -515,6 +559,9 @@ def build_parser():
     ap.add_argument("--v-max", type=float, default=2.0, help="planner speed limit, m/s (default 2)")
     ap.add_argument("--a-max", type=float, default=2.0, help="planner accel limit, m/s^2 (default 2)")
     ap.add_argument("--rate", type=float, default=50.0, help="setpoint rate, Hz (default 50)")
+    ap.add_argument("--time-scale", type=float, default=1.0,
+                    help="trajectory seconds per wall second = the sim's speed vs real time "
+                         "(measured 0.42 on 2026-10-23; each run prints the measured value)")
     ap.add_argument("--hover-s", type=float, default=3.0, help="hover before and after, s (default 3)")
     ap.add_argument("--max-error", type=float, default=1.5,
                     help="abort if the drone is this far from the setpoint, m (default 1.5)")
@@ -534,8 +581,8 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
-    if args.v_max <= 0 or args.a_max <= 0 or args.rate <= 0:
-        sys.exit("--v-max, --a-max and --rate must be positive")
+    if args.v_max <= 0 or args.a_max <= 0 or args.rate <= 0 or not 0 < args.time_scale <= 2:
+        sys.exit("--v-max, --a-max and --rate must be positive; --time-scale in (0, 2]")
     args.out_dir = args.out_dir or default_out_dir()
     sys.exit(run(args))
 
