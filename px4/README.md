@@ -78,6 +78,36 @@ differs, the value to use next:
 The ratio depends on Isaac's frame rate (~28 FPS that day), so re-measure it
 whenever the scene or the rendering load changes.
 
+## Starting from the spawn pose: `--reposition`
+
+The script plans from wherever the drone is. After an abort, PX4's loiter
+can leave it far from the start. After the 2026-10-23 aborts it was 1.35 m
+in front of gate_0, and the plan from there crept through gate_0 at 0.12 m/s.
+
+`--reposition` flies the drone back to where it hovered when the gates were
+spawned, then flies the course from there:
+
+1. **Find the start.** It's recovered from the manifest's `camera_pose_usd`
+   through the static camera mount. On the cluster manifest it agreed with
+   Isaac's `/World/Iris/body` to within 4 cm.
+2. **Check the path.** The straight line from the live pose to the start is
+   checked against every gate's four frame bars. It refuses before touching
+   OFFBOARD if the line comes within `--reposition-clearance` (default 0.6 m).
+3. **Enter OFFBOARD where the drone is.** Holding at the distant start
+   instead would make PX4 jump straight at it.
+4. **Fly back.** It moves in a straight line at `--reposition-speed` (default
+   0.5 m/s in sim units, scaled by `--time-scale`), turning to the start
+   heading on the way.
+5. **Settle.** It waits until the drone is within 0.15 m and slower than
+   0.2 m/s (up to 20 s), then does the normal hover and the course.
+
+The course is planned from the start pose and shown before you confirm.
+All the usual aborts apply during the move.
+
+```
+python3 px4/fly_min_snap_offboard.py --time-scale 0.44 --reposition
+```
+
 ## Defaults and safety
 
 - **Speed limits:** `--v-max 2 --a-max 2` makes a slow, ~17 s run for the

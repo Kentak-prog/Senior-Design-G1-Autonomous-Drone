@@ -27,10 +27,23 @@ GATES_3 = {
         {"name": "gate_1", "x": 8.6018, "y": -3.2453, "z": 3.6556, "yaw_deg": -22.091, "side": 1.5},
         {"name": "gate_2", "x": 13.0455, "y": -2.0747, "z": 3.7681, "yaw_deg": -7.091, "side": 1.5},
     ],
-    "camera_pose_usd": {"position": [0.2585, -0.0359, 2.6123]},
 }
 START_ENU = np.array([-0.0469, -0.0367, 2.5484])
 HEADING_ENU_DEG = -7.24
+# Where the last two cluster aborts left the drone: 1.35 m in front of gate_0.
+DRIFTED_ENU = np.array([3.814, 0.376, 3.216])
+DRIFTED_HEADING_DEG = 6.4
+
+
+def _camera_pose_for(body_enu, heading_deg):
+    """camera_pose_usd as spawn_test_gates.py writes it, for a level drone at body_enu."""
+    h = math.radians(heading_deg)
+    Rz = np.array([[math.cos(h), -math.sin(h), 0.0], [math.sin(h), math.cos(h), 0.0], [0.0, 0.0, 1.0]])
+    T = fms.make_transform(Rz, body_enu) @ fms.T_body_cam_usd_from_mount()
+    return {"position": T[:3, 3].tolist(), "R_world_cam_usd": T[:3, :3].tolist()}
+
+
+GATES_3["camera_pose_usd"] = _camera_pose_for(START_ENU, HEADING_ENU_DEG)
 
 OFFBOARD = fms.PX4_MAIN_OFFBOARD
 POSCTL = 3
@@ -134,6 +147,8 @@ class FakePX4:
         assert frame == fms.MAV_FRAME_LOCAL_NED
         v_ff = np.zeros(3) if mask & fms.IGN_VX else np.array([vx, vy, vz])
         self.sp = (np.array([x, y, z]), v_ff, yaw)
+        if not self.sp_times:
+            self.sp_first_pos = np.array([x, y, z])
         self.sp_times.append(self.now)
 
     def command_long_send(self, ts, tc, cmd, conf, p1, p2, p3, *rest):
@@ -320,6 +335,101 @@ def test_sim_speed_ratio():
     assert abs(fms.sim_speed_ratio(t, t[:, None] * v, v) - 1.0) < 1e-6
     assert fms.sim_speed_ratio(t, np.zeros_like(v), np.zeros_like(v)) is None   # hovering: no signal
     print("  sim speed ratio: 0.42 / 1.0 / None when not moving  OK")
+
+
+def test_spawn_body_pose_round_trip():
+    pos, yaw = fms.spawn_body_pose(GATES_3)
+    assert np.allclose(pos, START_ENU, atol=1e-9) and abs(math.degrees(yaw) - HEADING_ENU_DEG) < 1e-9
+    try:
+        fms.spawn_body_pose({"gates": [], "camera_pose_usd": {"position": [0, 0, 1]}})
+        raise AssertionError("expected ValueError without R_world_cam_usd")
+    except ValueError:
+        pass
+    print("  spawn hover pose recovered from camera_pose_usd through the mount  OK")
+
+
+def test_straight_move():
+    a, b = np.array([0.0, 0.0, 1.0]), np.array([4.0, 0.0, 1.0])
+    m0 = fms.straight_move(a, b, 0.0, 0.0, 0.5, 0.0)
+    assert np.allclose(m0["pos"], a) and np.allclose(m0["vel"], [0.5, 0, 0]) and m0["duration"] == 8.0
+    m1 = fms.straight_move(a, b, math.radians(170), math.radians(-170), 0.5, 4.0)
+    assert np.allclose(m1["pos"], [2.0, 0, 1]) and abs(abs(math.degrees(m1["yaw"])) - 180.0) < 1e-6
+    m2 = fms.straight_move(a, b, 0.0, 1.0, 0.5, 99.0)
+    assert np.allclose(m2["pos"], b) and np.allclose(m2["vel"], 0.0) and m2["done"] and m2["yaw"] == 1.0
+    print("  straight move: constant speed, short-way yaw (170 -> -170 via 180), holds the end  OK")
+
+
+def _gates3():
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "g.json")
+    with open(path, "w") as f:
+        json.dump(GATES_3, f)
+    return fms.gates_from_manifest(path)
+
+
+def test_path_frame_clearance():
+    gates = _gates3()
+    c_back = dict(fms.path_frame_clearance(DRIFTED_ENU, START_ENU, gates))
+    assert c_back["gate_0"] > 1.2, c_back                     # in front of gate_0, flying away from it
+    g0 = gates[0]
+    behind = g0.center + 1.5 * g0.normal
+    through = dict(fms.path_frame_clearance(behind, g0.center - 1.5 * g0.normal, gates))
+    assert abs(through["gate_0"] - 0.75) < 0.02, through        # dead centre of a 1.5 m opening
+    near_bar = g0.center + 1.8 * g0.normal + 0.7 * g0.x_axis
+    clip = dict(fms.path_frame_clearance(near_bar, near_bar - 3.6 * g0.normal, gates))
+    assert clip["gate_0"] < 0.1, clip                          # 5 cm inside the frame edge
+    print(f"  frame clearance: back to start {c_back['gate_0']:.2f} m, through the centre 0.75 m, "
+          f"grazing a bar {clip['gate_0']:.2f} m  OK")
+
+
+def test_reposition_then_fly_from_drifted_pose():
+    fake = FakePX4(start_enu=DRIFTED_ENU, heading_enu_deg=DRIFTED_HEADING_DEG)
+    drifted_ned = fake.pos.copy()
+    (rc, out_dir), log = _quiet(_fly, fake, extra=("--yes", "--reposition"))
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 0 and s["status"] == "completed" and s["gates_passed"], (s, log[-800:])
+    assert abs(s["reposition_m"] - np.linalg.norm(DRIFTED_ENU - START_ENU)) < 1e-6
+    assert np.allclose(s["start_enu"], START_ENU, atol=1e-9)
+    # entering OFFBOARD held the drone where it was (no jump towards the start)
+    assert np.allclose(fake.sp_first_pos, drifted_ned, atol=1e-6), fake.sp_first_pos
+    with open(os.path.join(out_dir, "flight_log.csv")) as f:
+        phases = [line.split(",")[0] for line in f.readlines()[1:]]
+    assert phases.index("reposition") < phases.index("settle") < phases.index("hover") < phases.index("trajectory")
+    print(f"  drifted 1.35 m before gate_0 -> hold, reposition {s['reposition_m']:.2f} m, settle, "
+          f"fly: all gates, err max {s['err_max_m']:.2f} m  OK")
+
+
+def test_reposition_with_slow_sim():
+    fake = FakePX4(start_enu=DRIFTED_ENU, heading_enu_deg=DRIFTED_HEADING_DEG, rtf=0.44, gain=1.0)
+    (rc, out_dir), log = _quiet(_fly, fake, extra=("--yes", "--reposition", "--time-scale", "0.44"))
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 0 and s["status"] == "completed" and s["gates_passed"], (s["status"], log[-800:])
+    print(f"  same at 0.44x sim with --time-scale 0.44 -> completed, err max {s['err_max_m']:.2f} m  OK")
+
+
+def test_reposition_refuses_path_through_a_bar():
+    g0 = _gates3()[0]
+    start = g0.center + 1.8 * g0.normal + 0.7 * g0.x_axis     # behind gate_0, lined up with a bar
+    fake = FakePX4(start_enu=start, heading_enu_deg=HEADING_ENU_DEG)
+    (rc, _), log = _quiet(_fly, fake, extra=("--yes", "--reposition"))
+    assert rc == 2 and "REFUSING: the reposition path passes" in log and fake.offboard_commands == 0, log[-600:]
+    print("  reposition path grazing gate_0's frame -> refused before OFFBOARD  OK")
+
+
+def test_reposition_needs_camera_pose():
+    fake = FakePX4(start_enu=DRIFTED_ENU)
+    tmp = tempfile.mkdtemp()
+    path = os.path.join(tmp, "test_gates.json")
+    with open(path, "w") as f:
+        json.dump({"gates": GATES_3["gates"]}, f)
+    args = fms.build_parser().parse_args(["--gates", path, "--out-dir", os.path.join(tmp, "run"),
+                                          "--yes", "--reposition"])
+    rc, log = _quiet(fms.run, args, link=fms.PX4Link(fake, clock=fake.clock), clock=fake.clock,
+                     sleep=fake.sleep)
+    assert rc == 2 and "REFUSING --reposition" in log and fake.offboard_commands == 0
+    print("  --reposition without camera_pose_usd in the manifest -> refused  OK")
 
 
 def test_refuses_on_ground():

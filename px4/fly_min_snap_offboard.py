@@ -75,10 +75,12 @@ for _sub in ("vision", os.path.join("vision", "gate_error_eval"), "Trajectory", 
 
 from fly_gate_approach import (Vehicle, enu_to_ned, ned_to_enu,       # noqa: E402
                                MAV_FRAME_LOCAL_NED, MSG_ID_ATTITUDE, MSG_ID_LOCAL_POSITION_NED,
-                               PX4_MAIN_OFFBOARD, MAV_MODE_FLAG_SAFETY_ARMED,
+                               PX4_MAIN_OFFBOARD, MAV_MODE_FLAG_SAFETY_ARMED, TYPE_MASK_POS_VEL_YAW,
                                IGN_VX, IGN_VY, IGN_VZ, IGN_AX, IGN_AY, IGN_AZ, IGN_YAW_RATE)
 from gate_path import gates_from_manifest, plan_gate_trajectory, gate_crossings   # noqa: E402
 from trajectory_reference import TrajectoryReference                               # noqa: E402
+from eval_isaac_gates import T_body_cam_usd_from_mount                            # noqa: E402
+from camera import invert_transform, make_transform                               # noqa: E402
 
 # SET_POSITION_TARGET_LOCAL_NED type_mask (a SET bit means IGNORE that field).
 # Position + velocity + acceleration feed-forward + yaw; bit 512 (force) is
@@ -110,6 +112,64 @@ def yaw_enu_to_ned(yaw_enu: float) -> float:
 def yaw_ned_to_enu(yaw_ned: float) -> float:
     """PX4 yaw (rad CW from north) -> ENU yaw (rad CCW from east). Same formula: it is an involution."""
     return wrap_pi(math.pi / 2.0 - yaw_ned)
+
+
+def spawn_body_pose(manifest_raw: dict):
+    """
+    (position ENU, heading ENU rad) of the drone body when the gates were
+    spawned, recovered from the manifest's camera_pose_usd through the static
+    camera mount (the inverse of what spawn_test_gates.py / simulate_min_snap
+    do going body -> camera). Raises ValueError if the manifest lacks the
+    camera pose.
+    """
+    cam = manifest_raw.get("camera_pose_usd") if isinstance(manifest_raw, dict) else None
+    if not cam or "position" not in cam or "R_world_cam_usd" not in cam:
+        raise ValueError("manifest has no camera_pose_usd position + R_world_cam_usd "
+                         "(re-run spawn_test_gates.py)")
+    T_world_cam = make_transform(np.asarray(cam["R_world_cam_usd"], dtype=float).reshape(3, 3),
+                                 np.asarray(cam["position"], dtype=float))
+    T_world_body = T_world_cam @ invert_transform(T_body_cam_usd_from_mount())
+    R = T_world_body[:3, :3]
+    return T_world_body[:3, 3].copy(), math.atan2(R[1, 0], R[0, 0])
+
+
+def _segment_distance(p0, p1, q0, q1, n: int = 200) -> float:
+    """Min distance between segments p0-p1 and q0-q1 (dense sampling; plenty
+    for a clearance check at metre scale)."""
+    s = np.linspace(0.0, 1.0, n)[:, None]
+    P = p0 + s * (p1 - p0)
+    Q = q0 + s * (q1 - q0)
+    return float(np.min(np.linalg.norm(P[:, None, :] - Q[None, :, :], axis=2)))
+
+
+def path_frame_clearance(a_enu, b_enu, gates):
+    """Per gate: closest approach (m) of the straight path a->b to any of the
+    gate's four frame bars. Passing through an opening is fine; a bar is not."""
+    a = np.asarray(a_enu, dtype=float)
+    b = np.asarray(b_enu, dtype=float)
+    out = []
+    for g in gates:
+        c = g.corners()
+        d = min(_segment_distance(a, b, c[i], c[(i + 1) % 4]) for i in range(4))
+        out.append((g.name, d))
+    return out
+
+
+def straight_move(a_enu, b_enu, yaw_a: float, yaw_b: float, speed: float, t: float) -> dict:
+    """
+    Straight-line move a->b at constant `speed` (sim units), yaw turning the
+    short way from yaw_a to yaw_b in step with the distance covered. Past the
+    end it holds b with zero velocity.
+    """
+    a = np.asarray(a_enu, dtype=float)
+    b = np.asarray(b_enu, dtype=float)
+    dist = float(np.linalg.norm(b - a))
+    duration = dist / speed if speed > 0 else 0.0
+    frac = 1.0 if duration <= 0 else float(np.clip(t / duration, 0.0, 1.0))
+    done = frac >= 1.0
+    vel = np.zeros(3) if done or dist == 0 else speed * (b - a) / dist
+    yaw = wrap_pi(yaw_a + frac * wrap_pi(yaw_b - yaw_a))
+    return {"pos": a + frac * (b - a), "vel": vel, "yaw": yaw, "done": done, "duration": duration}
 
 
 def plan_course(gates, start_enu, heading_enu: float, v_max: float, a_max: float, verbose: bool = False):
@@ -287,11 +347,16 @@ class OffboardRun:
     """
 
     def __init__(self, link: PX4Link, setpoints: Setpoints, rate_hz=50.0, hover_s=3.0,
-                 max_error=1.5, stale_s=0.5, time_scale=1.0, clock=time.monotonic, sleep=time.sleep,
-                 out=print):
+                 max_error=1.5, stale_s=0.5, time_scale=1.0, reposition_speed=None,
+                 settle_tol=0.15, settle_timeout=20.0, clock=time.monotonic, sleep=time.sleep, out=print):
         self.v = link
         self.sp = setpoints
         self.time_scale = time_scale    # trajectory seconds per wall second (sim speed)
+        # Not None -> fly straight to the trajectory start (sp.at(0)) at this
+        # speed (sim units) before the hover, instead of assuming the drone is there.
+        self.reposition_speed = reposition_speed
+        self.settle_tol = settle_tol
+        self.settle_timeout = settle_timeout
         self.dt = 1.0 / rate_hz
         self.hover_s = hover_s
         self.max_error = max_error
@@ -350,10 +415,9 @@ class OffboardRun:
         return lambda t: (pos_enu, zero, zero, yaw_enu, TYPE_MASK_HOLD)
 
     # -- sequence --------------------------------------------------------
-    def enter_offboard(self, attempts=5) -> bool:
-        start = self.sp.at(0.0)
-        hold = self._hold(start["pos_enu"], start["yaw_enu"])
-        self.out("streaming hover setpoints at the trajectory start ...")
+    def enter_offboard(self, hold_pos_enu, hold_yaw_enu, attempts=5) -> bool:
+        hold = self._hold(hold_pos_enu, hold_yaw_enu)
+        self.out(f"streaming hover setpoints at ENU {np.round(hold_pos_enu, 2)} ...")
         self._stream("pre_offboard", 1.5, hold)
         for _ in range(attempts):
             self.v.set_offboard()
@@ -373,12 +437,63 @@ class OffboardRun:
             return f"tracking error {err:.2f} m > --max-error {self.max_error} m at t={t:.2f}s"
         return None
 
+    def reposition(self, from_pos_enu, from_yaw_enu):
+        """Straight line from the current pose to the trajectory start, then
+        wait until settled there. Returns an abort reason or None."""
+        start = self.sp.at(0.0)
+        move = straight_move(from_pos_enu, start["pos_enu"], from_yaw_enu, start["yaw_enu"],
+                             self.reposition_speed, 0.0)
+        wall_s = move["duration"] / self.time_scale
+        self.out(f"repositioning {np.linalg.norm(start['pos_enu'] - from_pos_enu):.2f} m to the start "
+                 f"ENU {np.round(start['pos_enu'], 2)} at {self.reposition_speed} m/s "
+                 f"(~{wall_s:.0f} s wall) ...")
+        zero = np.zeros(3)
+
+        def go(t):
+            m = straight_move(from_pos_enu, start["pos_enu"], from_yaw_enu, start["yaw_enu"],
+                              self.reposition_speed, self.time_scale * t)
+            return m["pos"], m["vel"], zero, m["yaw"], TYPE_MASK_POS_VEL_YAW
+
+        _, reason = self._stream("reposition", wall_s, go, check=self._trajectory_check)
+        if reason:
+            return f"{reason} (while repositioning)"
+
+        def settled():
+            pos, vel, _ = self._measured()
+            return (pos is not None and tracking_error(pos, start["pos_enu"]) < self.settle_tol
+                    and float(np.linalg.norm(vel)) < 0.2)
+
+        t, reason = self._stream("settle", self.settle_timeout,
+                                 self._hold(start["pos_enu"], start["yaw_enu"]), until=settled,
+                                 check=lambda t, p: (None if self.v.main_mode == PX4_MAIN_OFFBOARD
+                                                     else "PX4 left OFFBOARD while settling"))
+        if reason:
+            return reason
+        if not settled():
+            pos, _, _ = self._measured()
+            return (f"did not settle within {self.settle_tol} m of the start in {self.settle_timeout:.0f} s "
+                    f"(still {tracking_error(pos, start['pos_enu']):.2f} m away)")
+        self.out(f"at the start after {t:.1f} s settling")
+        return None
+
     def execute(self) -> str:
         try:
-            if not self.enter_offboard():
+            start = self.sp.at(0.0)
+            if self.reposition_speed is not None:
+                # Hold where the drone IS while switching to OFFBOARD: holding
+                # the (distant) start would make PX4 jump straight at it.
+                self.v.poll()
+                here, _, here_yaw = self._measured()
+                hold_pos, hold_yaw = here, (here_yaw if here_yaw is not None else start["yaw_enu"])
+            else:
+                hold_pos, hold_yaw = start["pos_enu"], start["yaw_enu"]
+            if not self.enter_offboard(hold_pos, hold_yaw):
                 self.status = "aborted: PX4 did not enter OFFBOARD"
                 return self.status
-            start = self.sp.at(0.0)
+            if self.reposition_speed is not None:
+                reason = self.reposition(hold_pos, hold_yaw)
+                if reason:
+                    return self._abort(reason)
             self.out(f"OFFBOARD. hovering at the start {self.hover_s:.1f} s ...")
             _, reason = self._stream("hover", self.hover_s, self._hold(start["pos_enu"], start["yaw_enu"]),
                                      check=lambda t, p: (None if self.v.main_mode == PX4_MAIN_OFFBOARD
@@ -463,21 +578,16 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
     gates = gates_from_manifest(args.gates)
     print(f"[gates] {len(gates)} true gates from {args.gates}")
 
-    # ---- start pose ----
-    if args.plan_only:
-        if args.start is None or args.heading is None:
-            print("--plan-only needs --start X Y Z and --heading DEG (ENU)")
-            return 2
-        start_enu = np.array(args.start, dtype=float)
-        heading_enu = math.radians(args.heading)
-    else:
+    # ---- live pose ----
+    live_enu = None
+    if not args.plan_only:
         link = link or connect(args.connection, clock=clock)
         if not wait_for_pose(link, clock=clock, sleep=sleep):
             print("no LOCAL_POSITION_NED / ATTITUDE / autopilot HEARTBEAT within 10 s; aborting")
             return 1
-        start_enu = ned_to_enu(link.pos_ned)
-        heading_enu = yaw_ned_to_enu(link.yaw)
-        print(f"[start] live pose ENU {np.round(start_enu, 3)}, heading {math.degrees(heading_enu):+.1f} deg "
+        live_enu = ned_to_enu(link.pos_ned)
+        live_heading = yaw_ned_to_enu(link.yaw)
+        print(f"[start] live pose ENU {np.round(live_enu, 3)}, heading {math.degrees(live_heading):+.1f} deg "
               f"(PX4 NED {np.round(link.pos_ned, 3)}, yaw {math.degrees(link.yaw):+.1f} deg), "
               f"armed={link.armed}, main mode {link.main_mode}")
         if not link.armed:
@@ -487,6 +597,38 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
             print(f"REFUSING: not airborne (altitude {-link.pos_ned[2]:.2f} m < {args.min_alt} m). "
                   f"Hover first, e.g. `commander takeoff` at the pxh> prompt.")
             return 1
+
+    # ---- start pose: the spawn hover pose (--reposition), --start, or where the drone is ----
+    reposition_m = None
+    if args.reposition:
+        try:
+            start_enu, heading_enu = spawn_body_pose(manifest_raw)
+        except ValueError as e:
+            print(f"REFUSING --reposition: {e}")
+            return 2
+        print(f"[reposition] start = spawn hover pose ENU {np.round(start_enu, 3)}, "
+              f"heading {math.degrees(heading_enu):+.1f} deg")
+        if live_enu is not None:
+            reposition_m = float(np.linalg.norm(start_enu - live_enu))
+            clearance = path_frame_clearance(live_enu, start_enu, gates)
+            print(f"[reposition] straight path {reposition_m:.2f} m from the live pose; "
+                  f"closest approach to each gate frame:")
+            for name, d in clearance:
+                print(f"  {name}: {d:.2f} m")
+            worst = min(clearance, key=lambda c: c[1])
+            if worst[1] < args.reposition_clearance:
+                print(f"REFUSING: the reposition path passes {worst[1]:.2f} m from {worst[0]}'s frame "
+                      f"(< --reposition-clearance {args.reposition_clearance} m). Move the drone clear "
+                      f"of the gates first.")
+                return 2
+    elif args.plan_only:
+        if args.start is None or args.heading is None:
+            print("--plan-only needs --start X Y Z and --heading DEG (ENU), or --reposition")
+            return 2
+        start_enu = np.array(args.start, dtype=float)
+        heading_enu = math.radians(args.heading)
+    else:
+        start_enu, heading_enu = live_enu, live_heading
     cam = manifest_raw.get("camera_pose_usd", {}) if isinstance(manifest_raw, dict) else {}
     if cam.get("position") is not None:
         drift = float(np.linalg.norm(np.asarray(cam["position"])[:2] - start_enu[:2]))
@@ -517,13 +659,18 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
 
     # ---- fly ----
     if not args.yes:
-        reply = ask(f"Fly this {traj.duration:.1f} s trajectory in OFFBOARD (time scale {args.time_scale:g}, "
-                    f"~{traj.duration / args.time_scale:.0f} s wall)? [y/N] ").strip().lower()
+        what = (f"this {traj.duration:.1f} s trajectory in OFFBOARD (time scale {args.time_scale:g}, "
+                f"~{traj.duration / args.time_scale:.0f} s wall)")
+        if reposition_m is not None:
+            what = f"{reposition_m:.1f} m back to the start at {args.reposition_speed} m/s, then {what}"
+        reply = ask(f"Fly {what}? [y/N] ").strip().lower()
         if reply not in ("y", "yes"):
             print("not flying.")
             return 0
     runner = OffboardRun(link, sp, rate_hz=args.rate, hover_s=args.hover_s, max_error=args.max_error,
-                         stale_s=args.stale_s, time_scale=args.time_scale, clock=clock, sleep=sleep)
+                         stale_s=args.stale_s, time_scale=args.time_scale,
+                         reposition_speed=args.reposition_speed if args.reposition else None,
+                         clock=clock, sleep=sleep)
     status = runner.execute()
     print(f"\n[flight] {status}")
 
@@ -533,7 +680,7 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
                     "heading_enu_deg": math.degrees(heading_enu), "plan_duration_s": traj.duration,
                     "plan_peak_speed": v_pk, "plan_peak_accel": a_pk,
                     "v_max": args.v_max, "a_max": args.a_max, "rate_hz": args.rate,
-                    "time_scale": args.time_scale})
+                    "time_scale": args.time_scale, "reposition_m": reposition_m})
     with open(os.path.join(args.out_dir, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print("[flight] FLOWN path vs TRUE gates:")
@@ -567,6 +714,13 @@ def build_parser():
                     help="abort if the drone is this far from the setpoint, m (default 1.5)")
     ap.add_argument("--stale-s", type=float, default=0.5,
                     help="abort if no position for this long, s (default 0.5)")
+    ap.add_argument("--reposition", action="store_true",
+                    help="start from the spawn hover pose (from the manifest's camera pose): fly there in a "
+                         "straight line in OFFBOARD first, then fly the course")
+    ap.add_argument("--reposition-speed", type=float, default=0.5,
+                    help="reposition speed, m/s in sim units (scaled by --time-scale; default 0.5)")
+    ap.add_argument("--reposition-clearance", type=float, default=0.6,
+                    help="refuse if the reposition path passes this close to a gate frame bar, m (default 0.6)")
     ap.add_argument("--min-alt", type=float, default=1.0, help="refuse below this altitude, m (default 1)")
     ap.add_argument("--max-start-drift", type=float, default=1.5,
                     help="warn if the drone is this far from the spawn-time camera, m (default 1.5)")
@@ -581,8 +735,9 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
-    if args.v_max <= 0 or args.a_max <= 0 or args.rate <= 0 or not 0 < args.time_scale <= 2:
-        sys.exit("--v-max, --a-max and --rate must be positive; --time-scale in (0, 2]")
+    if (args.v_max <= 0 or args.a_max <= 0 or args.rate <= 0 or not 0 < args.time_scale <= 2
+            or not 0 < args.reposition_speed <= 2):
+        sys.exit("--v-max, --a-max and --rate must be positive; --time-scale and --reposition-speed in (0, 2]")
     args.out_dir = args.out_dir or default_out_dir()
     sys.exit(run(args))
 
