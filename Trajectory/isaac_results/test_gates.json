@@ -1,0 +1,18 @@
+{
+  "source": "Transcribed from /workspace/test_gates.json in the isaac-sim pod (spawn_test_gates.py run at 13:37:05 on 2026-10-23, drone hovering under PX4). Values rounded to 4 decimals (yaw to 3) when printed from the Isaac Script Editor.",
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "gates": [
+    {"name": "gate_0", "x": 6.1754, "y": 0.5371, "z": 3.3225, "yaw_deg": 11.814, "side": 1.5},
+    {"name": "gate_1", "x": 7.1262, "y": -4.074, "z": 3.3192, "yaw_deg": -8.186, "side": 1.5},
+    {"name": "gate_2", "x": 8.9408, "y": -2.494, "z": 6.9074, "yaw_deg": -18.186, "side": 1.5},
+    {"name": "gate_3", "x": 9.2954, "y": -6.197, "z": 7.5479, "yaw_deg": -8.186, "side": 1.5},
+    {"name": "gate_4", "x": 12.481, "y": 2.8528, "z": 8.7669, "yaw_deg": 1.814, "side": 1.5}
+  ],
+  "camera_pose_usd": {"position": [0.2468, -0.0522, 2.6118]},
+  "drone_body_pose": {
+    "position": [-0.0314, -0.021, 2.577],
+    "body_x_axis_world": [0.9902, -0.1394, 0.0004],
+    "heading_deg": -8.01
+  },
+  "dropped": []
+}
