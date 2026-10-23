@@ -76,6 +76,8 @@ from trajectory_reference import TrajectoryReference                            
 # left clear so afx/afy/afz are accelerations.
 TYPE_MASK_POS_VEL_ACC_YAW = IGN_YAW_RATE                                         # = 2048
 TYPE_MASK_HOLD = IGN_VX | IGN_VY | IGN_VZ | IGN_AX | IGN_AY | IGN_AZ | IGN_YAW_RATE   # = 2552
+MAV_AUTOPILOT_PX4 = 12
+MAV_COMP_ID_AUTOPILOT1 = 1
 
 DEFAULT_MANIFEST = "/workspace/test_gates.json"
 LOG_FIELDS = ["phase", "t",
@@ -228,7 +230,13 @@ class PX4Link(Vehicle):
                 self.last_pos_time = self.clock()
             elif t == "ATTITUDE":
                 self.yaw = float(msg.yaw)
-            elif t == "HEARTBEAT" and msg.get_srcSystem() == self.m.target_system:
+            elif (t == "HEARTBEAT" and msg.get_srcSystem() == self.m.target_system
+                  and msg.autopilot == MAV_AUTOPILOT_PX4):
+                # Only the flight controller's heartbeat carries the real
+                # arm state and mode; other components of system 1 on this
+                # link (2026-10-23 dry run: the first heartbeat came from
+                # component 0) report their own, which would read as
+                # "PX4 left OFFBOARD".
                 self.armed = bool(msg.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
                 self.main_mode = (msg.custom_mode >> 16) & 0xFF
 
@@ -394,6 +402,9 @@ def connect(connection, clock=time.monotonic):
     print(f"waiting for heartbeat on {connection} ...")
     master.wait_heartbeat(timeout=30)
     print(f"heartbeat from system {master.target_system} component {master.target_component}")
+    if master.target_component != MAV_COMP_ID_AUTOPILOT1:
+        print(f"  (addressing commands to the autopilot, component {MAV_COMP_ID_AUTOPILOT1})")
+        master.target_component = MAV_COMP_ID_AUTOPILOT1
     link = PX4Link(master, clock=clock)
     link.request_interval(MSG_ID_LOCAL_POSITION_NED, 50)
     link.request_interval(MSG_ID_ATTITUDE, 50)
@@ -401,11 +412,13 @@ def connect(connection, clock=time.monotonic):
 
 
 def wait_for_pose(link, timeout=10.0, clock=time.monotonic, sleep=time.sleep):
+    """Wait for position, attitude AND an autopilot heartbeat (1 Hz, so the
+    arm state / mode are real before anything is reported or decided)."""
     deadline = clock() + timeout
-    while (link.pos_ned is None or link.yaw is None) and clock() < deadline:
+    while (link.pos_ned is None or link.yaw is None or link.main_mode is None) and clock() < deadline:
         link.poll()
         sleep(0.05)
-    return link.pos_ned is not None and link.yaw is not None
+    return link.pos_ned is not None and link.yaw is not None and link.main_mode is not None
 
 
 def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> int:
@@ -424,12 +437,16 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
     else:
         link = link or connect(args.connection, clock=clock)
         if not wait_for_pose(link, clock=clock, sleep=sleep):
-            print("no LOCAL_POSITION_NED / ATTITUDE within 10 s; aborting")
+            print("no LOCAL_POSITION_NED / ATTITUDE / autopilot HEARTBEAT within 10 s; aborting")
             return 1
         start_enu = ned_to_enu(link.pos_ned)
         heading_enu = yaw_ned_to_enu(link.yaw)
         print(f"[start] live pose ENU {np.round(start_enu, 3)}, heading {math.degrees(heading_enu):+.1f} deg "
-              f"(PX4 NED {np.round(link.pos_ned, 3)}, yaw {math.degrees(link.yaw):+.1f} deg), armed={link.armed}")
+              f"(PX4 NED {np.round(link.pos_ned, 3)}, yaw {math.degrees(link.yaw):+.1f} deg), "
+              f"armed={link.armed}, main mode {link.main_mode}")
+        if not link.armed:
+            print("REFUSING: PX4 reports the vehicle is not armed. Hover first, e.g. `commander takeoff`.")
+            return 1
         if link.pos_ned[2] > -args.min_alt:
             print(f"REFUSING: not airborne (altitude {-link.pos_ned[2]:.2f} m < {args.min_alt} m). "
                   f"Hover first, e.g. `commander takeoff` at the pxh> prompt.")

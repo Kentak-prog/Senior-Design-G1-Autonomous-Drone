@@ -61,7 +61,7 @@ class FakePX4:
     target_component = 1
 
     def __init__(self, start_enu=START_ENU, heading_enu_deg=HEADING_ENU_DEG, gain=4.0,
-                 freeze_after=None, mode_switch_after=None):
+                 freeze_after=None, mode_switch_after=None, other_component=False):
         self.now = 1000.0
         self.pos = fms.enu_to_ned(start_enu)
         self.vel = np.zeros(3)
@@ -74,6 +74,7 @@ class FakePX4:
         self.offboard_since = None
         self.freeze_after = freeze_after          # vehicle stops responding N s after OFFBOARD
         self.mode_switch_after = mode_switch_after  # "pilot" switches to POSCTL N s after OFFBOARD
+        self.other_component = other_component      # also emit a non-autopilot heartbeat (mode 0, disarmed)
         self.loiter_commands = 0
         self.offboard_commands = 0
         self.queue = []
@@ -116,8 +117,10 @@ class FakePX4:
                 self.queue.append(_Msg("ATTITUDE", yaw=self.yaw))
                 self.next_pos_msg = self.now + 0.02
             if self.now >= self.next_hb:
-                self.queue.append(_Msg("HEARTBEAT", base_mode=128 if self.armed else 0,
-                                       custom_mode=self.mode << 16))
+                self.queue.append(_Msg("HEARTBEAT", autopilot=fms.MAV_AUTOPILOT_PX4,
+                                       base_mode=128 if self.armed else 0, custom_mode=self.mode << 16))
+                if self.other_component:   # after PX4's, so it is the one a naive reader keeps
+                    self.queue.append(_Msg("HEARTBEAT", autopilot=8, base_mode=0, custom_mode=0))
                 self.next_hb = self.now + 0.5
         return self.queue.pop(0) if self.queue else None
 
@@ -267,11 +270,24 @@ def test_abort_when_px4_leaves_offboard():
     print("  mode switched away mid-flight -> abort + LOITER  OK")
 
 
+def test_ignores_other_components_heartbeats():
+    # 2026-10-23 dry run: the first heartbeat on 14540 came from component 0.
+    # A non-autopilot heartbeat (mode 0, disarmed) interleaved with PX4's must
+    # not read as "not armed" or "PX4 left OFFBOARD".
+    fake = FakePX4(other_component=True)
+    (rc, out_dir), log = _quiet(_fly, fake)
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 0 and s["status"] == "completed" and s["gates_passed"], (s["status"], log[-500:])
+    assert "armed=True" in log
+    print("  non-autopilot heartbeats interleaved: still armed, completes  OK")
+
+
 def test_refuses_on_ground():
     fake = FakePX4(start_enu=np.array([0.0, 0.0, 0.1]))
     (rc, _), log = _quiet(_fly, fake)
-    assert rc == 1 and "not airborne" in log and fake.offboard_commands == 0
-    print("  refuses when not airborne (no OFFBOARD request)  OK")
+    assert rc == 1 and "REFUSING" in log and fake.offboard_commands == 0
+    print("  refuses when disarmed on the ground (no OFFBOARD request)  OK")
 
 
 def test_declining_does_not_fly():
