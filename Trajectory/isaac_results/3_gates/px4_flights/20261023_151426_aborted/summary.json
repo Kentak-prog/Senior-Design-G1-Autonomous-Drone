@@ -1,0 +1,26 @@
+{
+  "gates_passed": false,
+  "crossings": [
+    "gate_0: MISSED",
+    "gate_1: MISSED",
+    "gate_2: MISSED"
+  ],
+  "err_mean_m": 0.4700649828589381,
+  "err_max_m": 1.5050128013288049,
+  "samples": 92,
+  "sim_speed_ratio": 0.43908049117921333,
+  "status": "aborted: tracking error 1.51 m > --max-error 1.5 m at t=1.82s",
+  "start_enu": [
+    1.944260835647583,
+    0.12369667738676071,
+    2.8830413818359375
+  ],
+  "heading_enu_deg": 1.4481546939154462,
+  "plan_duration_s": 16.857706100072473,
+  "plan_peak_speed": 1.8739982387185228,
+  "plan_peak_accel": 2.0000127242333345,
+  "v_max": 2.0,
+  "a_max": 2.0,
+  "rate_hz": 50.0,
+  "time_scale": 1.0
+}

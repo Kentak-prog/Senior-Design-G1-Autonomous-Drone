@@ -1,0 +1,47 @@
+[start] body at [-0.03 -0.02  2.58], heading -8.0 deg; camera at [ 0.27 -0.06  2.63]
+[gates] 5 gates from C:/Users/aaron/Downloads/racing_drone/isaac results/test_gates.json
+  gate_0: center [6.18 0.54 3.32]  flight heading +11.8 deg
+  gate_1: center [ 7.13 -4.07  3.32]  flight heading -8.2 deg
+  gate_2: center [ 8.94 -2.49  6.91]  flight heading -18.2 deg
+  gate_3: center [ 9.3  -6.2   7.55]  flight heading -8.2 deg
+  gate_4: center [12.48  2.85  8.77]  flight heading +1.8 deg
+
+[vision] synthetic detections (1280x720, 60 deg hFOV, corner noise 0.5 px):
+  gate_0: range  5.98 m  pos err 0.004 m  normal err  0.9 deg  (bootstrap std  0.6 deg, reliable)
+  gate_1: range  7.97 m  pos err 0.005 m  normal err  0.3 deg  (bootstrap std  0.4 deg, reliable)
+  gate_2: range  9.96 m  pos err 0.018 m  normal err  0.4 deg  (bootstrap std  0.6 deg, reliable)
+  gate_3: range 12.00 m  pos err 0.021 m  normal err  0.3 deg  (bootstrap std  0.5 deg, reliable)
+  gate_4: range 13.99 m  pos err 0.014 m  normal err  0.5 deg  (bootstrap std  0.8 deg, reliable)
+
+[plan] 16 waypoints, 15 segments, duration 20.59 s, peak speed 3.79 m/s, peak accel 6.00 m/s^2
+[plan] reference attitude: max |roll| 32.5 deg, max |pitch| 26.8 deg, thrust 7.20-13.92 N
+[plan] saved NMPC reference to C:/Users/aaron/Downloads/racing_drone/isaac results/synthetic_perception\min_snap_reference.csv
+
+[plan] planned trajectory vs TRUE gates:
+  gate_0: t= 3.22s  offset=(+0.00, +0.00) m  frame margin 0.75 m  angle  0.9 deg  speed 2.03 m/s
+  gate_1: t= 6.70s  offset=(-0.00, -0.00) m  frame margin 0.75 m  angle  0.3 deg  speed 2.23 m/s
+  gate_2: t= 9.83s  offset=(-0.00, +0.01) m  frame margin 0.74 m  angle  0.4 deg  speed 2.30 m/s
+  gate_3: t=12.73s  offset=(+0.01, -0.01) m  frame margin 0.74 m  angle  0.3 deg  speed 2.25 m/s
+  gate_4: t=18.53s  offset=(-0.00, -0.00) m  frame margin 0.75 m  angle  0.5 deg  speed 2.73 m/s
+
+[sim] flying with NMPC (N=10, dt=0.02s, mass 1.0 kg, noise on) ...
+
+******************************************************************************
+This program contains Ipopt, a library for large-scale nonlinear optimization.
+ Ipopt is released as open source code under the Eclipse Public License (EPL).
+         For more information visit https://github.com/coin-or/Ipopt
+******************************************************************************
+
+[sim] done in 214.7 s wall time
+[sim] position tracking error: mean 0.282 m, max 0.661 m, final 0.366 m
+
+[sim] FLOWN path vs TRUE gates:
+  gate_0: t= 3.12s  offset=(+0.11, +0.03) m  frame margin 0.64 m  angle  6.5 deg  speed 2.69 m/s
+  gate_1: t= 6.70s  offset=(-0.02, -0.04) m  frame margin 0.71 m  angle  2.2 deg  speed 3.18 m/s
+  gate_2: t= 9.88s  offset=(+0.20, -0.06) m  frame margin 0.55 m  angle  8.6 deg  speed 2.20 m/s
+  gate_3: t=12.89s  offset=(-0.07, +0.04) m  frame margin 0.68 m  angle 20.1 deg  speed 2.82 m/s
+  gate_4: t=18.44s  offset=(-0.05, +0.01) m  frame margin 0.70 m  angle  8.7 deg  speed 2.11 m/s
+
+[result] ALL GATES PASSED
+
+Saved plot to C:/Users/aaron/Downloads/racing_drone/isaac results/synthetic_perception\min_snap_sim.png
