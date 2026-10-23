@@ -8,7 +8,7 @@
 
 # Drone mass -- the single place to change it. Used by the state equations,
 # the MPC cost/optimizer, the EKF, the race sim and the trajectory reference.
-m = 1.0 #kg
+m = 1.5 #kg
 
 drone_constraints = {
     # 0. Mass
