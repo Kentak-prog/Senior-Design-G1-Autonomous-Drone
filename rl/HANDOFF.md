@@ -137,6 +137,64 @@ baseline to beat, not a tuned racer.
 4. Vision noise model from `vision/gate_error_eval/runs/*/gate_errors.csv`,
    injected into the gate observations.
 
+## Next goal: fly an unseen course from vision (set 2026-10-24)
+
+**Goal.** Put the RL controller on a course it has never seen, have it find
+the gates with the CV module (`vision/`), and fly the course. No track file and
+no gate poses are given in advance.
+
+**When.** After the Isaac bridges work: PID, RL and MPC flown through PX4 in
+Isaac with ground-truth gates (`rl/isaac/`, Phases 1-4 of the Isaac test plan).
+This goal runs alongside improving the CV module, because the controller can
+only be as good as the gate detections it gets.
+
+**How it differs from today.**
+- Today the policy observes the current and next gate from the course file
+  (exact poses, never out of view; see "RL environment"). The goal needs gate
+  observations that come only from the camera. Gates are missing when out of
+  view, noisy when detected, and late by the vision pipeline's latency.
+- This replaces the 2026-10-20 plan of a rough prior map corrected by vision.
+  With no map, the drone has to find the next gate itself.
+
+**Open questions to settle first.**
+1. **Gate order.** How does the drone know which gate is next on an unseen
+   course? Options: the nearest gate ahead, gates numbered or coloured in
+   order, or a gate count given at the start.
+2. **No gate in view.** What should the drone do? Hover and yaw to search,
+   keep flying the last estimate, or follow a learned search behaviour.
+3. **Map or no map.** Is the policy's input the raw detections in camera or
+   body frame, or a gate map built on the fly from detections (memory of
+   gates already seen)?
+
+**Work this implies (RL).**
+- Observation built from detections, with a "gate visible / estimate age"
+  signal, through one shared function used by the env and the deployed
+  controller (as `build_obs` is today).
+- Training with a camera model in `race_env`: the real mount and FOV
+  (60 x 36 deg), detection range, noise and range bias fitted from the
+  gate-error CSVs, dropouts and latency.
+- Turn on the keep-gate-in-view reward (weight is 0 today). The vertical FOV is
+  narrow and the gates left the frame within ~1.5 s once the drone pitched.
+- Randomised courses with a held-out test set, as today, plus courses the
+  policy must search for.
+
+**Work this implies (CV).**
+- A live gate-pose node in Isaac: `vision/ros_camera_pose_fallback.py`
+  (2026-10-22) is the starting point. It needs `qos_profile_sensor_data` on
+  the pose subscription, the mount read from the stage rather than hard-coded,
+  and gates with an unreliable normal dropped rather than given a blank
+  orientation.
+- Accuracy and robustness: the ~1% range bias seen in the hover runs, motion
+  blur and pitch at racing speed, longer detection range, false positives,
+  and partially visible gates.
+- Measured latency and rate end to end (image -> gate pose), so training
+  models it.
+
+**Done when.** On a course not used in training and spawned fresh in Isaac,
+the RL controller, using only camera detections, passes every gate in order
+without hitting one, over repeated noisy starts. Report lap time and
+completion rate next to the same course flown with ground-truth gates.
+
 ## Caveat before any MPC comparison (resolved, see "Three-way comparison")
 
 The z-down issue is already fixed in `control/` (z-up now). Mass is passed via
