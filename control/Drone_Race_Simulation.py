@@ -29,7 +29,7 @@ from MPC_Optimizer import create_drone_mpc_optimizer
 from New_Drone_State_Equations import get_drone_dynamics
 from Runge_Kutta_4_Discretizer import get_rk4_discretizer
 from Kalman_Filter_MPC import DroneCasadiEKF12D
-from drone_constraints import drone_constraints
+from drone_constraints import drone_constraints, linear_drag as LINEAR_DRAG
 
 
 # ---------------------------------------------------------------------------
@@ -51,26 +51,48 @@ def track_position(t):
     return np.array([x, y, z])
 
 
-def reference_state(t, eps=1e-3):
-    """Full 12-state reference at time t: position, level attitude with
-    yaw pointed along the direction of travel, and velocity via finite
-    difference of the track position."""
+def reference_state(t, eps=1e-3, m=drone_constraints["mass"]):
+    """Full 12-state reference at time t: position, the roll/pitch needed to
+    fly the track, yaw pointed along the direction of travel, and velocity
+    via finite difference of the track position."""
     pos = track_position(t)
     pos_ahead = track_position(t + eps)
     vel = (pos_ahead - pos) / eps
+    acc = (pos_ahead - 2 * pos + track_position(t - eps)) / eps ** 2
     yaw = np.arctan2(vel[1], vel[0])
+
+    #fixed bug where the reference asked for level attitude (phi = theta = 0) everywhere, so the
+    # attitude weights in the cost fought the tilt the turns need and the drone lagged ~2 m behind.
+    # Differential flatness (same as Trajectory/trajectory_reference.py): the thrust must supply
+    # acc + g e_z plus the linear drag, so its direction fixes roll and pitch for this yaw.
+    # Drag is evaluated in the yaw-only frame, a good approximation at these tilts.
+    c, s = np.cos(yaw), np.sin(yaw)
+    v_yaw = np.array([c * vel[0] + s * vel[1], -s * vel[0] + c * vel[1], vel[2]])
+    drag_yaw = np.array([LINEAR_DRAG["x"], LINEAR_DRAG["y"], LINEAR_DRAG["z"]]) * v_yaw / m
+    f = acc + np.array([0.0, 0.0, 9.81]) + np.array([c * drag_yaw[0] - s * drag_yaw[1],
+                                                     s * drag_yaw[0] + c * drag_yaw[1], drag_yaw[2]])
+    b = f / np.linalg.norm(f)
+    bx, by, bz = c * b[0] + s * b[1], -s * b[0] + c * b[1], b[2]     # thrust direction, yaw frame
+    phi = np.arcsin(-by)
+    theta = np.arctan2(bx, bz)
     return np.array([
         pos[0], pos[1], pos[2],
-        0.0, 0.0, yaw,
+        phi, theta, yaw,
         vel[0], vel[1], vel[2],
         0.0, 0.0, 0.0
     ])
 
 
-def build_reference_horizon(t0, N, dt):
+def build_reference_horizon(t0, N, dt, yaw_now=None):
     ref = np.zeros((12, N + 1))
     for k in range(N + 1):
         ref[:, k] = reference_state(t0 + k * dt)
+    #fixed bug where the yaw reference jumped by 2*pi when arctan2 wrapped past +/-180 deg,
+    # so the MPC saw a ~360 deg yaw error, spun the drone the long way round and went infeasible.
+    # Unwrap along the horizon, then shift by whole turns to sit next to the current yaw.
+    ref[5] = np.unwrap(ref[5])
+    if yaw_now is not None:
+        ref[5] += 2 * np.pi * np.round((yaw_now - ref[5, 0]) / (2 * np.pi))
     return ref
 
 
@@ -95,9 +117,10 @@ def run_race_simulation(num_laps=1.5, dt=0.02, N=10, add_noise=True, seed=0, m =
 
     x_true = reference_state(0.0).reshape(12, 1)
     ekf.x = x_true.copy()
-    u_prev = np.zeros((4, 1))
-
     hover_thrust = m * 9.81  # thrust that balances gravity
+    #fixed bug where u_prev started at zero thrust: the input-rate penalty then held the first
+    # commands near 0 N and the drone sagged at the start. The drone starts hovering.
+    u_prev = np.array([[hover_thrust], [0.0], [0.0], [0.0]])
     X_guess = np.tile(x_true, (1, N + 1))
     U_guess = np.tile(np.array([[hover_thrust], [0.0], [0.0], [0.0]]), (1, N))
 
@@ -113,7 +136,7 @@ def run_race_simulation(num_laps=1.5, dt=0.02, N=10, add_noise=True, seed=0, m =
 
     for step in range(steps):
         t = step * dt
-        ref_horizon = build_reference_horizon(t, N, dt)
+        ref_horizon = build_reference_horizon(t, N, dt, yaw_now=float(ekf.x[5, 0]))
 
         opti.set_value(X_init, ekf.x)
         opti.set_value(U_prev, u_prev)

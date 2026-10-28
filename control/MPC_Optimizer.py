@@ -56,15 +56,17 @@ def create_drone_mpc_optimizer(N=10, dt=0.02, m = drone_constraints["mass"], ine
     vel_max = drone_constraints["linear_velocity_limits"]["max"]
 
     for k in range(N):
+        #fixed bug where the problem was infeasible whenever the current estimate was already past a
+        # limit: X[:, 0] is pinned to X_init, so state limits apply to the predicted states k+1 only
         #altitude limits
-        opti.subject_to(alt_min <= X[2, k])
-        opti.subject_to(X[2, k] <= alt_max)
+        opti.subject_to(alt_min <= X[2, k + 1])
+        opti.subject_to(X[2, k + 1] <= alt_max)
 
         #roll and pitch limits
-        opti.subject_to(roll_min <= X[3, k])
-        opti.subject_to(X[3, k] <= roll_max)
-        opti.subject_to(pitch_min <= X[4, k])
-        opti.subject_to(X[4, k] <= pitch_max)
+        opti.subject_to(roll_min <= X[3, k + 1])
+        opti.subject_to(X[3, k + 1] <= roll_max)
+        opti.subject_to(pitch_min <= X[4, k + 1])
+        opti.subject_to(X[4, k + 1] <= pitch_max)
 
         #total thrust limit (control index 0)
         opti.subject_to(thrust_min <= U[0, k])
