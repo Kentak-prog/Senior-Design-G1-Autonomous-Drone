@@ -46,6 +46,14 @@ def create_drone_mpc_optimizer(N=10, dt=0.02, m = drone_constraints["mass"], ine
     pitch_max = drone_constraints["pitch_limits"]["max"]
     thrust_min = drone_constraints["total_thrust_limits"]["min"]
     thrust_max = drone_constraints["total_thrust_limits"]["max"]
+    #updated to use the body torque, angular rate and velocity limits in drone_constraints
+    torque = drone_constraints["body_torque_limits"]
+    torque_min = [torque["roll"]["min"], torque["pitch"]["min"], torque["yaw"]["min"]]
+    torque_max = [torque["roll"]["max"], torque["pitch"]["max"], torque["yaw"]["max"]]
+    rate_min = [drone_constraints[k]["min"] for k in ("roll_rate_limits", "pitch_rate_limits", "yaw_rate_limits")]
+    rate_max = [drone_constraints[k]["max"] for k in ("roll_rate_limits", "pitch_rate_limits", "yaw_rate_limits")]
+    vel_min = drone_constraints["linear_velocity_limits"]["min"]
+    vel_max = drone_constraints["linear_velocity_limits"]["max"]
 
     for k in range(N):
         #altitude limits
@@ -61,6 +69,18 @@ def create_drone_mpc_optimizer(N=10, dt=0.02, m = drone_constraints["mass"], ine
         #total thrust limit (control index 0)
         opti.subject_to(thrust_min <= U[0, k])
         opti.subject_to(U[0, k] <= thrust_max)
+
+        #body torque limits (control indices 1-3: roll, pitch, yaw)
+        for i in range(3):
+            opti.subject_to(torque_min[i] <= U[1 + i, k])
+            opti.subject_to(U[1 + i, k] <= torque_max[i])
+
+        #body angular rate limits (state indices 9-11: p, q, r) and linear velocity limits (6-8)
+        for i in range(3):
+            opti.subject_to(rate_min[i] <= X[9 + i, k + 1])
+            opti.subject_to(X[9 + i, k + 1] <= rate_max[i])
+            opti.subject_to(vel_min <= X[6 + i, k + 1])
+            opti.subject_to(X[6 + i, k + 1] <= vel_max)
 
     #configuration solver (IPOPT)
     opts = {

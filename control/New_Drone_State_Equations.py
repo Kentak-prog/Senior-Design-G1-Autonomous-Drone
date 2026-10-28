@@ -2,9 +2,9 @@
 #State equations using casADI
 import casadi as ca
 import numpy as np
-from drone_constraints import drone_constraints
+from drone_constraints import drone_constraints, inertia as INERTIA, linear_drag as LINEAR_DRAG
 
-def get_drone_dynamics(m = drone_constraints["mass"], inertia=None): #kg
+def get_drone_dynamics(m = drone_constraints["mass"], inertia=None, drag=None): #kg
     #1. Define Symbolic State
     # Pos: x, y, z 
     # Att: phi (roll), theta (pitch), psi (yaw)
@@ -38,12 +38,15 @@ def get_drone_dynamics(m = drone_constraints["mass"], inertia=None): #kg
     #3. Constant Parameters
     g = 9.81           # m/s^2
     # m (kg) defaults to the mass in drone_constraints.py
-    Ix = 0.0081        # kg*m^2
-    Iy = 0.0081        # kg*m^2
-    Iz = 0.0142        # kg*m^2
-    # inertia=None keeps the values above; pass (Ix, Iy, Iz) in kg*m^2 to model another airframe
-    if inertia is not None:
-        Ix, Iy, Iz = inertia
+    #updated inertia and drag to match drone_constraints (Pegasus/Isaac Sim Iris model)
+    # inertia=None uses drone_constraints.inertia; pass (Ix, Iy, Iz) in kg*m^2 to model another airframe
+    if inertia is None:
+        inertia = (INERTIA["Ixx"], INERTIA["Iyy"], INERTIA["Izz"])
+    Ix, Iy, Iz = inertia   # kg*m^2
+    # drag=None uses drone_constraints.linear_drag; pass (dx, dy, dz) in N per m/s (body frame)
+    if drag is None:
+        drag = (LINEAR_DRAG["x"], LINEAR_DRAG["y"], LINEAR_DRAG["z"])
+    dx, dy, dz = drag
 
     #4. Non-linear Differential Equations (f(x, u))
     #Attitude Kinematics (Body rates p,q,r to Euler rate changes)
@@ -56,9 +59,23 @@ def get_drone_dynamics(m = drone_constraints["mass"], inertia=None): #kg
     # World frame is Z-UP (matches Isaac Sim, the vision stack and the altitude
     # limits in drone_constraints.py). Thrust U1 acts along body +Z, so the
     # acceleration is (U1/m) * (third column of R = Rz(psi) Ry(theta) Rx(phi)) - g * e_z.
-    dx_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.cos(psi) + ca.sin(phi) * ca.sin(psi))
-    dy_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.sin(psi) - ca.sin(phi) * ca.cos(psi))
-    dz_ddot = (U1 / m) * (ca.cos(phi) * ca.cos(theta)) - g
+    #
+    # Linear drag (Pegasus LinearDrag): F_body = -diag(dx, dy, dz) * v_body, with
+    # v_body = R^T v_world, rotated back to the world frame: a_drag = R F_body / m.
+    R = ca.vertcat(
+        ca.horzcat(ca.cos(psi) * ca.cos(theta),
+                   ca.cos(psi) * ca.sin(theta) * ca.sin(phi) - ca.sin(psi) * ca.cos(phi),
+                   ca.cos(psi) * ca.sin(theta) * ca.cos(phi) + ca.sin(psi) * ca.sin(phi)),
+        ca.horzcat(ca.sin(psi) * ca.cos(theta),
+                   ca.sin(psi) * ca.sin(theta) * ca.sin(phi) + ca.cos(psi) * ca.cos(phi),
+                   ca.sin(psi) * ca.sin(theta) * ca.cos(phi) - ca.cos(psi) * ca.sin(phi)),
+        ca.horzcat(-ca.sin(theta), ca.cos(theta) * ca.sin(phi), ca.cos(theta) * ca.cos(phi)))
+    v_body = ca.mtimes(R.T, ca.vertcat(x_dot, y_dot, z_dot))
+    a_drag = ca.mtimes(R, -ca.vertcat(dx * v_body[0], dy * v_body[1], dz * v_body[2])) / m
+
+    dx_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.cos(psi) + ca.sin(phi) * ca.sin(psi)) + a_drag[0]
+    dy_ddot = (U1 / m) * (ca.cos(phi) * ca.sin(theta) * ca.sin(psi) - ca.sin(phi) * ca.cos(psi)) + a_drag[1]
+    dz_ddot = (U1 / m) * (ca.cos(phi) * ca.cos(theta)) - g + a_drag[2]
     
     # Rotational Accelerations
     dp_dt = (U2 + (Iy - Iz) * q * r) / Ix
