@@ -86,7 +86,7 @@ TYPE_MASK_CTBR = ATT_IGN_ATTITUDE                                     # = 128
 MAV_PARAM_TYPE_INT32, MAV_PARAM_TYPE_REAL32 = 6, 9
 
 # PX4 parameters stored as INT32 (everything else is sent as REAL32).
-PARAM_INT_NAMES = {"MC_AIRMODE", "COM_OBL_RC_ACT", "COM_OBL_ACT", "COM_RC_IN_MODE",
+PARAM_INT_NAMES = {"MC_AIRMODE", "COM_OBL_RC_ACT", "COM_OBL_ACT", "COM_RC_IN_MODE", "COM_LOW_BAT_ACT",
                    "SYS_AUTOSTART", "MAV_TYPE"}
 
 

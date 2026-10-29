@@ -573,7 +573,8 @@ def test_runner_finish_holds_then_loiters():
         x = 4.0 + 0.2 * max(0, k - 60)
         return [min(x, 40.0), 0.0, 2.5], LEVEL
     v = FakeVehicle(fly)
-    log, s = run_in_vehicle(v, STRAIGHT, HoverCtl(), P, verbose=False, hold_s=1.0)
+    # preroll off: this fake scripts positions by tick count, so extra ticks shift it
+    log, s = run_in_vehicle(v, STRAIGHT, HoverCtl(), P, verbose=False, hold_s=1.0, preroll_s=0)
     assert s["completed"] and s["gates_passed"] == 3 and s["crash_kind"] == ""
     assert v.calls[-1] == "loiter" and v.calls[-2] == "pos"
     assert v.calls[-1 - 50:-1] == ["pos"] * 50                 # 1 s of position hold at 50 Hz

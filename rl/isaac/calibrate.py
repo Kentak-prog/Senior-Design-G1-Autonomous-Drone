@@ -72,7 +72,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.dirname(_HERE))   # rl/
 
 import frames  # noqa: E402
-from runner import (Abort, Pacer, goto, add_vehicle_args, make_vehicle)  # noqa: E402
+from runner import (Abort, Pacer, goto, ctbr_preroll, add_vehicle_args, make_vehicle)  # noqa: E402
 from drone_params import QuadParams  # noqa: E402
 from quad_sim import QuadSim  # noqa: E402
 
@@ -263,6 +263,8 @@ def cmd_rates(vehicle, args, params):
     for axis, name, rate in ((0, "roll", args.rate_rp), (1, "pitch", args.rate_rp),
                              (2, "yaw", args.rate_yaw)):
         s0 = hold_at(vehicle, params, hold, yaw)
+        # PX4 ignores CTBR for up to 0.5 s after the switch (runner.ctbr_preroll)
+        s0 = ctbr_preroll(vehicle, params, s0, hold, yaw, 1.0, on_state=altitude_guard)
         cmds = doublet_commands(rate, dt)
         pacer = Pacer(vehicle, dt, s0)
         s = s0

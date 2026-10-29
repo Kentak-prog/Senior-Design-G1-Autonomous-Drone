@@ -13,6 +13,7 @@ nothing here has been run against the live sim** (see the last section). The MPC
 | `vehicle.py` | `MavlinkVehicle` (pymavlink, lazy import), `SimVehicle` (offline PX4 stand-in on QuadSim), `VehicleState` |
 | `runner.py` | `run_in_vehicle(...)` + CLI: go to the start pose, race the track, abort to loiter |
 | `calibrate.py` | `params`, `origin`, `hover`, `rates` |
+| `gate_map.py`, `gate_vision.py`, `course_update.py`, `test_vision_bridge.py` | vision mode: gate map, camera front ends, pushing a new course into a controller (see "Vision mode") |
 | `test_isaac_bridge.py` | tests (plain functions, `All tests passed.`) |
 | `../../workspace/spawn_track.py` | Isaac Script Editor script: build a whole track from `rl/tracks/*.json` |
 
@@ -46,7 +47,7 @@ Ctrl-C at any time commands AUTO.LOITER. Run from `rl/isaac/` or `rl/`; every mo
 
 ## CLI
 
-`runner.py`: `--track` (required), `--controller pid|rl`, `--model DIR`, `--connection`,
+`runner.py`: `--track` (required), `--controller pid|rl|mpc_ctbr`, `--model DIR`, `--connection`,
 `--origin-offset X Y Z` (default 0 0 0), `--thrust-map model|linear`, `--u-hover`,
 `--thrust-scale`, `--geofence XMIN YMIN ZMIN XMAX YMAX ZMAX` (ENU; default `auto_geofence`:
 track box + 8 m), `--max-time 60`, `--ground-z 0.15`, `--out-dir` (writes `log.csv`, `summary.json`),
@@ -107,6 +108,76 @@ The end-to-end tests fly PID (straight3, oval6 with a non-zero origin offset) an
 and oval6; skipped if missing) through `run_in_vehicle` on `SimVehicle`, which stores its state as PX4 would (NED, FRD)
 so every conversion is exercised, and assert the lap time is within 0.5 s of `fly_course.run_controller`. Deliberately
 wrong conversions (outbound pitch rate, attitude, yaw) must make them fail.
+
+## Vision mode (gates from the camera, 2026-10-24)
+
+The controller does not get the track file. It starts from a ROUGH PRIOR (the track's gates perturbed by
+`--prior-pos-std` m per axis and `--prior-yaw-std` deg, seeded) with the gate count and order known, and camera
+detections correct a world-frame gate map. **Scoring stays against the TRUE track** (gate pass / collision / `oob`
+safety / summary margins): the runner is the referee and sees truth, the controller sees only the map.
+
+```
+# offline, no ROS/Isaac: SimVehicle + a geometric camera model
+python runner.py --track ../tracks/oval6.json --controller pid --sim --gates vision --sim-vision \
+    --prior-pos-std 0.5 --prior-yaw-std 10 --prior-seed 0 --out-dir ../runs/isaac/vis_pid_oval6
+# live (cluster pod: ROS 2 Humble sourced, rclpy + cv2 importable by the venv)
+python runner.py --track ../tracks/straight3.json --controller pid --gates vision \
+    --origin-offset X Y Z --thrust-scale S --mount-xyz 0.30 0 0.05 [--hfov-override 60]
+```
+Options: `--gates truth|vision` (default truth: unchanged behaviour), `--prior-pos-std 0.5`, `--prior-yaw-std 10`,
+`--prior-seed 0`, `--mount-xyz X Y Z` (camera in the body frame, default 0.30 0 0.05; it was once found at
+-0.040 0 -0.041, so MEASURE IT, see vision/HANDOFF.md), `--mount-rot-xyz-deg` (default 105 0 -90), `--hfov-override`
+(rebuild the intrinsics from the image size, for a stale `camera_info`; 60 for spawn_example.py), `--sim-vision`
+(with `--sim`), `--cam-namespace /iris_0`, `--pose-topic /drone00/state/pose`. `--controller` also takes `mpc_ctbr`.
+The auto geofence is built around the PRIOR gates (+8 m).
+
+| Piece | What it does |
+|---|---|
+| `gate_map.GateMap` | per gate: position by a recursive weighted mean (variance shrinks with detections, measurement variance grows with camera range: `(0.10 + 0.02 r)^2`, floor 0.08 m), yaw only from detections with `normal_reliable`, the 180-deg normal ambiguity resolved so gate +Z points along the PRIOR's flight direction, yaw further than 60 deg from the prior rejected. Association: nearest gate centre within 2.5 m, one detection per gate, only gates from the current target on (`set_progress`), 3 gates lookahead, ties go to the earlier gate. Full description in the module docstring. |
+| `gate_vision.process_frame` | pure: RGB image + intrinsics + body pose + mount -> world-frame detections, using vision/ (`detect_gates_color`, `estimate_gate_pose`, `gate_pose_world`, `optical_frame=False`). Drops reprojection RMS > 4 px, range > 25 m, openings touching the image border. |
+| `gate_vision.RosGateVision` | rclpy node in the RUNNER process: `<ns>/front_cam/rgb`, `camera_info`, `/drone00/state/pose` (all `qos_profile_sensor_data`), a worker thread that processes only the newest image (frames are dropped, never queued). `drain()`, `stats()`, `wait_ready()`, `close()`. |
+| `gate_vision.SimGateVision` | offline stand-in: a gate is detected when all 4 opening corners are inside the 60 x 36 deg FOV and within 15 m of the real camera pose; noise grows with range, +1% range bias, 15 Hz, `normal_reliable` only when the view is >= 12 deg off the gate normal. |
+| `course_update.update_course` | pushes the map into the controller without a reset: the controller's own `update_course(course, pos, vel)` if it has one (MPC), else adapters that rebuild PID `centers`/`normals` (stage, integrator kept) and the RL `CoursePool` (previous action kept). The runner pushes only when the map changed, and once right after `controller.reset`. |
+
+**Logged.** `log.csv` gets `n_det` (detections drained at this state) and `map_err` (3-D error of the CURRENT target
+gate's estimate vs truth, logging only). `summary.json["vision"]`: detections total / associated, ticks with detections,
+per-gate map error AT THE MOMENT THE GATE WAS CROSSED (3-D, in the gate plane, yaw), their means, final and prior errors,
+per-gate filter stats, and the camera front end's stats (frames in / processed / dropped, ms per frame, detections per frame,
+rejections). `format_summary` prints it.
+
+**Phase A** flies to the PRIOR start pose and feeds the map as it goes. With the camera mounted 15 deg up and a 36 deg vFOV,
+a level hover 4 m in front of a gate at the same height cannot see the gate's lower corners, so gate 0 is usually NOT
+corrected before the race starts (offline: 0.23-0.25 m in-plane error at the crossing of oval6's gate 0). It is
+corrected as the drone pitches down while accelerating.
+
+**Offline results** (SimVehicle + SimGateVision, prior 0.5 m / 10 deg, seeds 0-2, in-plane map error at crossing is what
+decides passing; passing needs it below about 0.45 m):
+
+| Controller | Track | Truth gates | Vision, seeds 0 / 1 / 2 | Prior only (no detections), seeds 0 / 1 / 2 |
+|---|---|---|---|---|
+| PID | straight3 | 8.26 s | 8.20 / 8.26 / 8.16 s | all hit a gate |
+| PID | oval6 | 18.70 s | 18.72 / 18.48 / 18.94 s | all hit a gate |
+| RL | straight3 | 3.06 s | 3.06 / 3.14 / 3.12 s | all hit a gate |
+| RL | oval6 | 7.46 s | **fails at gate 4 (3/6) on all 3 seeds** | hits a gate |
+| MPC (`mpc_ctbr`) | straight3 / oval6 | see mpc_ctbr | 9.42 s / 24.82 s (seed 0) | hits a gate |
+
+RL on oval6 fails even with noise-free detections and with a prior that is only 0.1 m wrong (a controller flown on a
+0.1 m-perturbed gate map misses a TRUE gate in 4 of 5 seeds): the policy's oval6 lap has an edge margin of 0.31 m against
+the 0.30 m the pass test needs. This is the policy's margin, not the vision path.
+
+**Assumptions.** Gates are upright, 1.5 m opening, magenta, count and order known; the pose topic is the body frame
+(FLU in ENU); the camera pose is the latest pose at image arrival (stamps are on different clocks: sim vs wall), so a moving
+drone adds `speed x (image transport delay)` to the world error (0.04 m per 30 ms at 1.5 m/s, 0.3 m at 10 m/s); detections are
+stamped with the image (sim) time.
+
+**Untested live.** `RosGateVision` has only run against a fake rclpy (QoS arguments, threading, dropping, stale-camera_info
+handling, pairing logic); nothing with real topics: that the three topics deliver, `Image.encoding` (rgb8/rgba8 handled),
+the real frame rate and ms per frame on the pod's CPU (the worker thread shares the GIL with the control loop), image-to-pose
+latency, camera_info after the refresh helper, and the mount value. Not checked against the live sim: that detections of
+the real gates associate within 2.5 m of a perturbed prior, the 4 px reprojection and 3 px border thresholds, the
+`normal_reliable` rate in flight (SimGateVision assumes "12 deg off-axis"), partial or occluded gates, other gates in
+the background, the ~1% range bias (modelled but not corrected), motion blur at speed. The MPC hook (`update_course`) is the MPC
+author's code; only the straight3 / oval6 seed 0 runs above exercised it.
 
 ## Untested against the live sim
 

@@ -156,13 +156,19 @@ def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0
     if kind == "mpc":
         from mpc_controller import MpcController
         return MpcController(params, course, v_max=mpc_vmax, a_max=mpc_amax)
+    if kind == "mpc_ctbr":      # same NMPC behind thrust + body rates (PX4 offboard)
+        isaac_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "isaac")
+        if isaac_dir not in sys.path:
+            sys.path.insert(0, isaac_dir)
+        from mpc_ctbr import MpcCtbrController
+        return MpcCtbrController(params, course, v_max=mpc_vmax, a_max=mpc_amax)
     raise ValueError(f"unknown controller {kind!r}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", required=True)
-    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc"])
+    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc", "mpc_ctbr"])
     ap.add_argument("--model", default=None,
                     help="run directory with model.zip + vecnormalize.pkl (for --controller rl)")
     ap.add_argument("--mpc-vmax", type=float, default=4.0, help="MPC planner speed limit [m/s]")

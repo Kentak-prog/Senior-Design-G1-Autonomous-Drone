@@ -42,6 +42,7 @@ and a PID baseline speaking the same command interface as the future policy
 | `train.py` | done, untrained | PPO + VecNormalize CLI, checkpoints, periodic eval on the fixed tracks |
 | `rl_policy.py` | done | `RlPolicyController`: trained policy behind the PID's controller interface |
 | `mpc_controller.py` | done | `MpcController`: Antek's NMPC + Trajectory/ min-snap planner on QuadSim, wrench command (`step_wrench`) |
+| `isaac/mpc_ctbr.py` | done (QuadSim + offline SimVehicle; not run on live PX4) | `MpcCtbrController`: the same NMPC behind thrust + body RATES (`command="ctbr"`, rate = predicted X[9:12,1]), ~3 ms/solve, `max_solve_ms` budget, `update_course` re-plan hook; `fly_course --controller mpc_ctbr`; tests `isaac/test_mpc_ctbr.py` |
 | `compare.py` | done | PID vs MPC vs RL table + plot |
 | `isaac/` | Phase 1 written, **not yet run against the live sim** | fly PID / RL on PX4 in Isaac Sim over MAVLink (CTBR via `SET_ATTITUDE_TARGET`), offline `SimVehicle`, calibration CLI, `workspace/spawn_track.py`; see `isaac/README.md` |
 | `test_*.py` | done | plain-function tests, no pytest (`test_race_env.py` ~10 s incl. a smoke training run) |
@@ -261,6 +262,27 @@ Caveats:
 - Noisy-start robustness: start_noise 0.3, seed 0, 16 envs (PID/RL) vs 4 envs (MPC): the MPC
   percentages have a coarse 25% granularity. Min margin = distance from the crossing point to the
   opening edge (>= 0.30 m needed to pass; 0.75 m = dead centre).
+
+### MPC over CTBR (`isaac/mpc_ctbr.py`), 2026-10-24
+
+`MpcCtbrController` = `MpcController` + thrust `U[0,0]` and body-rate setpoint = the MPC's predicted
+`X[9:12,1]` (FLU), clamped to `params.max_rate`, so PX4 offboard (thrust + rates) can fly it.
+Solver re-configured after `create_drone_mpc_optimizer` (control/ untouched): `expand=True`,
+`max_iter 15`, `tol 1e-3`, `mu_init 1e-3`, `warm_start_init_point yes`. Same laps as the wrench MPC in
+QuadSim (9.56 / 22.68 / 28.46 s, rate loop under it). Solve time, QuadSim, ms mean / p95 / max:
+
+| Options | straight3 | oval6 | slalom5 |
+|---|---|---|---|
+| as built (IPOPT, no expand, 50 it) | 106.6 / 112.9 / 282 | - | - |
+| + expand | 13.2 / 13.7 / 14.3 | 13.4 / 13.9 / 35 | 13.6 / 14.3 / 44 |
+| + max_iter 15, loose tol | 7.6 / 8.1 / 8.8 | 7.8 / 8.4 / 11 | 7.8 / 8.3 / 34 |
+| + mu_init 1e-3, warm start (default) | 3.4 / 3.7 / 4.7 | 3.3 / 3.7 / 4.6 | 3.5 / 4.7 / 11.5 |
+
+Rate lookahead k = 1 tracks best (k = 2, 3 are worse). `max_solve_ms=` falls back to the shifted
+previous solution when IPOPT hits its CPU limit. `update_course(course, pos, vel)` re-plans the
+remaining gates when one moved > 0.3 m or > 5 deg (the planner has no start-velocity input, so the new
+plan starts at rest: a mid-flight re-plan costs a slow-down; 35-90 ms per re-plan). Offline
+SimVehicle steps sim time per tick, so only the solve times above speak for real time.
 
 Results (`--mpc-vmax 4 8`, a_max 6, 2026-10-15, RL = `runs/best`):
 
