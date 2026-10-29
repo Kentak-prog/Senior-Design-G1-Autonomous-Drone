@@ -64,12 +64,16 @@ def main():
             self.declare_parameter("rate_hz", 50.0)
             self.declare_parameter("horizon", 10)
             self.declare_parameter("state_timeout", 0.5)
+            # attitude setpoint = the MPC's predicted attitude this far ahead (control/mpc_core.py
+            # "ATTITUDE LEAD"); 0.02 = one step, which leaves PX4 holding its current attitude
+            self.declare_parameter("attitude_lead_s", 0.1)
             gp = lambda n: self.get_parameter(n).value   # noqa: E731
 
             self.dt = 1.0 / float(gp("rate_hz"))
             self.N = int(gp("horizon"))
             self.state_timeout = float(gp("state_timeout"))
-            self.core = MpcCore(N=self.N, dt=self.dt, m=drone_constraints["mass"])
+            self.core = MpcCore(N=self.N, dt=self.dt, m=drone_constraints["mass"],
+                                attitude_lead_s=float(gp("attitude_lead_s")))
             self.tracker = StateTracker()
             self.traj = None
             self.hold = None                 # (pos, yaw) hover point while there is no trajectory
@@ -94,7 +98,8 @@ def main():
             self.create_subscription(MinSnapTrajectory, gp("trajectory_topic"), self.on_trajectory, latched)
             self.pub = self.create_publisher(AttitudeThrustSetpoint, gp("setpoint_topic"), 10)
             self.create_timer(self.dt, self.control_loop)
-            self.get_logger().info(f"MPC at {1 / self.dt:.0f} Hz, horizon {self.N}, mass "
+            self.get_logger().info(f"MPC at {1 / self.dt:.0f} Hz, horizon {self.N}, attitude lead "
+                                   f"{self.core.lead_idx * self.dt:.2f} s, mass "
                                    f"{drone_constraints['mass']} kg; "
                                    f"use_sim_time={self.get_parameter('use_sim_time').value}")
 
@@ -129,13 +134,13 @@ def main():
                 ref = hover_reference(self.hold[0], self.hold[1], self.N)
 
             out = self.core.step(x, ref)
-            x1, u0 = out["x1"], out["u0"]
+            xc, u0 = out["x_cmd"], out["u0"]          # the attitude / rates PX4 should track
             msg = AttitudeThrustSetpoint()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "map"
-            qx, qy, qz, qw = quat_xyzw_from_rpy(float(x1[3, 0]), float(x1[4, 0]), float(x1[5, 0]))
+            qx, qy, qz, qw = quat_xyzw_from_rpy(float(xc[3, 0]), float(xc[4, 0]), float(xc[5, 0]))
             msg.orientation.x, msg.orientation.y, msg.orientation.z, msg.orientation.w = qx, qy, qz, qw
-            msg.body_rate.x, msg.body_rate.y, msg.body_rate.z = (float(v) for v in x1[9:12, 0])
+            msg.body_rate.x, msg.body_rate.y, msg.body_rate.z = (float(v) for v in xc[9:12, 0])
             msg.thrust = float(u0[0, 0])
             msg.solve_time_ms = float(out["solve_ms"])
             msg.valid = bool(out["ok"])

@@ -154,7 +154,7 @@ hover point and nothing else. Don't run `min_snap_node`, so there's no plan.
 python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus
 python3 ros2_nodes/flight_monitor.py --ros-args -p use_sim_time:=true -p log_dir:=$RUN/s3 \
     -p max_vio_err_m:=99.0 -p plan_on_engage:=true
-python3 ros2_nodes/mpc_offboard_bridge.py --max-duration 15 --max-tilt-deg 30 --log-dir $RUN/s3 \
+python3 ros2_nodes/mpc_offboard_bridge.py --hover-thrust 0.58 --max-duration 15 --max-tilt-deg 30 --log-dir $RUN/s3 \
     --ros-args -p use_sim_time:=true
 ```
 `max_vio_err_m:=99` keeps a misbehaving VIO from aborting a flight that doesn't use it.
@@ -165,9 +165,40 @@ prints a `[bridge]` line (from `bridge_log.csv`) with these numbers:
 - `completed: reached --max-duration`, with no abort;
 - the drone neither sinks nor climbs.
 
-If it does sink or climb, rerun with `--hover-thrust` set to PX4's hover
-throttle. If it flips or drifts sideways at once, the attitude frame mapping
+`--hover-thrust 0.58` is measured (see below). If the drone still sinks or
+climbs, adjust it. If it flips or drifts sideways at once, the attitude frame mapping
 is wrong (`px4/attitude_bridge.py`): stop and debug there, with the log.
+
+### Stage 3 results (2026-10-29)
+
+Three runs, three findings, each fixed before the next:
+
+1. **Bridge aborted before OFFBOARD** ("no new MPC setpoint for more than
+   0.3 s"). It handled ROS only inside its loop, so setpoints went stale
+   while its `[y/N]` prompt blocked. Fixed: ROS callbacks run on a background
+   thread (`ros2_nodes/mpc_offboard_bridge.py`).
+2. **0.12 m sag at engage.** To hold altitude the MPC needed 15.87 N
+   against m·g = 14.7 N: the Pegasus Iris thrust curve says hover is at
+   0.556 throttle, but PX4 really hovers at about 0.58. Fixed:
+   `--hover-thrust 0.58`. The second run held 2.565 m against a 2.57 m
+   hold point, at 14.75 N.
+3. **x offset never corrected.** The drone sat 0.30 m from its hold point
+   for 36 s, while the MPC itself reported the error.
+   - Cause: the NMPC's controls are thrust + torques. `mpc_node` sent PX4
+     the attitude predicted one step (0.02 s) ahead, which is the current
+     attitude, so PX4 just held it.
+   - Fixed: the attitude setpoint is now the MPC's prediction 0.1 s ahead
+     (`attitude_lead_s`, `control/mpc_core.py` "ATTITUDE LEAD").
+   - Checked offline on a PX4-like plant (`control/px4_attitude_plant.py`,
+     `control/test_mpc_core.py`): a 0.3 m offset drops below 0.05 m within
+     3 s; with the old one-step lead it is still 0.7–1.2 m off after 10 s.
+   - Cost: PX4's attitude lag isn't in the MPC's model, so course tracking
+     at 2/2 is about 0.3 m mean / 0.55 m max (0.03 m with torques fed
+     straight in). All gates still pass.
+   - 0.1 s is the best lead, or within 0.05 m of it, for a PX4 lag of
+     0.05–0.12 s.
+
+**Rerun Stage 3 after pulling these fixes and restarting `mpc_node`.**
 
 ## Stage 4: the course on ground truth
 
@@ -176,7 +207,7 @@ As stage 3, plus the plan from the true state:
 python3 ros2_nodes/min_snap_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus \
     -p gates_file:=/workspace/test_gates.json -p yaw_mode:=next_gate -p settle_s:=3.0 \
     -p v_max:=2.0 -p a_max:=2.0 -p start_topic:=/mpc_offboard_bridge/engaged
-python3 ros2_nodes/mpc_offboard_bridge.py --max-duration 60 --max-tilt-deg 30 --log-dir $RUN/s4 \
+python3 ros2_nodes/mpc_offboard_bridge.py --hover-thrust 0.58 --max-duration 60 --max-tilt-deg 30 --log-dir $RUN/s4 \
     --ros-args -p use_sim_time:=true
 ```
 Use a new `flight_monitor` with `log_dir:=$RUN/s4` and `max_vio_err_m:=99.0`.
@@ -213,7 +244,7 @@ is.
 Stage 2's nodes, with `min_snap_node` stopped (no plan) and a fresh
 `flight_monitor` (`log_dir:=$RUN/s6`, default watchdog):
 ```bash
-python3 ros2_nodes/mpc_offboard_bridge.py --max-duration 15 --max-tilt-deg 30 --log-dir $RUN/s6 \
+python3 ros2_nodes/mpc_offboard_bridge.py --hover-thrust 0.58 --max-duration 15 --max-tilt-deg 30 --log-dir $RUN/s6 \
     --ros-args -p use_sim_time:=true
 ```
 **GO:** same as stage 3. A slow drift here, which stage 3 didn't have, is VIO
@@ -225,7 +256,7 @@ Stage 2's full set, fresh `flight_monitor` (`log_dir:=$RUN/s7`), then start
 recording (`Trajectory/isaac_results/3_gates/scripts/record_novnc.js`:
 `startRec()`) and engage:
 ```bash
-python3 ros2_nodes/mpc_offboard_bridge.py --max-duration 60 --max-tilt-deg 30 --log-dir $RUN/s7 \
+python3 ros2_nodes/mpc_offboard_bridge.py --hover-thrust 0.58 --max-duration 60 --max-tilt-deg 30 --log-dir $RUN/s7 \
     --ros-args -p use_sim_time:=true
 ```
 At engage the bridge logs `OFFBOARD confirmed -> True on
@@ -234,10 +265,16 @@ The plan is 16.0 s of sim time, about 38 s wall at 0.42×. Afterwards:
 `analyze_vio_mpc_flight.py $RUN/s7`.
 
 **Pass:** `ALL GATES PASSED`, the watchdog never trips. The rehearsal's
-numbers to compare against:
-- VIO error mean 0.21 m, max 0.61 m;
-- tracking mean 0.29 m, max 0.66 m;
-- frame margins 0.60–0.68 m.
+numbers to compare against (`Trajectory/simulate_vio_mpc.py
+--camera-pitch-deg 0 --v-max 2 --a-max 2`, through the PX4-like plant with
+a 0.08 s lag and a 0.1 s lead, 2026-10-29):
+- VIO error mean 0.24 m, max 0.98 m;
+- tracking mean 0.52 m, max 0.88 m;
+- frame margins 0.44–0.65 m.
+
+With torques fed straight to the plant (`--plant torque`, the rehearsal
+before 2026-10-29), tracking was 0.29 m mean and 0.66 m max, with margins of
+0.60–0.68 m. That plant does not show PX4's lag.
 
 ## Stage 8: faster
 

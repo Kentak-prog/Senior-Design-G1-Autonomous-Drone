@@ -18,7 +18,12 @@ Sequence (sim time):
   --hover-s        plan min-snap from the VIO's pose through the map gates
                    (Trajectory/min_snap_planner.plan_course, as ros2_nodes/min_snap_node.py does)
   then             MpcCore (control/mpc_core.py, as ros2_nodes/mpc_node.py) at 50 Hz on the VIO state;
-                   the true drone is the control model integrated at 250 Hz
+                   the true drone at 250 Hz is, with --plant:
+                     px4     (default) thrust + the MPC's attitude --attitude-lead-s ahead, the
+                             attitude lagging it by --attitude-tau (control/px4_attitude_plant.py):
+                             how Isaac flies it, through PX4
+                     torque  the MPC's own control model (thrust + torques), as before 2026-10-29;
+                             this hid that PX4 needs a lead (control/mpc_core.py "ATTITUDE LEAD")
 
 Scored on the TRUE path: gate passes, MPC tracking error, VIO error.
 
@@ -50,6 +55,7 @@ from New_Drone_State_Equations import get_drone_dynamics                        
 from Runge_Kutta_4_Discretizer import get_rk4_discretizer                         # noqa: E402
 from drone_constraints import drone_constraints                                   # noqa: E402
 from mpc_core import MpcCore, TrajectoryBuffer, hover_reference                   # noqa: E402
+from px4_attitude_plant import Px4AttitudePlant                                   # noqa: E402
 from min_snap_planner import plan_course, trajectory_points                       # noqa: E402
 from vio import GateVIO, rot_rpy, FRD_FROM_FLU, camera_mount_usd                  # noqa: E402
 from ros_camera import T_world_cam_from_transform                                 # noqa: E402
@@ -111,7 +117,9 @@ def run(args):
 
     f, xs, us = get_drone_dynamics(m)
     plant = get_rk4_discretizer(f, xs, us, imu_dt)
-    core = MpcCore(N=10, dt=1.0 / args.mpc_rate, m=m)
+    core = MpcCore(N=10, dt=1.0 / args.mpc_rate, m=m, attitude_lead_s=args.attitude_lead_s)
+    px4 = Px4AttitudePlant(m, tau=args.attitude_tau)
+    x_cmd = None
     mount = camera_mount_usd(args.camera_pitch_deg)
     vio = GateVIO(gates, mount, imu_rate=args.imu_rate,
                   initial_guess=(start + rng.normal(0, args.guess_error, 3), start_yaw),
@@ -148,7 +156,7 @@ def run(args):
                 xe = vio.state
                 ref = buf.horizon(t, core.N, core.dt, yaw_now=float(xe[5, 0]))
                 out = core.step(xe, ref)
-                u = out["u0"]
+                u, x_cmd = out["u0"], out["x_cmd"]
                 solve_ms.append(out["solve_ms"])
                 log["t"].append(t); log["true"].append(x[:, 0].copy()); log["est"].append(xe[:, 0].copy())
                 log["ref"].append(ref[:, 0].copy())
@@ -158,7 +166,9 @@ def run(args):
                     break
 
         # --- true drone (held at the spawn hover until the plan starts) ---
-        if flying:
+        if flying and args.plant == "px4":
+            x_next = px4.step(x, u[0, 0], x_cmd[3:6, 0], imu_dt)
+        elif flying:
             x_next = np.array(plant(x, u)).reshape(12, 1)
         else:
             x_next = x.copy()
@@ -270,6 +280,10 @@ def main():
     ap.add_argument("--a-max", type=float, default=None, help="default: 80%% of the drone's max (12 m/s^2)")
     ap.add_argument("--no-time-opt", action="store_true", help="distance-proportional segment times (old planner)")
     ap.add_argument("--no-delay-compensation", action="store_true")
+    ap.add_argument("--plant", choices=["px4", "torque"], default="px4",
+                    help="px4: attitude setpoint through a lagging attitude loop (Isaac); torque: the MPC's own model")
+    ap.add_argument("--attitude-tau", type=float, default=0.08, help="--plant px4: attitude lag, s")
+    ap.add_argument("--attitude-lead-s", type=float, default=0.1, help="MPC attitude setpoint lead, s (mpc_node default)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=os.path.join(HERE, "sim_output", "vio_mpc_rehearsal.png"))
     ap.add_argument("--no-plot", action="store_true")

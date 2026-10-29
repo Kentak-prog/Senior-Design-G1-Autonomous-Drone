@@ -13,6 +13,15 @@ Used by the ROS 2 node ros2_nodes/mpc_node.py and by the Python rehearsals
 
 Reference / state row order: [x, y, z, roll, pitch, yaw, vx, vy, vz, p, q, r]
 (world ENU, body FLU, R = Rz(yaw) Ry(pitch) Rx(roll)).
+
+ATTITUDE LEAD. The NMPC's controls are thrust + body torques, but PX4 takes an
+attitude (+ rates) setpoint. The attitude the MPC predicts one step (0.02 s)
+ahead is essentially the current one, so sending it makes PX4 hold whatever
+attitude it has: the MPC loses its tilt authority (Isaac, 2026-10-29: a 0.3 m
+offset was never corrected). step() also returns x_cmd, the predicted state
+attitude_lead_s ahead (default 0.1 s, about PX4's attitude response time);
+that is what goes to PX4. Checked on a PX4-like plant (px4_attitude_plant.py,
+test_mpc_core.py).
 """
 
 import os
@@ -87,8 +96,10 @@ def hover_reference(pos, yaw, N):
 class MpcCore:
     """The repo NMPC with warm starting and the previous command carried over."""
 
-    def __init__(self, N=10, dt=0.02, m=drone_constraints["mass"]):
+    def __init__(self, N=10, dt=0.02, m=drone_constraints["mass"], attitude_lead_s=0.1):
         self.N, self.dt, self.m = N, dt, m
+        # column of the predicted trajectory sent as the attitude setpoint (1 = the next step)
+        self.lead_idx = int(min(N, max(1, round(attitude_lead_s / dt))))
         (self.opti, self.X, self.U, self.X_init, self.U_prev, self.X_ref) = create_drone_mpc_optimizer(
             N=N, dt=dt, m=m)
         self.hover_u = np.array([[m * G], [0.0], [0.0], [0.0]])
@@ -103,8 +114,9 @@ class MpcCore:
     def step(self, x, ref):
         """
         x: 12x1 state, ref: 12 x (N+1). Returns dict(u0 4x1, x1 12x1 predicted next
-        state, ok bool, solve_ms float). On failure: u0 = hover thrust, x1 = level at
-        the current yaw, ok = False.
+        state, x_cmd 12x1 predicted state attitude_lead_s ahead (the attitude / rate
+        setpoint for PX4), ok bool, solve_ms float). On failure: u0 = hover thrust,
+        x1 = x_cmd = level at the current yaw, ok = False.
         """
         x = np.asarray(x, dtype=float).reshape(12, 1)
         if self._X_guess is None:
@@ -131,10 +143,11 @@ class MpcCore:
             x1 = x.copy()
             x1[3:5] = 0.0
             x1[9:12] = 0.0
-            return {"u0": self.hover_u.copy(), "x1": x1, "ok": False, "solve_ms": solve_ms}
+            return {"u0": self.hover_u.copy(), "x1": x1, "x_cmd": x1.copy(), "ok": False, "solve_ms": solve_ms}
 
         u0 = U_sol[:, 0].reshape(4, 1)
         self.u_prev = u0
         self._X_guess = np.hstack([X_sol[:, 1:], X_sol[:, -1:]])     # shift one step for the next solve
         self._U_guess = np.hstack([U_sol[:, 1:], U_sol[:, -1:]])
-        return {"u0": u0, "x1": X_sol[:, 1].reshape(12, 1), "ok": True, "solve_ms": solve_ms}
+        return {"u0": u0, "x1": X_sol[:, 1].reshape(12, 1), "x_cmd": X_sol[:, self.lead_idx].reshape(12, 1),
+                "ok": True, "solve_ms": solve_ms}
