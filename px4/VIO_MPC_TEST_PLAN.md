@@ -56,14 +56,22 @@ Until the plan arrives, `mpc_node` holds the hover point.
 
 ## Stage 0: pod prep (once per container)
 
-`ros2-eval` restarted 14 h ago. As of 2026-10-28 it has **no casadi and no
-scipy**, an **old `drone_msgs` build** (no `AttitudeThrustSetpoint`), and the
-repo on `px4-offboard-min-snap` at `7146eb0`.
+Done on 2026-10-29: `main`, casadi 3.6.7, scipy 1.10.1, matplotlib 3.7.5,
+numpy 1.26.4 with one BLAS thread, and `drone_msgs` rebuilt. All tests pass
+in the pod. A container restart loses the `--user` installs, so redo this
+after one.
 
 ```bash
 cd /workspace/Senior-Design-G1-Autonomous-Drone && git fetch && git checkout main && git pull
-pip install --user "casadi==3.6.7" "scipy==1.10.1" pymavlink
-python3 -c "import numpy; print(numpy.__version__)"       # must still be 1.21.5 (NumPy 2 breaks cv_bridge)
+pip install --user "casadi==3.6.7" "scipy==1.10.1" "matplotlib==3.7.5" pymavlink
+python3 -c "import numpy; print(numpy.__version__)"       # 1.x only (NumPy 2 breaks cv_bridge)
+# matplotlib's contourpy pulls numpy 1.26.4 into ~/.local. That works (cv_bridge + cv2 checked
+# 2026-10-29), BUT pip's numpy bundles OpenBLAS, which starts a thread per core: test_vio went
+# from seconds to over 11 minutes. Use one BLAS thread, in every shell:
+echo 'export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1' >> ~/.bashrc && source ~/.bashrc
+# an old hand-made /workspace/ros_ws/drone_msgs (2026-10-22) duplicates the package: move it out
+[ -d /workspace/ros_ws/drone_msgs ] && mv /workspace/ros_ws/drone_msgs /workspace/drone_msgs_old_20261022
+mkdir -p /workspace/ros_ws/src && ln -sfn /workspace/Senior-Design-G1-Autonomous-Drone/drone_msgs /workspace/ros_ws/src/drone_msgs
 cd /workspace/ros_ws && rm -rf build/drone_msgs install/drone_msgs \
   && colcon build --packages-select drone_msgs && source install/setup.bash
 ros2 interface show drone_msgs/msg/AttitudeThrustSetpoint  # must print the message

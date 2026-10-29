@@ -31,6 +31,7 @@ import csv
 import math
 import os
 import sys
+import threading
 import time
 
 import numpy as np
@@ -108,8 +109,17 @@ def main():
             engaged_pub.publish(Bool(data=True))
             print(f"[bridge] OFFBOARD confirmed -> True on {args.engaged_topic} (min_snap_node plans now)")
 
+    # Callbacks run on their own thread, so setpoints keep arriving (and being
+    # time-stamped) while the main thread blocks, e.g. on the confirmation prompt.
+    # Spinning once per step instead left the newest setpoint seconds old after
+    # the prompt, and run() aborted as "stale" before OFFBOARD (Isaac, 2026-10-29).
+    from rclpy.executors import SingleThreadedExecutor
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+
     def get_setpoint():
-        rclpy.spin_once(node, timeout_sec=0.0)
         return latest["sp"], latest["t"]
 
     link = connect(args.connection)
@@ -124,7 +134,7 @@ def main():
             print("REFUSING: the drone must be armed and hovering (e.g. `commander takeoff`).")
             return 1
 
-        rclpy.spin_once(node, timeout_sec=0.5)
+        time.sleep(0.5)                      # let a latched abort reason arrive
         if abort["reason"]:
             print(f"REFUSING: the flight monitor has already tripped: {abort['reason']}")
             return 1
@@ -159,8 +169,10 @@ def main():
             print(f"[bridge] log {path}")
         return 0 if status.startswith("completed") or status == "stopped: Ctrl-C" else 1
     finally:
+        executor.shutdown()
+        spin_thread.join(timeout=2.0)     # else rclpy aborts the process at exit
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
