@@ -13,7 +13,7 @@ nothing here has been run against the live sim** (see the last section). The MPC
 | `vehicle.py` | `MavlinkVehicle` (pymavlink, lazy import), `SimVehicle` (offline PX4 stand-in on QuadSim), `VehicleState` |
 | `runner.py` | `run_in_vehicle(...)` + CLI: go to the start pose, race the track, abort to loiter |
 | `calibrate.py` | `params`, `origin`, `hover`, `rates` |
-| `gate_map.py`, `gate_vision.py`, `course_update.py`, `test_vision_bridge.py` | vision mode: gate map, camera front ends, pushing a new course into a controller (see "Vision mode") |
+| `vision_gate_map.py`, `gate_vision.py`, `course_update.py`, `test_vision_bridge.py` | vision mode: gate map, camera front ends, pushing a new course into a controller (see "Vision mode") |
 | `test_isaac_bridge.py` | tests (plain functions, `All tests passed.`) |
 | `../../workspace/spawn_track.py` | Isaac Script Editor script: build a whole track from `rl/tracks/*.json` |
 

@@ -40,7 +40,7 @@ Edge margin = half-side minus the larger of |x|, |y| of the plane crossing in th
 
 VISION MODE (gate_source=..., CLI --gates vision): the controller is built from
     a ROUGH PRIOR course and is told where the gates are by a GateMap that camera
-    detections correct (gate_map.py, gate_vision.py). The `course` argument stays
+    detections correct (vision_gate_map.py, gate_vision.py). The `course` argument stays
     the TRUE course: scoring (gate pass / collision), the safety "oob" check and
     the summary all use it; the controller only ever sees the map. Phase A flies
     to the PRIOR start pose. Each state (phase A and B): gate_source.step(state,
@@ -578,7 +578,7 @@ def main(argv=None):
     gate_source = None
     ctl_course = course
     if a.gates == "vision":
-        import gate_map as gm
+        import vision_gate_map as gm
         import gate_vision as gv
         if a.sim_vision and not a.sim:
             ap.error("--sim-vision needs --sim")

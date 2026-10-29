@@ -66,7 +66,7 @@ from color_gate_detector import detect_gates_color  # noqa: E402
 from ros_camera import (T_world_cam_from_transform, intrinsics_from_camera_info,  # noqa: E402
                         transform_to_matrix)
 from eval_isaac_gates import rotate_xyz_deg_to_matrix  # noqa: E402
-from gate_map import Detection  # noqa: E402
+from vision_gate_map import Detection  # noqa: E402  (not "gate_map": Trajectory/gate_map.py exists too)
 
 DEFAULT_MOUNT_XYZ = (0.30, 0.0, 0.05)
 DEFAULT_MOUNT_ROT_XYZ_DEG = (105.0, 0.0, -90.0)

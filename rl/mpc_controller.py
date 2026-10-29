@@ -86,10 +86,15 @@ class MpcController:
     command = "wrench"
 
     def __init__(self, params: QuadParams, course: Course, v_max: float = 4.0,
-                 a_max: float = 6.0, horizon: int = 10):
+                 a_max: float = 6.0, horizon: int = 10, optimize_times: bool = False):
         self.p = params
         self.course = course
         self.v_max, self.a_max, self.N = v_max, a_max, horizon
+        # gate_path.plan_gate_trajectory optimises segment times by default since
+        # origin/main 2026-10-28: faster laps, but one plan took 12 s wall / 105 s CPU
+        # for straight3 on an M-series Mac and minutes under load, inside reset().
+        # Off by default here (distance-proportional times, as in the published runs).
+        self.optimize_times = optimize_times
         self.dt = params.control_dt
         self.solve_times = []
         self.n_failures = 0
@@ -103,7 +108,8 @@ class MpcController:
             start, start_yaw = self.course.start_pose()
             self.traj, _ = plan_gate_trajectory(gates, np.asarray(start, dtype=float),
                                                 v_max=self.v_max, a_max=self.a_max,
-                                                verbose=False)
+                                                verbose=False,
+                                                optimize_times=self.optimize_times)
             self._ref = TrajectoryReference(self.traj, start_yaw, m=p.mass)
             (self.opti, self.X, self.U, self.X_init, self.U_prev,
              self.X_ref) = create_drone_mpc_optimizer(N=self.N, dt=self.dt, m=p.mass,

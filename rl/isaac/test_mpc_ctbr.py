@@ -25,8 +25,12 @@ from runner import run_in_vehicle, edge_margins
 from vehicle import SimVehicle
 
 P = QuadParams()
-# wrench-MPC lap times (HANDOFF, v4 a6) for the same plan
-WRENCH_LAP = {"straight3": 9.56, "oval6": 22.68, "slalom5": 28.46}
+# Reference laps of this controller in QuadSim (v4 a6, optimize_times=False). Re-measured
+# 2026-10-29 after merging origin/main (MPC model now has drag and tighter limits): was
+# 9.56 / 22.68 / 28.46 s, the wrench-MPC numbers in HANDOFF and the 2026-10-24 Isaac runs.
+# With the planner's optimize_times=True the laps are 5.72 / 13.88 / 19.38 s, but one plan
+# takes 12 s+ (see MpcController.optimize_times).
+WRENCH_LAP = {"straight3": 9.44, "oval6": 22.60, "slalom5": 28.40}
 MEAN_MS_BOUND, P95_MS_BOUND = 20.0, 40.0
 _ALL_MS = []
 
@@ -46,7 +50,7 @@ def test_quadsim_tracks_and_timing():
         print(f"  {name}: lap {s['lap_time']:.2f} s (wrench MPC {ref:.2f} s), solve mean "
               f"{ms.mean():.1f} / p95 {np.percentile(ms, 95):.1f} / max {ms.max():.1f} ms, "
               f"failures {ctl.n_failures}")
-        # same plan, same time-parametrised reference: laps should be within 1 s of the wrench MPC
+        # regression: laps within 1 s of the reference above
         assert abs(s["lap_time"] - ref) <= 1.0, (name, s["lap_time"], ref)
         assert ctl.n_failures == 0
         # Bounds: the control period is 20 ms, so a mean over 20 ms cannot be real time;

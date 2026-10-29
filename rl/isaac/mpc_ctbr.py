@@ -320,11 +320,17 @@ class MpcCtbrController(MpcController):
         gates = [PathGate(g.name, g.T_world_gate(), g.side) for g in course.gates[k0:]]
         pos = np.asarray(pos, dtype=float).reshape(3).copy()
         yaw, gen = self._yaw0, self._plan_gen     # measured yaw of the last act() (unwrapped)
+        # The plan starts at rest (vel unused). optimize_times=False: gate_path's segment-time
+        # optimisation (origin/main 2026-10-28) made one mid-flight re-plan take 94 s.
+        # NOT start_state=current velocity, although gate_path supports it since then:
+        # min_snap.fit_to_limits never returned for a start on gate 0's plane at 1.7 m/s
+        # (test_midflight_replan_straight3): its time rescale blew up and sampling the
+        # trajectory at 5 ms ran the machine out of memory (2026-10-29). Revisit once fixed.
 
         def plan():
             t0 = time.perf_counter()
-            traj, _ = plan_gate_trajectory(gates, pos, v_max=self.v_max,
-                                           a_max=self.a_max, verbose=False)
+            traj, _ = plan_gate_trajectory(gates, pos, v_max=self.v_max, a_max=self.a_max,
+                                           verbose=False, optimize_times=False)
             ref = TrajectoryReference(traj, yaw, m=self.p.mass)
             return gen, traj, ref, course, k0, 1e3 * (time.perf_counter() - t0)
 

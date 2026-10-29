@@ -23,7 +23,7 @@ sys.path.insert(0, RL)
 import numpy as np
 import torch
 
-import gate_map as gm
+import vision_gate_map as gm
 import gate_vision as gv
 import course_update as cu
 import runner
