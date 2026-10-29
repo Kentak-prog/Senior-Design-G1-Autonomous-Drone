@@ -148,7 +148,15 @@ async def main():
     # Fix camera transform (known bug — ROS2CameraGraph bakes spawn height)
     cam_prim = stage.GetPrimAtPath(f"{DRONE_PATH}/body/{CAMERA_NAME}")
     if cam_prim.IsValid():
-        pitch_deg = 15.0
+        # Camera up-tilt. 15 deg suits the gate-detection tests (gates above the drone).
+        # For VIO + MPC flights use 0 (level): at gate height a 15 deg-up camera loses the
+        # gates' bottom edges (Trajectory/simulate_vio_mpc.py). One-shot override, set
+        # BEFORE exec'ing this file:  import os; os.environ["CAMERA_PITCH_DEG"] = "0"
+        # (os.environ, not a Script Editor variable -- see spawn_test_gates.main's note).
+        # Whatever is used here, pass the same camera_pitch_deg to ros2_nodes/vio_node.py.
+        import os
+        pitch_deg = float(os.environ.pop("CAMERA_PITCH_DEG", "15.0"))
+        print(f"[init] camera pitch {pitch_deg} deg up")
         xf = UsdGeom.Xformable(cam_prim)
         xf.ClearXformOpOrder()
         cam_prim.RemoveProperty("xformOp:translate")

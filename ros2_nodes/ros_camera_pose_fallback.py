@@ -21,8 +21,15 @@ output.
 """
 
 import argparse
+import os
+import sys
 
 import numpy as np
+
+# Lives in ros2_nodes/ with the other ROS 2 nodes; the vision code it uses is in vision/.
+_VISION = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vision")
+if _VISION not in sys.path:
+    sys.path.insert(0, _VISION)
 
 from camera import make_transform
 from gate_pose import estimate_gate_pose, gate_pose_world, approach_waypoints, DEFAULT_GATE_SIDE
