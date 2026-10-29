@@ -1,0 +1,35 @@
+[WARN] [1793252387.862585550] [min_snap_ros_node]: state source 'pegasus' (/drone00/state/pose + /drone00/state/twist) is the simulator's GROUND TRUTH -- use it to bring the controller up, not for a vision + IMU test
+[INFO] [1793252387.865524815] [min_snap_ros_node]: planning through 3 map gates from /workspace/test_gates.json (yaw_mode next_gate)
+[INFO] [1793252387.869311939] [min_snap_ros_node]: waiting for True on /mpc_offboard_bridge/engaged before planning
+[INFO] [1793252405.444691010] [min_snap_ros_node]: plan ready, waiting for /mpc_offboard_bridge/engaged: 3 gate(s) from [ 0.35 -0.06  2.55]: 15.69 s, 10 waypoints, 785 points; gate_0 [5.16 0.57 3.37], gate_1 [ 8.6  -3.25  3.66], gate_2 [13.05 -2.07  3.77]
+[INFO] [1793252536.776114021] [min_snap_ros_node]: start received on /mpc_offboard_bridge/engaged
+[INFO] [1793252536.824248080] [min_snap_ros_node]: published plan through 3 gate(s) from [ 0.35 -0.06  2.55]: 15.69 s, 10 waypoints, 785 points; gate_0 [5.16 0.57 3.37], gate_1 [ 8.6  -3.25  3.66], gate_2 [13.05 -2.07  3.77]
+Traceback (most recent call last):
+  File "/workspace/Senior-Design-G1-Autonomous-Drone/ros2_nodes/min_snap_node.py", line 218, in main
+    rclpy.spin(node)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 229, in spin
+    executor.spin_once()
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 812, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 801, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(timeout_sec=timeout_sec)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 784, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/executors.py", line 685, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/workspace/Senior-Design-G1-Autonomous-Drone/ros2_nodes/min_snap_node.py", line 227, in <module>
+    main()
+  File "/workspace/Senior-Design-G1-Autonomous-Drone/ros2_nodes/min_snap_node.py", line 223, in main
+    rclpy.shutdown()
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/__init__.py", line 130, in shutdown
+    _shutdown(context=context)
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/utilities.py", line 58, in shutdown
+    return context.shutdown()
+  File "/opt/ros/humble/local/lib/python3.10/dist-packages/rclpy/context.py", line 102, in shutdown
+    self.__context.shutdown()
+rclpy._rclpy_pybind11.RCLError: failed to shutdown: rcl_shutdown already called on the given context, at ./src/rcl/init.c:241
