@@ -5,8 +5,8 @@ summary.json, test_gates.json) in the same camera-view orientation as
 plot_3_gates.py: forward up the page, the drone's left on the left.
 
 Run from Senior-Design-G1-Autonomous-Drone/Trajectory:
-    python "isaac results/3_gates/scripts/plot_px4_flight.py" \
-        "isaac results/3_gates/px4_flights/20261023_152804_all_gates_passed"
+    python "isaac_results/3_gates/scripts/plot_px4_flight.py" \
+        "isaac_results/3_gates/px4_flights/20261023_152804_all_gates_passed"
 (no argument = that run). Writes <run>/px4_flight.png.
 """
 

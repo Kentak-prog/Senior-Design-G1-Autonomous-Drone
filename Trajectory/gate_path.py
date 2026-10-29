@@ -27,14 +27,22 @@ from dataclasses import dataclass
 import numpy as np
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-for _sub in ("vision",):
+for _sub in ("vision", "control"):
     _p = os.path.join(_REPO, _sub)
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
 from gate_pose import approach_waypoints, DEFAULT_GATE_SIDE   # noqa: E402
+from drone_constraints import drone_constraints               # noqa: E402
 
-from min_snap import fit_to_limits                             # noqa: E402
+from min_snap import fit_to_limits, optimize_segment_times     # noqa: E402
+
+# The planner's speed / acceleration limits: a fraction of what the drone can
+# do (control/drone_constraints.py), leaving the rest as margin for the
+# controller to correct errors. 0.8 x 12 m/s = 9.6 m/s, 0.8 x 15 m/s^2 = 12 m/s^2.
+LIMIT_FRACTION = 0.8
+DEFAULT_V_MAX = LIMIT_FRACTION * drone_constraints["linear_velocity_limits"]["max"]
+DEFAULT_A_MAX = LIMIT_FRACTION * drone_constraints["linear_accel_limits"]["max"]
 
 
 @dataclass
@@ -92,6 +100,10 @@ def gate_waypoints(gates, start, standoff: float = 1.0, finish_dist: float = 4.0
 
     Returns a list of dicts: {'name', 'position', 'type', 'gate'} where type is
     start / pre / center / post / finish (plus 'avoid' if the planner inserts any).
+
+    In flight the start can already be on a gate's approach line. If the start
+    is in front of the first gate, near its line and closer than its pre point
+    (plus a margin), the pre point would be behind the drone, so it is skipped.
     """
     start = np.asarray(start, dtype=float)
     wps = [{'name': 'start', 'position': start, 'type': 'start', 'gate': None}]
@@ -109,7 +121,16 @@ def gate_waypoints(gates, start, standoff: float = 1.0, finish_dist: float = 4.0
 
         pre, center, _ = approach_waypoints(gate.T_world_gate, standoff=d_pre)
         _, _, post = approach_waypoints(gate.T_world_gate, standoff=d_post)
-        wps.append({'name': f'{gate.name}_pre', 'position': pre, 'type': 'pre', 'gate': i})
+        # Skip the pre point only when the start is already ON the approach: in front
+        # of the gate (between the pre point and the plane) and close to its line.
+        # A start BEHIND the gate (e.g. lap 2, coming back round) needs the pre point
+        # most of all -- it is what makes the path loop round to the front.
+        rel = gate.center - start
+        start_to_plane = rel @ gate.normal                         # > 0: start is in front of the gate
+        on_approach = (0.0 < start_to_plane < d_pre + 0.3 and
+                       np.linalg.norm(rel - start_to_plane * gate.normal) < gate.side / 2)
+        if i > 0 or not on_approach:
+            wps.append({'name': f'{gate.name}_pre', 'position': pre, 'type': 'pre', 'gate': i})
         wps.append({'name': gate.name, 'position': center, 'type': 'center', 'gate': i})
         if next_pt is not None:
             wps.append({'name': f'{gate.name}_post', 'position': post, 'type': 'post', 'gate': i})
@@ -205,11 +226,20 @@ def _avoidance_point(gate, p0, p1, clearance):
 # Planning
 # ---------------------------------------------------------------------------
 
-def plan_gate_trajectory(gates, start, v_max: float = 4.0, a_max: float = 6.0,
+def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
                          standoff: float = 1.0, finish_dist: float = 4.0,
-                         clearance: float = 0.5, max_iters: int = 10, verbose: bool = True):
+                         clearance: float = 0.5, max_iters: int = 20, verbose: bool = True,
+                         start_state=None, obstacle_gates=(), optimize_times: bool = True):
     """
     Gates -> waypoints -> min-snap trajectory that respects v_max / a_max.
+
+    v_max / a_max default to DEFAULT_V_MAX / DEFAULT_A_MAX (80 % of the drone's
+    limits in control/drone_constraints.py); pass smaller ones for a gentler run.
+
+    optimize_times (default): each segment's share of the time is optimized for
+    the shortest total time within the limits (min_snap.optimize_segment_times)
+    instead of being proportional to its length. Only from rest: with a moving
+    start_state (in-flight replan) the distance-proportional fit is used.
 
     Every gate with a reliable normal is crossed perpendicular to its plane
     (velocity direction constraint at the center). If the polynomial bulges
@@ -217,24 +247,47 @@ def plan_gate_trajectory(gates, start, v_max: float = 4.0, a_max: float = 6.0,
     frame, the midpoint of that segment's straight line is inserted as an
     extra waypoint and the trajectory is re-solved.
 
+    In-flight replanning:
+      start_state:    {1: vel, 2: acc, 3: jerk} at `start` (None = at rest)
+      obstacle_gates: gates NOT to fly through any more (already passed) whose
+                      frames must still be avoided
+
     Returns (traj, waypoints).
     """
+    v_max = DEFAULT_V_MAX if v_max is None else v_max
+    a_max = DEFAULT_A_MAX if a_max is None else a_max
+    moving = start_state is not None and any(np.any(np.asarray(v) != 0) for v in start_state.values())
     wps = gate_waypoints(gates, start, standoff=standoff, finish_dist=finish_dist)
+    check_gates = list(gates) + list(obstacle_gates)
 
     traj = None
     for _ in range(max_iters):
         points = np.array([w['position'] for w in wps])
         fixed_dir = {i: gates[w['gate']].normal for i, w in enumerate(wps)
                      if w['type'] == 'center' and gates[w['gate']].normal_reliable}
-        traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max)
+        if optimize_times and not moving:
+            traj = optimize_segment_times(points, fixed_dir, v_max=v_max, a_max=a_max)
+        else:
+            traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, start_state=start_state)
 
-        bad = _first_bad_crossing(traj, gates, clearance)
+        bad = _first_bad_crossing(traj, check_gates, clearance)
         if bad is None:
             return traj, wps
 
         gate, c, edge_dist = bad
         seg = int(traj.segment_index(c['time']))
         point = _avoidance_point(gate, wps[seg]['position'], wps[seg + 1]['position'], clearance)
+
+        # Stalled: the new point lands on a detour point we already added. Happens when
+        # the required clearance is geometrically impossible, e.g. two gates side by side
+        # with less than 2 * clearance between their frames and the route passing between
+        # them. More waypoints would not help, so keep this trajectory and say how close it gets.
+        avoid_pts = [w['position'] for w in wps if w['type'] == 'avoid']
+        if not c['inside'] and avoid_pts and min(np.linalg.norm(p - point) for p in avoid_pts) < 0.05:
+            print(f"[plan] WARNING: cannot keep {clearance:.2f} m from the {gate.name} frame "
+                  f"(not enough room); best found passes {edge_dist:.2f} m outside it.")
+            return traj, wps
+
         wps.insert(seg + 1, {'name': f'avoid_{gate.name}', 'position': point,
                              'type': 'avoid', 'gate': None})
         if verbose:

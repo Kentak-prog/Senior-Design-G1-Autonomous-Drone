@@ -36,12 +36,19 @@ WHY these numbers (provenance)
 
 from dataclasses import dataclass
 import math
+import os
+import sys
+
+_CONTROL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control")
+if _CONTROL not in sys.path:
+    sys.path.insert(0, _CONTROL)
+from drone_constraints import drone_constraints   # noqa: E402  (the one place the mass is set)
 
 
 @dataclass
 class QuadParams:
     # --- rigid body (PX4 iris; TODO verify against the Iris USD) ---
-    mass: float = 1.5                                        # kg
+    mass: float = drone_constraints["mass"]                  # kg, from control/drone_constraints.py
     inertia_diag: tuple = (0.029125, 0.029125, 0.055225)     # kg m^2 (Ixx, Iyy, Izz)
     gravity: float = 9.81                                    # m/s^2
 

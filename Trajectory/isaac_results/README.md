@@ -18,8 +18,8 @@ From `Senior-Design-G1-Autonomous-Drone/Trajectory/`:
 
 ```
 python simulate_min_snap.py --start -0.0314 -0.021 2.577 --heading -8.01 \
-    --gates "isaac results/test_gates.json" \
-    --perception {truth|synthetic} --out-dir "isaac results/<run>"
+    --gates "isaac_results/test_gates.json" \
+    --perception {truth|synthetic} --out-dir "isaac_results/<run>"
 ```
 
 Defaults otherwise: v_max 4.0 m/s, a_max 6.0 m/s², dt 0.02 s, NMPC horizon 10,

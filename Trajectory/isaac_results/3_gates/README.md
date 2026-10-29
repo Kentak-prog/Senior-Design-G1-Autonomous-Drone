@@ -57,6 +57,6 @@ Run from `Senior-Design-G1-Autonomous-Drone/Trajectory`.
 | `record_novnc.js` | paste into the browser console on the noVNC page: `startRec()`, then `stopAndSave("name.webm")` |
 
 ```
-python "isaac results/3_gates/scripts/plot_3_gates.py"
-python "isaac results/3_gates/scripts/plot_px4_flight.py" "isaac results/3_gates/px4_flights/<run>"
+python "isaac_results/3_gates/scripts/plot_3_gates.py"
+python "isaac_results/3_gates/scripts/plot_px4_flight.py" "isaac_results/3_gates/px4_flights/<run>"
 ```

@@ -16,7 +16,7 @@ as the control model:
 
 => thrust direction b = (a + g e3) / |a + g e3|, rotate by -psi, read off
 phi and theta. Body rates p, q, r come from the Euler-rate relations in
-control/Drone_State_Equations.py. U1 (feed-forward thrust) is exposed too,
+control/New_Drone_State_Equations.py. U1 (feed-forward thrust) is exposed too,
 for warm-starting the optimizer.
 
 Heading (psi): starts at the given start heading, blends over the first part
@@ -37,7 +37,7 @@ import numpy as np
 _CONTROL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control")
 if _CONTROL not in sys.path:
     sys.path.insert(0, _CONTROL)
-from drone_constraints import drone_constraints   # noqa: E402
+from drone_constraints import drone_constraints, linear_drag as LINEAR_DRAG   # noqa: E402
 
 G = 9.81
 
@@ -53,22 +53,38 @@ class TrajectoryReference:
     states by interpolation. Past the end of the trajectory it holds the final
     hover state.
 
-    m is the drone mass (kg), defaulting to control/drone_constraints.py. It only scales the
-    feed-forward thrust -- the attitude reference does not depend on mass.
+    m is the drone mass (kg) and drag the body-frame linear drag (N per m/s),
+    both defaulting to control/drone_constraints.py -- the same values the
+    control model uses, so the feed-forward attitude and thrust match it. Without
+    drag, mass only scales the thrust; with drag, the tilt needed to push through
+    the air depends on drag/mass too.
     """
 
     def __init__(self, traj, start_yaw: float, dt: float = 0.005,
                  yaw_min_speed: float = 0.3, yaw_blend_speed: float = 1.0,
-                 yaw_smooth_sigma: float = 0.3, m: float = drone_constraints["mass"]):  # kg
+                 yaw_smooth_sigma: float = 0.3, m: float = drone_constraints["mass"],  # kg
+                 yaw_blend_time: float = None, drag=None, yaw_profile=None):
+        """
+        yaw_profile: optional callable (times, pos, vel) -> yaw (rad, continuous) that replaces the
+                     default "face the direction of travel" heading -- e.g. min_snap_planner's
+                     look-at-the-next-gate yaw, which keeps the gates in the camera for VIO.
+                     Roll, pitch, rates and thrust are still derived for whatever yaw it returns.
+        """
         self.traj = traj
         self.duration = traj.duration
         times, pos, vel, acc, _, _ = traj.sample(dt)
         self.times = times
 
-        psi = self._heading(times, vel, start_yaw, yaw_min_speed, yaw_blend_speed, yaw_smooth_sigma)
-        phi, theta, thrust = self._attitude_from_accel(acc, psi, m)
+        if yaw_profile is not None:
+            psi = np.asarray(yaw_profile(times, pos, vel), dtype=float)
+        else:
+            psi = self._heading(times, vel, start_yaw, yaw_min_speed, yaw_blend_speed, yaw_smooth_sigma,
+                                yaw_blend_time)
+        if drag is None:
+            drag = (LINEAR_DRAG["x"], LINEAR_DRAG["y"], LINEAR_DRAG["z"])
+        phi, theta, thrust = self._attitude_from_accel(acc, vel, psi, m, drag)
 
-        # Euler rates -> body rates (inverse of the kinematics in Drone_State_Equations.py)
+        # Euler rates -> body rates (inverse of the kinematics in New_Drone_State_Equations.py)
         dphi, dtheta, dpsi = (np.gradient(a, times) for a in (phi, theta, psi))
         p = dphi - np.sin(theta) * dpsi
         q = np.cos(phi) * dtheta + np.cos(theta) * np.sin(phi) * dpsi
@@ -78,7 +94,7 @@ class TrajectoryReference:
         self.thrust = thrust
 
     @staticmethod
-    def _heading(times, vel, start_yaw, min_speed, blend_speed, yaw_smooth_sigma):
+    def _heading(times, vel, start_yaw, min_speed, blend_speed, yaw_smooth_sigma, blend_time=None):
         speed = np.linalg.norm(vel[:, :2], axis=1)
         raw = np.arctan2(vel[:, 1], vel[:, 0])
 
@@ -106,22 +122,50 @@ class TrajectoryReference:
         heading = (np.convolve(pad(w * heading), kernel, 'valid') /
                    np.convolve(pad(w), kernel, 'valid'))
 
-        # Blend from the start heading to the travel heading while speeding up
-        reached = speed >= blend_speed
-        t_blend = times[np.argmax(reached)] if np.any(reached) else times[-1]
+        # From rest: blend while speeding up. In-flight replan (blend_time given):
+        # the drone is already moving, so blend over a fixed time from the yaw the
+        # previous plan had at this instant -- no jump in the yaw reference.
+        if blend_time is not None:
+            t_blend = blend_time
+        else:
+            reached = speed >= blend_speed
+            t_blend = times[np.argmax(reached)] if np.any(reached) else times[-1]
         w = _smoothstep(times / max(t_blend, 1e-6))
         return start_yaw + w * (heading - start_yaw)
 
     @staticmethod
-    def _attitude_from_accel(acc, psi, m):
-        f = np.column_stack((acc[:, 0], acc[:, 1], acc[:, 2] + G))     # = (U1/m) * b
+    def _rotation(phi, theta, psi):
+        """N x 3 x 3 body->world rotations, R = Rz(psi) Ry(theta) Rx(phi) (as in the control model)."""
+        cf, sf, ct, st, cp, sp = np.cos(phi), np.sin(phi), np.cos(theta), np.sin(theta), np.cos(psi), np.sin(psi)
+        return np.stack([
+            np.stack([cp * ct, cp * st * sf - sp * cf, cp * st * cf + sp * sf], axis=-1),
+            np.stack([sp * ct, sp * st * sf + cp * cf, sp * st * cf - cp * sf], axis=-1),
+            np.stack([-st, ct * sf, ct * cf], axis=-1)], axis=1)
+
+    @classmethod
+    def _attitude_from_accel(cls, acc, vel, psi, m, drag, iters=4):
+        """
+        Model: m a = U1 R e3 - m g e3 + R F_drag,  F_drag = -D R^T v  (body-frame linear drag)
+        =>  (U1/m) b = a + g e3 + R D R^T v / m,   b = R e3
+
+        The drag term depends on the attitude itself, so start from the no-drag
+        attitude and iterate (drag is small next to gravity, so a few passes converge).
+        """
+        D = np.diag(drag)
+        phi = theta = np.zeros(len(acc))
+        for i in range(iters + 1):
+            f = np.column_stack((acc[:, 0], acc[:, 1], acc[:, 2] + G))
+            if i > 0:
+                R = cls._rotation(phi, theta, psi)
+                v_body = np.einsum('nji,nj->ni', R, vel)                 # R^T v
+                f = f + np.einsum('nij,nj->ni', R, v_body @ D) / m       # + R D R^T v / m
+            b = f / np.linalg.norm(f, axis=1, keepdims=True)
+            c, s = np.cos(psi), np.sin(psi)
+            bx = c * b[:, 0] + s * b[:, 1]          # Rz(-psi) @ b
+            by = -s * b[:, 0] + c * b[:, 1]
+            phi = np.arcsin(np.clip(-by, -1.0, 1.0))
+            theta = np.arctan2(bx, b[:, 2])
         thrust = m * np.linalg.norm(f, axis=1)
-        b = f / np.linalg.norm(f, axis=1, keepdims=True)
-        c, s = np.cos(psi), np.sin(psi)
-        bx = c * b[:, 0] + s * b[:, 1]          # Rz(-psi) @ b
-        by = -s * b[:, 0] + c * b[:, 1]
-        phi = np.arcsin(np.clip(-by, -1.0, 1.0))
-        theta = np.arctan2(bx, b[:, 2])
         return phi, theta, thrust
 
     # ------------------------------------------------------------------ queries

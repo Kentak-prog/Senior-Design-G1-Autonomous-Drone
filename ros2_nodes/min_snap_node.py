@@ -69,8 +69,10 @@ def main():
             self.declare_parameter("pose_topic", "/drone00/state/pose")
             self.declare_parameter("twist_topic", "/drone00/state/twist")
             self.declare_parameter("odom_topic", "/state_estimate/odometry")
-            self.declare_parameter("v_max", 2.0)
-            self.declare_parameter("a_max", 2.0)
+            # 0 = the planner default: 80 % of the drone's limits (9.6 m/s, 12 m/s^2 for the Iris)
+            self.declare_parameter("v_max", 0.0)
+            self.declare_parameter("a_max", 0.0)
+            self.declare_parameter("optimize_times", True)
             self.declare_parameter("min_gates", 1)
             self.declare_parameter("min_hits", 3)
             self.declare_parameter("match_dist", 1.0)
@@ -146,8 +148,9 @@ def main():
         def publish_plan(self, gates, x):
             start, yaw = x[0:3, 0].copy(), float(x[5, 0])
             try:
-                traj, wps, ref = plan_course(gates, start, yaw, float(self.gp("v_max")), float(self.gp("a_max")),
-                                             yaw_mode=str(self.gp("yaw_mode")))
+                traj, wps, ref = plan_course(gates, start, yaw, float(self.gp("v_max")) or None,
+                                             float(self.gp("a_max")) or None, yaw_mode=str(self.gp("yaw_mode")),
+                                             optimize_times=bool(self.gp("optimize_times")))
             except Exception as exc:  # noqa: BLE001
                 self.get_logger().warn(f"min-snap planning failed: {exc}", throttle_duration_sec=2.0)
                 return

@@ -24,19 +24,16 @@ Plot: `3_gates/px4_flights/20261023_152804_all_gates_passed/px4_flight.png`.
 
 ## Where everything is
 
-Nothing new is committed to `main`. This repo has:
+Everything below is on `main`. It was developed on `px4-offboard-min-snap`
+(`1ac34e8` → `e02ee05`) and merged in PR #2.
 
-| What | Where | Git state |
-|---|---|---|
-| Flight script, tests (22 pass), README | `px4/` | on branch **`px4-offboard-min-snap`** only (commits `1ac34e8` → `7146eb0`, pushed). Not on `main`. |
-| This update, all results below | `Trajectory/isaac results/` | untracked (never committed) |
-| Flight video | `C:\Users\aaron\Downloads\isaac_px4_flight_152804.webm` | not in the repo |
+| What | Where |
+|---|---|
+| Flight script, tests (22 pass), README | `px4/` |
+| This update, all results below | `Trajectory/isaac_results/` |
+| Flight video | `C:\Users\aaron\Downloads\isaac_px4_flight_152804.webm` (not in the repo) |
 
-> `px4/` only exists on disk while `px4-offboard-min-snap` is checked out.
-> `git checkout main` makes it disappear. The untracked `isaac results/` stays
-> either way. Get `px4/` back with `git checkout px4-offboard-min-snap`.
-
-Inside `Trajectory/isaac results/`:
+Inside `Trajectory/isaac_results/`:
 
 | Path | Contents |
 |---|---|
@@ -119,7 +116,7 @@ Inside the container:
 
 ```bash
 cd /workspace/Senior-Design-G1-Autonomous-Drone
-git fetch && git checkout px4-offboard-min-snap && git pull
+git fetch && git checkout main && git pull
 pip install pymavlink        # once per container; ABORT if pip tries to upgrade numpy
 python3 px4/test_fly_min_snap_offboard.py    # expect: All tests passed. (22)
 ```
@@ -179,7 +176,7 @@ Copy it into `px4_flights/` as `<id>_<outcome>`, e.g.
 `20261023_152804_all_gates_passed`. From WSL:
 
 ```bash
-kubectl cp -c ros2-eval fake-isaac/<pod>:/workspace/px4_runs/min_snap_<id> "Trajectory/isaac results/3_gates/px4_flights/<id>_<outcome>"
+kubectl cp -c ros2-eval fake-isaac/<pod>:/workspace/px4_runs/min_snap_<id> "Trajectory/isaac_results/3_gates/px4_flights/<id>_<outcome>"
 ```
 
 `<pod>` comes from `kubectl get pods -n fake-isaac`; today it was
@@ -188,12 +185,12 @@ kubectl cp -c ros2-eval fake-isaac/<pod>:/workspace/px4_runs/min_snap_<id> "Traj
 Then, from `Trajectory/`:
 
 ```bash
-python "isaac results/3_gates/scripts/plot_px4_flight.py" "isaac results/3_gates/px4_flights/<id>_<outcome>"
+python "isaac_results/3_gates/scripts/plot_px4_flight.py" "isaac_results/3_gates/px4_flights/<id>_<outcome>"
 ```
 
 ## What went wrong on the way (and what was fixed)
 
-All fixes are on `px4-offboard-min-snap`.
+All fixes are on `main` (merged from `px4-offboard-min-snap`).
 
 1. **The dry run printed `armed=False` while the drone was flying.** The
    status was read before any heartbeat had arrived, and the first heartbeat

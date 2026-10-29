@@ -1,0 +1,11 @@
+[plan] t=3.00s from VIO pose [-0.16  0.01  2.51] (true [-0.04  0.    2.56]): 17.52 s
+[vio] gyro bias true [ 0.052  0.268 -0.181] deg/s, estimated [ 0.05   0.281 -0.201]; accel mean |a| 9.813 m/s^2 at hover
+[vio] initialized at t=1.97s; fixes full 118, position-only 0, rejected 0, unmatched 0
+[vio] position error mean 0.245 m, max 0.939 m; velocity error mean 0.101 m/s; yaw error max 0.33 deg
+[mpc] TRUE drone vs reference: mean 0.296 m, max 0.900 m; solve median 15.5 ms
+[result] TRUE path vs gates:
+  gate_0: t= 4.47s  offset=(+0.19, +0.11) m  frame margin 0.56 m  angle 12.4 deg
+  gate_1: t= 9.76s  offset=(+0.05, +0.06) m  frame margin 0.69 m  angle  0.8 deg
+  gate_2: t=13.94s  offset=(-0.06, +0.04) m  frame margin 0.69 m  angle  1.0 deg
+[result] ALL GATES PASSED
+[plot] isaac_results/3_gates/python_sim/vio_mpc_rehearsal.png

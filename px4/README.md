@@ -1,18 +1,22 @@
 # px4/ — flying the min-snap course in Isaac Sim through PX4
 
-Stage 1 of flying the gate course for real: PX4's own position controller
-tracks the min-snap reference, streamed as OFFBOARD position / velocity /
-acceleration / yaw setpoints over MAVLink. The repo NMPC is not in the loop
-yet (that is stage 2: attitude + thrust setpoints via `SET_ATTITUDE_TARGET`).
+Two ways to fly the gate course in Isaac Sim through PX4 OFFBOARD:
+
+- **Stage 1, PX4 position control** (`fly_min_snap_offboard.py`). PX4's own
+  position controller tracks the min-snap reference, streamed as position /
+  velocity / acceleration / yaw setpoints. **Flown successfully on 2026-10-23**
+  (`Trajectory/isaac_results/`).
+- **Stage 2, the repo NMPC in control** (`ros2_nodes/mpc_offboard_bridge.py`, with
+  `ros2_nodes/mpc_node.py` and `ros2_nodes/min_snap_node.py`). The NMPC sends
+  attitude + thrust setpoints (`SET_ATTITUDE_TARGET`), and PX4 only runs its
+  attitude and rate loops. **Untested against the cluster**; see "Stage 2" below.
 
 | File | What |
 |---|---|
-| `fly_min_snap_offboard.py` | plan from the live PX4 pose through the manifest gates, then fly it in OFFBOARD |
+| `fly_min_snap_offboard.py` | stage 1: plan from the live PX4 pose through the manifest gates, then fly it in OFFBOARD |
 | `test_fly_min_snap_offboard.py` | self-tests, including the full OFFBOARD sequence against a fake PX4 (`python3 test_fly_min_snap_offboard.py`) |
-
-**Status: untested against the cluster.** The planning, ENU/NED conversion
-and OFFBOARD sequence pass against a fake PX4; the real MAVLink link has not
-been flown yet.
+| `attitude_bridge.py` | stage 2: MPC attitude/thrust setpoints → PX4 `SET_ATTITUDE_TARGET` (conversions + OFFBOARD sequence; its ROS 2 front end is `ros2_nodes/mpc_offboard_bridge.py`) |
+| `test_attitude_bridge.py` | frame + thrust conversions and the OFFBOARD sequence against a fake PX4 |
 
 ## Running it
 
@@ -138,3 +142,181 @@ python3 px4/fly_min_snap_offboard.py --time-scale 0.44 --reposition
 
 Before the first flight, check this by comparing the PX4 start pose printed
 by the script with `/World/Iris/body` in Isaac.
+
+## Stage 2: the NMPC flies (untested on the cluster)
+
+```
+vision gate detector ──/iris_0/front_cam/gate_poses──▶ ros2_nodes/min_snap_node.py
+                                                          │ /min_snap/trajectory (latched, stamped t=0)
+state (/drone00/state/* or an Odometry) ─────────────────▶ ros2_nodes/mpc_node.py   (NMPC, 50 Hz)
+                                                          │ /mpc/attitude_setpoint
+                                                          ▼
+                                     ros2_nodes/mpc_offboard_bridge.py ──MAVLink SET_ATTITUDE_TARGET──▶ PX4
+```
+
+**Status.** The planner, the NMPC (closed loop on the 3-gate course: all gates,
+2.6 cm max error, ~7 ms per solve) and the bridge (conversions + OFFBOARD
+sequence against a fake PX4) are tested without ROS. None of it has run on the
+cluster, and the ROS wiring itself has not been run anywhere.
+
+**State source.** Both nodes default to `state_source:=pegasus`, which reads
+the simulator's **ground truth** (`/drone00/state/pose` + `/drone00/state/twist`).
+That's fine for bringing the controller up, but not for a vision + IMU test.
+`state_source:=odometry` reads a `nav_msgs/Odometry` instead, e.g. from an
+estimator built on `control/Kalman_Filter_MPC.py`'s IMU + pose updates.
+
+**Clock.** Run every node with `use_sim_time:=true`, and have Isaac publish
+`/clock`. The trajectory's time base, the MPC's 50 Hz timer and all staleness
+checks then follow sim time, so no `--time-scale` is needed. The bridge
+measures setpoint staleness by arrival time, so it doesn't depend on which
+clock the stamps use.
+
+**Run** (in `ros2-eval`, ROS sourced):
+
+```bash
+# once: build the message package (it had no package.xml / CMakeLists.txt before)
+cd /workspace && mkdir -p ros_ws/src && ln -sfn /workspace/Senior-Design-G1-Autonomous-Drone/drone_msgs ros_ws/src/drone_msgs
+cd ros_ws && colcon build --packages-select drone_msgs && source install/setup.bash
+
+cd /workspace/Senior-Design-G1-Autonomous-Drone
+python3 control/test_mpc_core.py && python3 px4/test_attitude_bridge.py     # sanity, no ROS needed
+python3 ros2_nodes/ros_camera_pose_fallback.py &                                    # gate detections
+python3 ros2_nodes/min_snap_node.py --ros-args -p use_sim_time:=true &
+python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true &
+python3 ros2_nodes/mpc_offboard_bridge.py --ros-args -p use_sim_time:=true             # asks before engaging
+```
+
+**Order.** Drone hovering (`commander takeoff`) → gates spawned →
+`min_snap_node` logs `published plan through N gate(s)`. Until then
+`mpc_node` holds the hover point. → The bridge prints the MPC's hover thrust
+(about 0.556 normalized) and asks before engaging. If the drone sinks or
+climbs at hover, pass `--hover-thrust` with PX4's hover throttle
+(`MPC_THR_HOVER` or the hover thrust estimate). Ctrl-C hands back to
+AUTO.LOITER.
+
+Bridge aborts (to AUTO.LOITER):
+- no new setpoint for 0.3 s
+- the MPC solver failing for 0.5 s
+- a setpoint tilted more than 45°
+
+If someone switches PX4 out of OFFBOARD, the bridge stops without fighting them.
+
+## Stage 3: VIO + MPC on the 3-gate course (untested on the cluster)
+
+The NMPC flies the 3-gate course of 2026-10-23 using **only the IMU and the
+camera**: no GPS, no simulator ground truth, no PX4 position.
+
+```
+/drone00/sensors/imu ─┐
+/iris_0/front_cam/rgb ┴─▶ ros2_nodes/vio_node.py ──/vio/odometry──▶ min_snap_node (map + look-at yaw)
+       (gate map: /workspace/test_gates.json)        └──────────▶ mpc_node ──▶ mpc_offboard_bridge ──▶ PX4
+```
+
+PX4 keeps running its own estimator (with Pegasus' GPS), but in this mode
+it only uses it for its attitude loop. Its position estimate matters only
+if the bridge aborts to AUTO.LOITER: that's the safety net.
+
+### Rehearsed offline first (`Trajectory/simulate_vio_mpc.py`)
+
+The rehearsal reproduces the same pipeline with Pegasus-like sensors: a 250 Hz
+FRD IMU with Pegasus' noise and a random gyro bias, and a 1280×720 camera
+through the real PnP, with latency and corner noise. Results:
+
+- **All gates passed.** This holds for 4 random seeds and for a degraded
+  camera (10 Hz, 150 ms latency, 1.5 px noise).
+- **VIO error at the gates:** 0.08–0.23 m (`python_sim/vio_mpc_rehearsal.png`).
+
+It also found three things the Isaac run needs:
+
+1. **Level camera.** With the 15° up-tilt used for the vision tests, the
+   gates' bottom edges leave the 36° vertical field of view once the drone
+   climbs to gate height. The VIO then sees nothing after takeoff and dead
+   reckons: about 3 m of error.
+2. **Look-at yaw** (`yaw_mode:=next_gate`). Facing along the velocity turns
+   the camera up to 60° away from the next gate on this slalom.
+
+   Only **both together** fix the problem: VIO error mean 0.70 → 0.25 m, max
+   2.98 → 0.94 m (and the max comes after the last gate).
+3. **One clock.** Without latency compensation, 150 ms of camera latency makes
+   the VIO diverge to 11 m and the drone misses gates. Compensation needs the
+   IMU and the images on the same clock. Pegasus stamps the IMU with **wall**
+   time and Isaac stamps images with **sim** time, so `workspace/sim_clock.py`
+   is required.
+4. **Speed.** The planner now defaults to 80 % of the drone's limits (9.6 m/s,
+   12 m/s²) with time-optimized segment timing. The MPC alone (perfect state)
+   flies that plan through all gates. **The VIO can't keep up:** at 12 m/s²
+   the drone tilts about 52°, the level camera points at the ground, and the
+   gates drop out of view. Rehearsal, one seed each:
+
+   | Limits (v / a) | Plan | VIO error mean / max | Result |
+   |---|---|---|---|
+   | 2 / 2 | 16.0 s | 0.21 / 0.61 m | all gates |
+   | 3 / 3 | 11.7 s | 0.28 / 0.85 m | all gates |
+   | 4 / 4 | 10.1 s | 0.31 / 0.86 m | all gates |
+   | 5 / 6 | 8.2 s | 1.07 / 2.86 m | all gates, marginal |
+   | 9.6 / 12 (default) | 5.8 s | 1.68 / 4.42 m | **gate_2 missed** |
+
+   So the runbook passes `v_max:=2.0 a_max:=2.0`. Step up to 3 and then 4
+   once 2 is clean.
+
+### Runbook
+
+**Get the code into the pod.** These changes are **not committed**. Commit
+and push them, then `git pull` in the pod, or `kubectl cp` the changed files.
+The Isaac-side scripts are run from the repo checkout in `/workspace`, NOT
+from `/workspace/scripts` (that copy doesn't have the camera-pitch option).
+
+1. **Isaac, fresh process.** Add the Flat Grid. Then in the Script Editor, each once:
+   ```python
+   import os; os.environ["CAMERA_PITCH_DEG"] = "0"; exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_example.py").read())
+   ```
+   ```python
+   exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/sim_clock.py").read())
+   ```
+   ```python
+   exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_gates_from_manifest.py").read())
+   ```
+   Expect:
+   - `[init] camera pitch 0.0 deg up`
+   - `[sim_clock] ... now uses sim time`
+   - three `[spawn_gates_from_manifest] gate_N` lines matching the 2026-10-23 course
+2. **PX4.** Start it (command in `vision/HANDOFF.md`), wait for `Ready for
+   takeoff!`, then `commander takeoff` at `pxh>`. The drone hovers near (0, 0, 2.5).
+3. **Check the clocks** (in `ros2-eval`). The three stamps should agree to
+   within a few tenths of a second:
+   ```bash
+   ros2 topic echo --once /clock
+   ros2 topic echo --once /drone00/sensors/imu --field header.stamp
+   ros2 topic echo --once /iris_0/front_cam/camera_info --field header.stamp
+   ```
+4. **Build `drone_msgs`** once per container (see Stage 2), then start the
+   nodes in this order, each in its own `ros2-eval` shell or with `&`:
+   ```bash
+   python3 ros2_nodes/vio_node.py --ros-args -p use_sim_time:=true -p camera_pitch_deg:=0.0
+   ```
+   **Wait for its log** before going on:
+   - `|accel| at hover ~9.81` (otherwise the IMU frame or the hover is wrong)
+   - `pos [...]` with `error vs ground truth` under about **0.1 m** while hovering
+     (the ground truth is only logged for comparison; the estimator never uses it)
+   ```bash
+   python3 ros2_nodes/min_snap_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry \
+       -p odom_topic:=/vio/odometry -p gates_file:=/workspace/test_gates.json -p yaw_mode:=next_gate -p settle_s:=3.0 \
+       -p v_max:=2.0 -p a_max:=2.0
+   python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry -p odom_topic:=/vio/odometry
+   ```
+   Expect `published plan through 3 gate(s)`, then `mpc_node` solve times.
+5. **Record** (`Trajectory/isaac_results/3_gates/scripts/record_novnc.js`: `startRec()`), then:
+   ```bash
+   python3 ros2_nodes/mpc_offboard_bridge.py --ros-args -p use_sim_time:=true
+   ```
+   It prints the hover thrust and asks before engaging. Ctrl-C hands back to
+   AUTO.LOITER, which flies on PX4's own estimate.
+
+**Don't engage if:**
+- the VIO's error vs ground truth while hovering is over about 0.3 m
+- `mpc_node` reports solves near or above 20 ms
+- the plan's start is far from where Isaac shows the drone
+
+**Logs:** `/workspace/vio_runs/vio_<time>/` holds `vio_log.csv` (the
+estimate next to ground truth, every 8 ms) and `vio_events.csv` (every fix
+and rejection).

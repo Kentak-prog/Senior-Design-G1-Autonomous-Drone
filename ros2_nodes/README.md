@@ -55,7 +55,8 @@ runbook, with what to check before engaging, is `px4/README.md` "Stage 3":
 ```bash
 python3 ros2_nodes/vio_node.py --ros-args -p use_sim_time:=true -p camera_pitch_deg:=0.0
 python3 ros2_nodes/min_snap_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry \
-    -p odom_topic:=/vio/odometry -p gates_file:=/workspace/test_gates.json -p yaw_mode:=next_gate -p settle_s:=3.0
+    -p odom_topic:=/vio/odometry -p gates_file:=/workspace/test_gates.json -p yaw_mode:=next_gate -p settle_s:=3.0 \
+    -p v_max:=2.0 -p a_max:=2.0
 python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry -p odom_topic:=/vio/odometry
 python3 ros2_nodes/mpc_offboard_bridge.py --ros-args -p use_sim_time:=true
 ```

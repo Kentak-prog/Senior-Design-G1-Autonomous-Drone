@@ -463,10 +463,51 @@ So the code:
 
 In exact math one rescale is enough. The loop (up to 5 passes) only cleans up the error from estimating peaks by sampling.
 
-### Limitations and possible improvements
+### Note: `v_cruise_frac` has no effect from rest
 
-- Only the **overall pace** is tuned. The **ratio** of time between segments stays fixed by distance. Full min-snap planners also optimize each segment's share of time (for example, by gradient descent on total snap with total time fixed), which can give noticeably smoother or faster paths.
-- Tuning `v_cruise_frac` and the initial time split is the main lever for trading smoothness against lap time.
+Because every segment is rescaled by the same factor, the cruise speed used
+for the initial guess cancels out. Changing 60 % to 80 % gives exactly the
+same trajectory. Only the **limits** and the **split** of time between
+segments matter.
+
+### Time-optimal split (`min_snap.optimize_segment_times`, the default since 2026-10-28)
+
+With the split fixed by distance, a long straight gets the same time per
+metre as a tight turn. The turn hits `a_max` while the straight never gets
+near `v_max`. `optimize_segment_times` frees the split:
+
+```
+Tᵢ = T0ᵢ · exp(θᵢ)              T0 = distance-proportional (no 0.2 s floor), θ₀ = 0
+cost(θ) = Σ Tᵢ · s(θ)           s = the uniform rescale that just meets v_max / a_max
+```
+
+It minimizes the cost with Powell's method, which is derivative-free
+because the cost is a max over samples and so not smooth. Each evaluation
+is one KKT solve and one sample. Starting from an accelerate–cruise time
+per segment was tried and converged to slower plans.
+
+On the 3-gate course: 17.41 → 15.99 s at 2 m/s / 2 m/s², and 6.21 → 5.78 s
+at the new default limits (7–8 % faster). Planning takes 3–6 s.
+
+`gate_path.plan_gate_trajectory(optimize_times=True)` uses it from rest.
+In-flight replans (a moving `start_state`) keep the distance-proportional
+fit, because uniform rescaling is not exact when the start velocity is
+fixed.
+
+### Default limits
+
+`gate_path.DEFAULT_V_MAX` / `DEFAULT_A_MAX` are **80 % of the drone's
+limits** in `control/drone_constraints.py`: 9.6 m/s and 12 m/s² for the
+Iris. The remaining 20 % is margin for the controller. Pass smaller limits
+for gentler runs. The VIO + MPC run uses 2 m/s / 2 m/s², because at
+12 m/s² the drone tilts about 52° and the camera loses the gates (see
+`px4/README.md`, Stage 3).
+
+### Remaining limitations
+
+- The optimizer minimizes time only. It does not trade time against
+  smoothness (snap), and it finds a local optimum.
+- Gate positions and the pre/post standoffs are fixed; only timing is optimized.
 
 ---
 

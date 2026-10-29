@@ -14,8 +14,8 @@ The NMPC run takes a few minutes, so its log is cached in python_sim/mpc_log.npz
 and reused on later runs unless --mpc is passed again.
 
 Run from Senior-Design-G1-Autonomous-Drone/Trajectory:
-    python "isaac results/3_gates/scripts/plot_3_gates.py"          # plan figure (+ MPC figure if cached)
-    python "isaac results/3_gates/scripts/plot_3_gates.py" --mpc    # also fly the NMPC and cache it
+    python "isaac_results/3_gates/scripts/plot_3_gates.py"          # plan figure (+ MPC figure if cached)
+    python "isaac_results/3_gates/scripts/plot_3_gates.py" --mpc    # also fly the NMPC and cache it
 """
 
 import argparse
