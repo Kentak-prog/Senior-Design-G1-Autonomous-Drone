@@ -294,8 +294,9 @@ def main():
                     help="artificial course layout (spawn_test_gates.py specs)")
     ap.add_argument("--perception", choices=["synthetic", "truth"], default="synthetic")
     ap.add_argument("--corner-noise-px", type=float, default=0.5)
-    ap.add_argument("--v-max", type=float, default=4.0)
-    ap.add_argument("--a-max", type=float, default=6.0)
+    ap.add_argument("--v-max", type=float, default=None, help="default: 80%% of the drone's max (9.6 m/s)")
+    ap.add_argument("--a-max", type=float, default=None, help="default: 80%% of the drone's max (12 m/s^2)")
+    ap.add_argument("--no-time-opt", action="store_true", help="distance-proportional segment times (old planner)")
     ap.add_argument("--mass", type=float, default=drone_constraints["mass"],
                     help="drone mass (kg); default from control/drone_constraints.py")
     ap.add_argument("--dt", type=float, default=0.02, help="control period (s)")
@@ -334,7 +335,8 @@ def main():
                  if args.perception == "synthetic" else true_gates)
 
     # 4. plan
-    traj, wps = plan_gate_trajectory(est_gates, start, v_max=args.v_max, a_max=args.a_max)
+    traj, wps = plan_gate_trajectory(est_gates, start, v_max=args.v_max, a_max=args.a_max,
+                                     optimize_times=not args.no_time_opt)
     _, _, vel, acc, _, _ = traj.sample(0.005)
     print(f"\n[plan] {len(wps)} waypoints, {traj.n_seg} segments, duration {traj.duration:.2f} s, "
           f"peak speed {np.linalg.norm(vel, axis=1).max():.2f} m/s, "

@@ -7,7 +7,9 @@ minimum-snap trajectory solver
 each segment between waypoints is a 7th-order polynomial per axis, the solver
 minimizes the integral of squared snap (4th derivative of position) subject to:
   - passing through every waypoint (gate)
-  - rest-to-rest boundary conditions (zero vel/acc/jerk at start and finish)
+  - boundary conditions: zero vel/acc/jerk at the finish; at the start either
+    the same (rest) or a given vel/acc/jerk, so an in-flight replan picks up
+    exactly where the drone's current reference is
   - continuity of vel/acc/jerk/snap at interior waypoints (the optimum is
     then C6 smooth on its own)
   - optional velocity DIRECTION at chosen waypoints: velocity is forced
@@ -63,14 +65,17 @@ class MinSnapTrajectory:
     segment_times: M durations in seconds
     fixed_dir:     {waypoint_index: direction (3,)} -- velocity at that
                    (interior) waypoint is constrained parallel to direction
+    start_state:   {1: vel (3,), 2: acc (3,), 3: jerk (3,)} at the first
+                   waypoint; any derivative left out is zero. None = start at rest.
     """
 
-    def __init__(self, waypoints, segment_times, fixed_dir=None):
+    def __init__(self, waypoints, segment_times, fixed_dir=None, start_state=None):
         self.waypoints = np.asarray(waypoints, dtype=float)
         self.n_seg = len(self.waypoints) - 1
         if self.n_seg < 1:
             raise ValueError("Need at least two waypoints.")
         self.fixed_dir = dict(fixed_dir or {})
+        self.start_state = {r: np.asarray(v, dtype=float) for r, v in (start_state or {}).items()}
         self.T = np.asarray(segment_times, dtype=float)
         self.t_breaks = np.concatenate(([0.0], np.cumsum(self.T)))
         self.coeffs, self.snap_cost = self._solve()   # coeffs: (3 axes, M segments, 8)
@@ -104,9 +109,10 @@ class MinSnapTrajectory:
                 add([(ax, s, poly_deriv_row(0.0, 0))], pts[s])
                 add([(ax, s, poly_deriv_row(self.T[s], 0))], pts[s + 1])
 
-            # Rest-to-rest: zero vel/acc/jerk at start and finish
+            # Start: given vel/acc/jerk (zero = rest). Finish: at rest.
             for r in range(1, 4):
-                add([(ax, 0, poly_deriv_row(0.0, r))], 0.0)
+                start_val = self.start_state[r][ax] if r in self.start_state else 0.0
+                add([(ax, 0, poly_deriv_row(0.0, r))], start_val)
                 add([(ax, M - 1, poly_deriv_row(self.T[-1], r))], 0.0)
 
             # Interior continuity
@@ -172,24 +178,98 @@ def initial_segment_times(points, v_cruise: float) -> np.ndarray:
     return np.maximum(dists / v_cruise, 0.2)
 
 
+def _peak_ratio(traj, v_max, a_max, dt=0.005):
+    """How far over (> 1) or under (< 1) the limits a trajectory is: max of v/v_max, sqrt(a/a_max)."""
+    _, _, vel, acc, _, _ = traj.sample(dt)
+    return max(np.max(np.linalg.norm(vel, axis=1)) / v_max,
+               np.sqrt(np.max(np.linalg.norm(acc, axis=1)) / a_max))
+
+
+def optimize_segment_times(points, fixed_dir=None, v_max: float = 4.0, a_max: float = 6.0,
+                           max_evals: int = 4000, verbose: bool = False) -> MinSnapTrajectory:
+    """
+    Time-optimal min-snap: choose each segment's SHARE of the time to make the
+    whole trajectory as fast as the limits allow.
+
+    fit_to_limits gives every segment a time proportional to its length and
+    then rescales all of them together until the peak speed or acceleration
+    touches the limit. That fixes the ratio between segments: a long straight
+    gets the same time per metre as a tight turn, so the turn hits a_max while
+    the straight never gets near v_max. Here the ratios are free:
+
+        T_i = T0_i * exp(theta_i)          (T0 = the distance-proportional split)
+        cost(theta) = total time after uniformly rescaling to the limits
+
+    Uniform rescaling is exact from rest (velocity scales 1/s, acceleration
+    1/s^2 -- see fit_to_limits), so every cost evaluation is one KKT solve and
+    one sample. theta_0 is held at 0 (the cost does not change if all theta
+    move together). Minimized with Powell's method (derivative-free: the cost
+    is a max over samples, so it is not smooth). Start from rest only.
+
+    Measured on the 3-gate course (2026-10-28): 17.41 -> 15.99 s at 2 / 2 and
+    6.21 -> 5.78 s at 9.6 m/s / 12 m/s^2 (7-8 % faster), 3-6 s of planning.
+    Starting from an accelerate-cruise time per segment instead of distance-
+    proportional was tried and converged to slower trajectories.
+    """
+    from scipy.optimize import minimize
+
+    points = np.asarray(points, dtype=float)
+    # distance-proportional start, without initial_segment_times' 0.2 s floor (at high
+    # speed the floor distorts the split between short and long segments)
+    T0 = np.maximum(np.linalg.norm(np.diff(points, axis=0), axis=1) / v_max, 1e-3)
+    M = len(T0)
+    if M < 2:
+        return fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max)
+
+    def total_time(free):
+        theta = np.concatenate(([0.0], np.clip(free, -2.0, 2.0)))   # each share within e^+-2 of T0's
+        T = T0 * np.exp(theta)
+        ratio = _peak_ratio(MinSnapTrajectory(points, T, fixed_dir), v_max, a_max, dt=0.01)
+        return float(np.sum(T) * ratio)
+
+    t_ref = total_time(np.zeros(M - 1))
+    res = minimize(total_time, np.zeros(M - 1), method="Powell",
+                   options={"xtol": 1e-3, "ftol": 1e-5, "maxfev": max_evals})
+    theta = np.concatenate(([0.0], np.clip(res.x, -2.0, 2.0)))
+    traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, segment_times=T0 * np.exp(theta))
+    if verbose:
+        print(f"[min_snap] segment times optimized: {t_ref:.2f} s -> {traj.duration:.2f} s "
+              f"({res.nfev} evaluations)")
+    return traj
+
+
 def fit_to_limits(points, fixed_dir=None, v_max: float = 4.0, a_max: float = 6.0,
-                  v_cruise_frac: float = 0.6) -> MinSnapTrajectory:
+                  v_cruise_frac: float = 0.6, start_state=None, segment_times=None) -> MinSnapTrajectory:
     """
     Solve with distance-proportional segment times, then uniformly rescale all
     times so the peak speed or acceleration just reaches v_max / a_max.
 
-    Direction constraints are homogeneous, so scaling every segment time by s
-    scales velocity by exactly 1/s and acceleration by 1/s^2 -- the shape is
-    unchanged. The loop only absorbs sampling error in the peak estimates.
+    From rest, direction constraints are homogeneous, so scaling every segment
+    time by s scales velocity by exactly 1/s and acceleration by 1/s^2 -- the
+    shape is unchanged and one rescale lands on the limit.
+
+    With a moving start_state (in-flight replan) the start velocity does NOT
+    scale with time, so the rescale is only approximate: iterate, and keep the
+    best trajectory that respects the limits (or, failing that, the one that
+    exceeds them least).
+
+    segment_times: start from these segment times instead of the distance-
+    proportional split (optimize_segment_times passes its optimized split).
     """
-    T = initial_segment_times(points, v_cruise=v_cruise_frac * v_max)
-    traj = None
-    for _ in range(5):
-        traj = MinSnapTrajectory(points, T, fixed_dir)
+    T = (np.asarray(segment_times, dtype=float).copy() if segment_times is not None
+         else initial_segment_times(points, v_cruise=v_cruise_frac * v_max))
+    moving = start_state is not None and any(np.any(np.asarray(v) != 0) for v in start_state.values())
+    best, best_key = None, None
+    for _ in range(10 if moving else 5):
+        traj = MinSnapTrajectory(points, T, fixed_dir, start_state)
         _, _, vel, acc, _, _ = traj.sample(0.005)
-        scale = max(np.max(np.linalg.norm(vel, axis=1)) / v_max,
+        ratio = max(np.max(np.linalg.norm(vel, axis=1)) / v_max,
                     np.sqrt(np.max(np.linalg.norm(acc, axis=1)) / a_max))
-        if abs(scale - 1.0) < 1e-3:
+        # Prefer within-limits (ratio <= 1), then closest to the limit (fastest)
+        key = (ratio > 1.0 + 1e-3, abs(ratio - 1.0))
+        if best_key is None or key < best_key:
+            best, best_key = traj, key
+        if abs(ratio - 1.0) < (1e-3 if not moving else 0.02):
             break
-        T = T * scale
-    return traj
+        T = T * ratio
+    return best

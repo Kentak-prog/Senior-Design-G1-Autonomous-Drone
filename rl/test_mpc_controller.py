@@ -79,16 +79,17 @@ def test_inertia_keyword():
     """Pure roll torque on a level, still drone: dp/dt = U2 / Ix."""
     mc_ = mc  # noqa: F841  (ensures control/ is on sys.path)
     from New_Drone_State_Equations import get_drone_dynamics
+    from drone_constraints import inertia as DEFAULT_INERTIA   # the default since 2c1dcfa (was 0.0081 / 0.0142)
     x0 = np.zeros(12)
     u = np.array([0.0, 0.1, 0.0, 0.0])
     f, _, _ = get_drone_dynamics()
-    assert abs(float(f(x0, u)[9]) - 0.1 / 0.0081) < 1e-9
-    f, _, _ = get_drone_dynamics(inertia=(0.029125, 0.029125, 0.055225))
-    assert abs(float(f(x0, u)[9]) - 0.1 / 0.029125) < 1e-9
+    assert abs(float(f(x0, u)[9]) - 0.1 / DEFAULT_INERTIA["Ixx"]) < 1e-9
+    f, _, _ = get_drone_dynamics(inertia=(0.02, 0.03, 0.05))     # an explicit inertia overrides the default
+    assert abs(float(f(x0, u)[9]) - 0.1 / 0.02) < 1e-9
     u = np.array([0.0, 0.0, 0.0, 0.1])
-    assert abs(float(f(x0, u)[11]) - 0.1 / 0.055225) < 1e-9
+    assert abs(float(f(x0, u)[11]) - 0.1 / 0.05) < 1e-9
     f, _, _ = get_drone_dynamics()
-    assert abs(float(f(x0, u)[11]) - 0.1 / 0.0142) < 1e-9
+    assert abs(float(f(x0, u)[11]) - 0.1 / DEFAULT_INERTIA["Izz"]) < 1e-9
     print("  inertia=None -> 0.0081/0.0142; inertia=(...) -> Iris values  OK")
 
 
