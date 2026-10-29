@@ -28,7 +28,15 @@ What it does:
 
   gates_file:=<test_gates.json> skips 1 and plans through the KNOWN course map
   once the state has been arriving for settle_s (the VIO + MPC run: the VIO
-  localizes against the same map). yaw_mode:=next_gate points the nose at the
+  localizes against the same map).
+
+  start_topic:=/mpc_offboard_bridge/engaged (std_msgs/Bool) holds the plan
+  back until the bridge reports OFFBOARD, so t = 0 is when the MPC actually
+  takes over. Without it t = 0 is when the plan is made, and the reference
+  runs on while PX4 is still hovering by itself. With the map the plan is
+  still computed at settle (time optimization takes seconds) and only
+  stamped and published on the start; if the drone has moved more than
+  start_tol_m from its start by then, it is planned again from there. yaw_mode:=next_gate points the nose at the
   next gate instead of along the velocity, which keeps the gates in the camera.
 
 The planning lives in Trajectory/min_snap_planner.py (no ROS; tested there).
@@ -83,6 +91,8 @@ def main():
             # map) instead of latching live detections. yaw_mode next_gate: look at the next gate.
             self.declare_parameter("gates_file", "")
             self.declare_parameter("yaw_mode", "velocity")
+            self.declare_parameter("start_topic", "")      # e.g. /mpc_offboard_bridge/engaged
+            self.declare_parameter("start_tol_m", 0.5)
             gp = lambda n: self.get_parameter(n).value   # noqa: E731
             self.gp = gp
 
@@ -104,6 +114,12 @@ def main():
             self.pub = self.create_publisher(MinSnapTrajectory, gp("trajectory_topic"), latched)
             self.create_timer(0.1, self.tick)
             self.planned_gates = None
+            self.ready = None              # (msg, start, gates, summary): planned, not yet published
+            self.started = not gp("start_topic")
+            if gp("start_topic"):
+                from std_msgs.msg import Bool
+                self.create_subscription(Bool, gp("start_topic"), self.start_cb, latched)
+                self.get_logger().info(f"waiting for True on {gp('start_topic')} before planning")
             self.MinSnapPoint, self.MinSnapTrajectory = MinSnapPoint, MinSnapTrajectory
 
         def _now(self):
@@ -119,18 +135,35 @@ def main():
                                    side=float(self.gp("gate_side")), viewer_pos=viewer) for p in msg.poses]
             self.latch.update(dets, self._now(), viewer)
 
+        def start_cb(self, msg):
+            if msg.data and not self.started:
+                self.started = True
+                self.get_logger().info(f"start received on {self.gp('start_topic')}")
+
         def tick(self):
             x = self.tracker.state
             if x is None:
                 return
             if self.map_gates is not None:
-                # known map: plan once the state has been coming in for settle_s (estimator settled)
+                # known map: plan once the state has been coming in for settle_s (estimator settled),
+                # publish once started
                 if self.planned_gates is not None:
                     return
                 if self.first_state_time is None:
                     self.first_state_time = self._now()
-                if self._now() - self.first_state_time >= float(self.gp("settle_s")):
-                    self.publish_plan(self.map_gates, x)
+                if self.ready is None and self._now() - self.first_state_time >= float(self.gp("settle_s")):
+                    self.ready = self.build_plan(self.map_gates, x)
+                    if self.ready is not None and not self.started:
+                        self.get_logger().info(f"plan ready, waiting for {self.gp('start_topic')}: {self.ready[3]}")
+                if self.ready is not None and self.started:
+                    moved = float(np.linalg.norm(x[0:3, 0] - self.ready[1]))
+                    if moved > float(self.gp("start_tol_m")):
+                        self.get_logger().warn(f"drone moved {moved:.2f} m since the plan was made; planning again")
+                        self.ready = self.build_plan(self.map_gates, x)
+                    if self.ready is not None:
+                        self.publish(*self.ready)
+                return
+            if not self.started:
                 return
             gates = self.latch.confirmed(viewer_pos=x[0:3, 0])
             if self.planned_gates is not None:
@@ -143,9 +176,12 @@ def main():
                        and self._now() - self.latch.last_new_gate_time >= float(self.gp("settle_s")))
             if len(gates) < int(self.gp("min_gates")) or not settled:
                 return
-            self.publish_plan(gates, x)
+            plan = self.build_plan(gates, x)
+            if plan is not None:
+                self.publish(*plan)
 
-        def publish_plan(self, gates, x):
+        def build_plan(self, gates, x):
+            """(msg without stamp, start position, gates, summary) or None if planning failed."""
             start, yaw = x[0:3, 0].copy(), float(x[5, 0])
             try:
                 traj, wps, ref = plan_course(gates, start, yaw, float(self.gp("v_max")) or None,
@@ -153,10 +189,9 @@ def main():
                                              optimize_times=bool(self.gp("optimize_times")))
             except Exception as exc:  # noqa: BLE001
                 self.get_logger().warn(f"min-snap planning failed: {exc}", throttle_duration_sec=2.0)
-                return
+                return None
             ts, states, thrust = trajectory_points(ref)
             msg = self.MinSnapTrajectory()
-            msg.header.stamp = self.get_clock().now().to_msg()     # t = 0 of this plan
             msg.header.frame_id = "map"
             for k, t in enumerate(ts):
                 pt = self.MinSnapPoint()
@@ -165,13 +200,17 @@ def main():
                     setattr(pt, f, float(states[i, k]))
                 pt.thrust = float(thrust[k])
                 msg.points.append(pt)
+            summary = (f"{len(gates)} gate(s) from {np.round(start, 2)}: {traj.duration:.2f} s, "
+                       f"{len(wps)} waypoints, {len(ts)} points; "
+                       + ", ".join(f"{g.name} {np.round(g.center, 2)}{'' if g.normal_reliable else ' (center only)'}"
+                                   for g in gates))
+            return msg, start, gates, summary
+
+        def publish(self, msg, start, gates, summary):
+            msg.header.stamp = self.get_clock().now().to_msg()     # t = 0 of this plan
             self.pub.publish(msg)
             self.planned_gates = gates
-            self.get_logger().info(
-                f"published plan through {len(gates)} gate(s) from {np.round(start, 2)}: {traj.duration:.2f} s, "
-                f"{len(wps)} waypoints, {len(ts)} points; "
-                + ", ".join(f"{g.name} {np.round(g.center, 2)}{'' if g.normal_reliable else ' (center only)'}"
-                            for g in gates))
+            self.get_logger().info(f"published plan through {summary}")
 
     rclpy.init()
     node = MinSnapRosNode()

@@ -172,10 +172,19 @@ def straight_move(a_enu, b_enu, yaw_a: float, yaw_b: float, speed: float, t: flo
     return {"pos": a + frac * (b - a), "vel": vel, "yaw": yaw, "done": done, "duration": duration}
 
 
-def plan_course(gates, start_enu, heading_enu: float, v_max: float, a_max: float, verbose: bool = False):
-    """Min-snap plan from start_enu through gates (ENU). Returns (traj, waypoints, ref)."""
+def plan_course(gates, start_enu, heading_enu: float, v_max: float, a_max: float, verbose: bool = False,
+                yaw_mode: str = "velocity"):
+    """Min-snap plan from start_enu through gates (ENU). Returns (traj, waypoints, ref).
+    yaw_mode "next_gate" looks at the next gate (Trajectory/min_snap_planner.look_at_yaw_profile),
+    which keeps the gates in the camera for the VIO."""
     traj, wps = plan_gate_trajectory(gates, np.asarray(start_enu, dtype=float),
                                      v_max=v_max, a_max=a_max, verbose=verbose)
+    if yaw_mode == "next_gate":
+        from min_snap_planner import look_at_yaw_profile
+        return traj, wps, TrajectoryReference(traj, start_yaw=heading_enu,
+                                              yaw_profile=look_at_yaw_profile(traj, wps, gates, heading_enu))
+    if yaw_mode != "velocity":
+        raise ValueError(f"unknown yaw_mode {yaw_mode!r} (use 'velocity' or 'next_gate')")
     return traj, wps, TrajectoryReference(traj, start_yaw=heading_enu)
 
 
@@ -637,7 +646,7 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
                   f"the gates were spawned; check the plan below before flying.")
 
     # ---- plan ----
-    traj, wps, ref = plan_course(gates, start_enu, heading_enu, args.v_max, args.a_max)
+    traj, wps, ref = plan_course(gates, start_enu, heading_enu, args.v_max, args.a_max, yaw_mode=args.yaw_mode)
     sp = Setpoints(traj, ref)
     v_pk, a_pk = plan_peaks(traj)
     print(f"[plan] {len(wps)} waypoints, {traj.n_seg} segments, {traj.duration:.2f} s, "
@@ -706,6 +715,9 @@ def build_parser():
     ap.add_argument("--v-max", type=float, default=2.0, help="planner speed limit, m/s (default 2)")
     ap.add_argument("--a-max", type=float, default=2.0, help="planner accel limit, m/s^2 (default 2)")
     ap.add_argument("--rate", type=float, default=50.0, help="setpoint rate, Hz (default 50)")
+    ap.add_argument("--yaw-mode", choices=("velocity", "next_gate"), default="velocity",
+                    help="velocity: face the direction of travel; next_gate: look at the next gate "
+                         "(keeps the gates in view for an open-loop VIO check)")
     ap.add_argument("--time-scale", type=float, default=1.0,
                     help="trajectory seconds per wall second = the sim's speed vs real time "
                          "(measured 0.42 on 2026-10-23; each run prints the measured value)")

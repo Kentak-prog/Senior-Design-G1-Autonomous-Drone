@@ -136,17 +136,24 @@ class AttitudeBridge:
     .orientation (x, y, z, w), .body_rate (x, y, z), .thrust (N), .valid.
     arrival_time is on `clock` (wall, monotonic) -- staleness never compares
     the ROS clock with PX4's.
+    external_abort() -> reason (str) or None: an outside watchdog (e.g.
+    ros2_nodes/flight_monitor.py); any reason aborts to AUTO.LOITER.
+    on_offboard(): called once when PX4 confirms OFFBOARD (the bridge node
+    tells min_snap_node to start the plan then).
     """
 
     def __init__(self, link: PX4Link, get_setpoint, rate_hz=50.0, stale_s=0.3, invalid_s=0.5,
                  max_tilt_deg=45.0, hover_thrust=None, mass=drone_constraints["mass"],
-                 clock=time.monotonic, sleep=time.sleep, out=print):
+                 clock=time.monotonic, sleep=time.sleep, out=print, external_abort=None,
+                 on_offboard=None):
         self.v = link
         self.get_setpoint = get_setpoint
         self.dt = 1.0 / rate_hz
         self.stale_s, self.invalid_s, self.max_tilt = stale_s, invalid_s, max_tilt_deg
         self.hover_thrust, self.mass = hover_thrust, mass
         self.clock, self.sleep, self.out = clock, sleep, out
+        self.external_abort = external_abort or (lambda: None)
+        self.on_offboard = on_offboard or (lambda: None)
         self.status = "not started"
         self.sent = 0
         self.rows = []
@@ -163,6 +170,9 @@ class AttitudeBridge:
         return q_ned, w, u
 
     def _check(self, sp, arrived, invalid_since, now):
+        ext = self.external_abort()
+        if ext:
+            return f"watchdog: {ext}"
         if sp is None or arrived is None or now - arrived > self.stale_s:
             return f"no new MPC setpoint for more than {self.stale_s} s"
         if invalid_since is not None and now - invalid_since > self.invalid_s:
@@ -210,6 +220,7 @@ class AttitudeBridge:
             else:
                 return self._abort("PX4 did not enter OFFBOARD")
 
+            self.on_offboard()
             self.out(f"OFFBOARD: the MPC is flying (max {max_duration:.0f} s; Ctrl-C hands back to AUTO.LOITER)")
             t_start = self.clock()
             next_t = t_start

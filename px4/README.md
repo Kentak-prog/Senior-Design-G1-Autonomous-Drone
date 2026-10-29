@@ -261,62 +261,22 @@ It also found three things the Isaac run needs:
 
 ### Runbook
 
-**Get the code into the pod.** These changes are **not committed**. Commit
-and push them, then `git pull` in the pod, or `kubectl cp` the changed files.
-The Isaac-side scripts are run from the repo checkout in `/workspace`, NOT
-from `/workspace/scripts` (that copy doesn't have the camera-pitch option).
+**`px4/VIO_MPC_TEST_PLAN.md`** is the runbook: eight stages, each adding
+one unknown, each with a GO criterion. In brief:
+- pod prep: casadi, scipy, `drone_msgs`;
+- Isaac with a level camera and `/clock`;
+- a dry run until `ros2_nodes/flight_monitor.py` prints `PREFLIGHT: GO`;
+- hover and course on ground truth;
+- the VIO open-loop on the proven position flier;
+- hover and course on the VIO.
 
-1. **Isaac, fresh process.** Add the Flat Grid. Then in the Script Editor, each once:
-   ```python
-   import os; os.environ["CAMERA_PITCH_DEG"] = "0"; exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_example.py").read())
-   ```
-   ```python
-   exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/sim_clock.py").read())
-   ```
-   ```python
-   exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_gates_from_manifest.py").read())
-   ```
-   Expect:
-   - `[init] camera pitch 0.0 deg up`
-   - `[sim_clock] ... now uses sim time`
-   - three `[spawn_gates_from_manifest] gate_N` lines matching the 2026-10-23 course
-2. **PX4.** Start it (command in `vision/HANDOFF.md`), wait for `Ready for
-   takeoff!`, then `commander takeoff` at `pxh>`. The drone hovers near (0, 0, 2.5).
-3. **Check the clocks** (in `ros2-eval`). The three stamps should agree to
-   within a few tenths of a second:
-   ```bash
-   ros2 topic echo --once /clock
-   ros2 topic echo --once /drone00/sensors/imu --field header.stamp
-   ros2 topic echo --once /iris_0/front_cam/camera_info --field header.stamp
-   ```
-4. **Build `drone_msgs`** once per container (see Stage 2), then start the
-   nodes in this order, each in its own `ros2-eval` shell or with `&`:
-   ```bash
-   python3 ros2_nodes/vio_node.py --ros-args -p use_sim_time:=true -p camera_pitch_deg:=0.0
-   ```
-   **Wait for its log** before going on:
-   - `|accel| at hover ~9.81` (otherwise the IMU frame or the hover is wrong)
-   - `pos [...]` with `error vs ground truth` under about **0.1 m** while hovering
-     (the ground truth is only logged for comparison; the estimator never uses it)
-   ```bash
-   python3 ros2_nodes/min_snap_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry \
-       -p odom_topic:=/vio/odometry -p gates_file:=/workspace/test_gates.json -p yaw_mode:=next_gate -p settle_s:=3.0 \
-       -p v_max:=2.0 -p a_max:=2.0
-   python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true -p state_source:=odometry -p odom_topic:=/vio/odometry
-   ```
-   Expect `published plan through 3 gate(s)`, then `mpc_node` solve times.
-5. **Record** (`Trajectory/isaac_results/3_gates/scripts/record_novnc.js`: `startRec()`), then:
-   ```bash
-   python3 ros2_nodes/mpc_offboard_bridge.py --ros-args -p use_sim_time:=true
-   ```
-   It prints the hover thrust and asks before engaging. Ctrl-C hands back to
-   AUTO.LOITER, which flies on PX4's own estimate.
-
-**Don't engage if:**
-- the VIO's error vs ground truth while hovering is over about 0.3 m
-- `mpc_node` reports solves near or above 20 ms
-- the plan's start is far from where Isaac shows the drone
-
-**Logs:** `/workspace/vio_runs/vio_<time>/` holds `vio_log.csv` (the
-estimate next to ground truth, every 8 ms) and `vio_events.csv` (every fix
-and rejection).
+Two things differ from running the nodes by hand:
+- **The plan starts on engage.** `min_snap_node` with
+  `start_topic:=/mpc_offboard_bridge/engaged` publishes its plan (t = 0) only
+  once the bridge confirms OFFBOARD. Otherwise the reference runs on while
+  PX4 hovers by itself.
+- **`flight_monitor` is the scorer and the sim-only watchdog**: VIO vs
+  truth, truth vs reference, altitude. When it trips, it publishes on
+  `/flight_monitor/abort`, and the bridge hands PX4 to AUTO.LOITER.
+  `px4/analyze_vio_mpc_flight.py <log_dir>` scores the run the way the
+  rehearsal does.

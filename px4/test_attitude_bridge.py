@@ -104,9 +104,11 @@ def _bridge(fake, get, **kw):
 
 def test_runs_in_offboard_then_hands_back():
     fake = FakePX4Attitude()
-    b = _bridge(fake, _setpoint_source(fake))
+    engaged = []
+    b = _bridge(fake, _setpoint_source(fake), on_offboard=lambda: engaged.append(fake.mode))
     status = b.run(max_duration=3.0)
     assert status.startswith("completed") and fake.mode == AUTO and fake.loiter_commands >= 1, status
+    assert engaged == [OFFBOARD], engaged            # told once, after PX4 confirmed OFFBOARD
     assert fake.offboard_since is not None and b.sent > 150
     q = fake.att[-1][1]
     assert np.allclose(_ned_rpy(q), [0, 0, math.degrees(fms.yaw_enu_to_ned(0.3))], atol=1e-6)
@@ -125,6 +127,17 @@ def test_aborts_on_stale_invalid_or_tilted():
         status = b.run(max_duration=10.0)
         assert status.startswith("aborted") and expect in status and fake.loiter_commands >= 1, status
     print("  aborts to AUTO.LOITER on a stale setpoint, a failing solver, or a 50 deg tilt  OK")
+
+
+def test_aborts_on_external_watchdog():
+    fake = FakePX4Attitude()
+    t0 = fake.now
+    b = _bridge(fake, _setpoint_source(fake),
+                external_abort=lambda: "VIO 1.4 m from the truth" if fake.now - t0 > 3.0 else None)
+    status = b.run(max_duration=10.0)
+    assert status == "aborted: watchdog: VIO 1.4 m from the truth" and fake.loiter_commands >= 1, status
+    assert fake.offboard_since is not None
+    print("  an outside watchdog reason (flight_monitor) aborts to AUTO.LOITER  OK")
 
 
 def test_does_not_fight_a_mode_switch():

@@ -236,6 +236,31 @@ def test_plan_limits_and_gates():
           f"all 3 gates  OK")
 
 
+def test_yaw_mode_next_gate_keeps_gates_in_view():
+    gates, traj, ref_v = _plan()
+    (_, wps, ref_g), _ = _quiet(fms.plan_course, gates, START_ENU, math.radians(HEADING_ENU_DEG), 2.0, 2.0,
+                                yaw_mode="next_gate")
+
+    def worst_off_axis(ref):
+        worst = 0.0
+        for k in range(0, ref.states.shape[1], 20):
+            p, yaw = ref.states[0:3, k], ref.states[5, k]
+            ahead = [g for g in gates if (p - g.center) @ g.normal < -0.3]     # gates not yet reached
+            if not ahead:
+                break
+            d = ahead[0].center - p
+            worst = max(worst, abs(math.degrees(fms.wrap_pi(math.atan2(d[1], d[0]) - yaw))))
+        return worst
+    wv, wg = worst_off_axis(ref_v), worst_off_axis(ref_g)
+    assert wg < 30.0 < wv, (wg, wv)                  # 30 deg = half the camera's horizontal FOV
+    try:
+        fms.plan_course(gates, START_ENU, 0.0, 2.0, 2.0, yaw_mode="sideways")
+        raise AssertionError("bad yaw_mode accepted")
+    except ValueError:
+        pass
+    print(f"  --yaw-mode next_gate: next gate at most {wg:.1f} deg off the nose (velocity yaw: {wv:.0f} deg)  OK")
+
+
 def test_setpoints():
     _, traj, ref = _plan()
     sp = fms.Setpoints(traj, ref)
