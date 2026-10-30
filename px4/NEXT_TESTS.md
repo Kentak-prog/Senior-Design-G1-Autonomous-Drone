@@ -28,8 +28,20 @@ What the Stage 4 log shows (`vio/vio_events.csv`, times from engage):
 - **Rejections:** 69, all of gate_2, from +2.23 s to +9.36 s, chi² 34 to
   4032. The first ones came while the VIO was still within 0.15 m of the
   truth.
-- **After +9.36 s:** no detections at all, although gate_2 (passed at +12.2 s)
-  was straight ahead.
+- **From +4.83 s to +8 s, and after +9.36 s:** no logged events, although
+  gate_2 (passed at +12.2 s) was ahead. This does **not** prove the gates
+  weren't detected: `vio_events.csv` has no row for a frame with no detection,
+  a failed PnP, or a detection that didn't match a map gate. The drifted
+  estimate makes that last one plausible after about +10 s (error 1.5 m and
+  growing; the match tolerance is 1 m + 10 % of range). The only other hint is
+  indirect: camera time fell to 5-6 ms/frame.
+- **Labels:** the gate names are the VIO's own matches, not ground truth.
+- **Geometry (`vio_mpc/run_045716_s4/fig5_gate_visibility.png`):** 315 of the 316
+  in-flight fixes fall in the moments when the WHOLE gate is in frame, by
+  calculation from the true pose. gate_0 is never whole in frame (its top edge is
+  clipped even at hover), and it has no fixes. From +4.8 s to +8.4 s no gate is
+  whole in frame. gate_2 is whole in frame only once after that, +8.4 to +9.4 s,
+  and every fix then was rejected (VIO already about 1 m off).
 - **Dead reckoning:** the error grew from 0.26 m to 1.1 m (gate_1) to 2.7 m
   (gate_2) to 13 m. The VIO's own std stayed far below its real error
   (0.17 m reported against 1.13 m actual).
@@ -38,17 +50,20 @@ What the Stage 4 log shows (`vio/vio_events.csv`, times from engage):
 - [ ] **Record the camera in Stage 5:** `ros2 bag record
   /iris_0/front_cam/rgb /iris_0/front_cam/camera_info /drone00/state/pose`.
   The VIO gets fed the frames, but nobody saves them.
+- [ ] Log every frame in `vio_node`: detections found, PnP failures, unmatched,
+  fixes and rejections. Today the unmatched count isn't logged in flight.
 - [ ] Run the detector and PnP offline on the bag, frame by frame, against
   the true gate poses. That answers four questions:
-  - Why is gate_1 not detected from +4.8 s to +8.6 s? Likely a side-on
-    approach, then too close: a 1.5 m frame at 1.2 m doesn't fit in the
-    60° field of view.
-  - Why is gate_2 not detected after +9.4 s, when it was straight ahead?
+  - Is gate_1 detected from +4.8 s to +8.6 s? If not, is that the side-on
+    approach, then being too close? (Untested guess: a 1.5 m frame at 1.2 m
+    doesn't fit in the 60° field of view.)
+  - Is gate_2 detected after +9.4 s? If so, was it dropped as unmatched?
   - Why were early gate_2 fixes rejected (chi² 34–58) while the VIO was
     accurate? It could be a range bias at about 11 m, the gate seen through
     or behind another frame, or a wrong association.
-  - Why are there no gate_0 fixes in flight? Check the association in
-    `control/vio.py` (`assoc_tol`).
+  - Why are there no gate_0 fixes, even at hover? It may be clipped by the
+    top of the frame (it looks that way in the onboard view). Check that and
+    the association in `control/vio.py` (`assoc_tol`).
 
 ### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`)
 - [ ] Tune the process noise (`accel_noise`, plus a velocity random walk) so
