@@ -4,6 +4,7 @@ First-principles expectations (hand-derived signs and numbers), not round
 trips. The last test flies straight3 with the real NMPC and takes ~1 minute.
 """
 
+import dataclasses
 import math
 import os
 import time
@@ -37,16 +38,16 @@ def test_wrench_hover():
 
 def test_wrench_roll_direction():
     """Positive body torque about +x (forward) lifts the LEFT side (body +y gains +z)
-    and gives positive roll rate."""
-    s = QuadSim(1, P, dtype=DT)
+    and gives positive roll rate. Motor lag off: the hand number below assumes the torque arrives at once."""
+    s = QuadSim(1, dataclasses.replace(P, tau_motor=0.0), dtype=DT)
     for _ in range(5):
         s.step_wrench(torch.tensor([MG], dtype=DT), torch.tensor([[0.3, 0.0, 0.0]], dtype=DT))
     R = quat_to_rotmat(s.quat)
     y_axis_z = R[0, 2, 1].item()              # world z-component of body +y
     assert y_axis_z > 0.01, y_axis_z
     assert s.omega[0, 0].item() > 0.0
-    # alpha = tau / Ix, integrated over 5 control steps (0.1 s): ~ 0.3/0.029125*0.1
-    assert abs(s.omega[0, 0].item() - 0.3 / 0.029125 * 0.1) < 0.05
+    # alpha = tau / Ix, integrated over 5 control steps (0.1 s): ~ 0.3/Ix*0.1 (Iris: 0.3/0.029125*0.1)
+    assert abs(s.omega[0, 0].item() - 0.3 / P.inertia_diag[0] * 0.1) < 0.05
     print(f"  +roll torque: body y z-component {y_axis_z:.3f}, p = {s.omega[0,0].item():.3f} rad/s  OK")
 
 

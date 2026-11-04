@@ -37,7 +37,7 @@ from drone_params import QuadParams
 from fly_course import run_controller, make_controller
 from pid_controller import PidController
 
-P = QuadParams()
+P = QuadParams.for_vehicle("iris")   # hand-derived Iris numbers (hover u = 0.556)
 S = math.sqrt(0.5)
 BEST = os.path.join(RL, "runs", "best")
 
@@ -124,7 +124,7 @@ def test_yaw():
 
 # ---------------------------------------------------------------- thrust map
 def test_thrust_map():
-    tm = ThrustMap("model")
+    tm = ThrustMap("model", P)
     # hand: T = 1.5*9.81 = 14.715 N; w = sqrt(14.715 / (4*8.54858e-6)) = 656.0 rad/s;
     # u = (656.0 - 100)/1000 = 0.556
     assert abs(tm.to_px4(14.715) - 0.556) < 5e-4, tm.to_px4(14.715)
@@ -132,15 +132,15 @@ def test_thrust_map():
     assert tm.to_px4(0.0) == 0.0 and tm.to_px4(-3.0) == 0.0 and tm.to_px4(1e4) == 1.0
     assert abs(tm.from_px4(0.0) - 4 * 8.54858e-6 * 100.0 ** 2) < 1e-9     # 0.3419 N at u = 0
     assert tm.from_px4(1.7) == tm.from_px4(1.0) and tm.from_px4(-1) == tm.from_px4(0)
-    lin = ThrustMap("linear", u_hover=0.5)
+    lin = ThrustMap("linear", P, u_hover=0.5)
     mg = 1.5 * 9.81
     assert abs(lin.to_px4(mg) - 0.5) < 1e-12 and abs(lin.to_px4(mg / 2) - 0.25) < 1e-12
     assert lin.to_px4(2.5 * mg) == 1.0 and abs(lin.from_px4(0.5) - mg) < 1e-9
     # scale: the real thrust is 1.1x the model, so asking for T needs the u of T/1.1
-    s = ThrustMap("model", scale=1.1)
+    s = ThrustMap("model", P, scale=1.1)
     assert abs(s.to_px4(1.1 * 14.715) - tm.to_px4(14.715)) < 1e-12
     assert abs(s.from_px4(0.556) - 1.1 * tm.from_px4(0.556)) < 1e-9
-    ls = ThrustMap("linear", u_hover=0.5, scale=0.9)       # weaker than assumed: needs more u
+    ls = ThrustMap("linear", P, u_hover=0.5, scale=0.9)       # weaker than assumed: needs more u
     assert abs(ls.to_px4(mg) - 0.5 / 0.9) < 1e-12
     print("  u(m g) = 0.556, clipping, linear mode, scale  OK")
 
@@ -218,7 +218,7 @@ def test_mavlink_constants():
 
 def test_mavlink_vehicle_with_fake_master():
     m = FakeMaster()
-    v = MavlinkVehicle(master=m, origin_offset_enu=(10, 20, 30), thrust_map=ThrustMap("model"))
+    v = MavlinkVehicle(master=m, origin_offset_enu=(10, 20, 30), thrust_map=ThrustMap("model", P))
     cmds = [a for n, a in m.mav.calls if n == "command_long_send"]
     # SET_MESSAGE_INTERVAL: (sys, comp, 511, confirm, msg id, interval us, ...)
     assert [(c[2], c[4], c[5]) for c in cmds] == [(511, 32, 10000.0), (511, 31, 10000.0),

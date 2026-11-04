@@ -14,7 +14,7 @@ from drone_params import QuadParams
 from quad_sim import QuadSim
 from rotations import quat_to_rotmat, quat_from_euler_zyx, rotmat_to_euler_zyx
 
-P = QuadParams()
+P = QuadParams.for_vehicle("iris")   # the hand-derived numbers below are the Iris's
 DT = torch.float64
 MG = P.mass * P.gravity
 

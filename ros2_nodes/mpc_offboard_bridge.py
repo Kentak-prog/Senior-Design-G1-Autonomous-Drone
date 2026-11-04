@@ -57,7 +57,7 @@ def build_parser():
     ap.add_argument("--invalid-s", type=float, default=0.5, help="abort if the MPC reports invalid this long (s)")
     ap.add_argument("--max-tilt-deg", type=float, default=45.0)
     ap.add_argument("--hover-thrust", type=float, default=None,
-                    help="normalized hover throttle (e.g. PX4 MPC_THR_HOVER); default: Pegasus Iris thrust curve")
+                    help="normalized hover throttle (e.g. PX4 MPC_THR_HOVER); default: Pegasus thrust curve of $DRONE_VEHICLE")
     ap.add_argument("--max-duration", type=float, default=120.0, help="hand back to AUTO.LOITER after this (s)")
     ap.add_argument("--min-alt", type=float, default=1.0, help="refuse below this altitude (m)")
     ap.add_argument("--abort-topic", default="/flight_monitor/abort",

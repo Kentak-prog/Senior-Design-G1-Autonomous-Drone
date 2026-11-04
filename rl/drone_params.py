@@ -2,11 +2,11 @@
 Physical parameters of the quadrotor the RL stack trains and tests on.
 
 Everything the simulator, the rate controller and the PID baseline need to
-know about the airframe lives in ONE dataclass, `QuadParams`, so that when the
-team commits to a real drone only this object changes. The defaults describe
-the Pegasus Iris used in Isaac Sim (workspace/spawn_example.py: Multirotor
-with PX4MavlinkBackend), because that is what the policy will be deployed on
-first.
+know about the airframe lives in ONE dataclass, `QuadParams`. Its airframe
+defaults come from the active vehicle profile in control/vehicles.py, picked
+with the DRONE_VEHICLE environment variable (default "iris": the Pegasus Iris
+used in Isaac Sim, workspace/spawn_example.py). QuadParams.for_vehicle(name)
+builds the params of a given vehicle regardless of the environment.
 
 CONVENTIONS (shared by every module in rl/)
     World frame: ENU (x east, y north, z up) = Pegasus "map" frame = the frame
@@ -18,23 +18,23 @@ CONVENTIONS (shared by every module in rl/)
         airframe counter-clockwise (seen from above) when that rotor speeds up.
 
 WHY these numbers (provenance)
-    mass / inertia / rotor positions: PX4's iris model (Tools/sitl_gazebo).
-        TODO verify against the Iris USD actually loaded in Isaac Sim.
+    airframe (mass, inertia, rotors, thrust curve, drag, collision radius):
+        the vehicle profile; control/vehicles.py documents each one.
     thrust curve / yaw coefficient / rotor-speed limit: Pegasus
-        QuadraticThrustCurve defaults (thrust = k_f * w^2, w in [0, 1100]).
+        QuadraticThrustCurve form (thrust = k_f * w^2, w in [0, w_max]).
     PX4 output -> rotor speed: Pegasus PX4MavlinkBackend maps a normalised
         motor output u in [0, 1] to w = 1000*u + 100 rad/s. This is what lets
         us convert a collective-thrust command to a PX4 setpoint later.
-    linear drag: Pegasus LinearDrag defaults, force = -coeff * v_body
+    linear drag: Pegasus LinearDrag, force = -coeff * v_body
         (elementwise, body frame), applied in the body frame.
-    tau_motor = 0: Pegasus rotors are instantaneous. Set > 0 to model a
-        first-order motor lag (useful for sim-to-real robustness).
+    tau_motor: from the profile. 0 = instantaneous, as Pegasus rotors are
+        (Iris); the Starling 2 Max's 35 ms is measured from flight logs.
     rate-controller gains: our own choice, modelled on PX4's rate loop (see
         quad_sim.RateController); not read from PX4.
     TODO verify everything marked above before trusting absolute numbers.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 import os
 import sys
@@ -42,37 +42,39 @@ import sys
 _CONTROL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control")
 if _CONTROL not in sys.path:
     sys.path.insert(0, _CONTROL)
-from drone_constraints import drone_constraints   # noqa: E402  (the one place the mass is set)
+from vehicles import Vehicle, active_vehicle, get_vehicle   # noqa: E402
+
+_V = active_vehicle()
 
 
 @dataclass
 class QuadParams:
-    # --- rigid body (PX4 iris; TODO verify against the Iris USD) ---
-    mass: float = drone_constraints["mass"]                  # kg, from control/drone_constraints.py
-    inertia_diag: tuple = (0.029125, 0.029125, 0.055225)     # kg m^2 (Ixx, Iyy, Izz)
-    gravity: float = 9.81                                    # m/s^2
+    # --- rigid body (active vehicle profile, control/vehicles.py) ---
+    mass: float = _V.mass                    # kg
+    inertia_diag: tuple = _V.inertia_diag    # kg m^2 (Ixx, Iyy, Izz)
+    gravity: float = 9.81                    # m/s^2
 
-    # Rotor positions in body FLU (x fwd, y left, z up), PX4 iris
-    # (TODO verify). Index order matches Pegasus' rotor / motor-output order.
-    rotor_xy: tuple = ((0.13, -0.22), (-0.13, 0.20), (0.13, 0.22), (-0.13, -0.20))
-    rotor_z: float = 0.023
+    # Rotor positions in body FLU (x fwd, y left, z up).
+    # Index order matches Pegasus' rotor / motor-output order.
+    rotor_xy: tuple = _V.rotor_xy
+    rotor_z: float = _V.rotor_z
 
     # --- Pegasus QuadraticThrustCurve ---
-    k_f: float = 8.54858e-6      # thrust per rotor = k_f * w^2   [N / (rad/s)^2]
-    k_m: float = 1e-6            # yaw moment per rotor = k_m * w^2 * rot_dir [N m / (rad/s)^2]
-    rot_dir: tuple = (-1.0, -1.0, 1.0, 1.0)
-    w_min: float = 0.0           # rad/s
-    w_max: float = 1100.0        # rad/s
+    k_f: float = _V.k_f          # thrust per rotor = k_f * w^2   [N / (rad/s)^2]
+    k_m: float = _V.k_m          # yaw moment per rotor = k_m * w^2 * rot_dir [N m / (rad/s)^2]
+    rot_dir: tuple = _V.rot_dir
+    w_min: float = _V.w_min      # rad/s
+    w_max: float = _V.w_max      # rad/s
 
     # --- Pegasus PX4MavlinkBackend: w = px4_w_scale * u + px4_w_offset ---
-    px4_w_scale: float = 1000.0
-    px4_w_offset: float = 100.0
+    px4_w_scale: float = _V.px4_w_scale
+    px4_w_offset: float = _V.px4_w_offset
 
     # --- Pegasus LinearDrag: force_body = -coeff * v_body (elementwise) ---
-    drag_coeff: tuple = (0.50, 0.30, 0.0)
+    drag_coeff: tuple = _V.drag_coeff
 
     # --- timing ---
-    tau_motor: float = 0.0       # s; 0 = instantaneous (Pegasus); >0 = first-order lag
+    tau_motor: float = _V.tau_motor   # s; 0 = instantaneous (Pegasus); >0 = first-order lag
     physics_dt: float = 1.0 / 250.0   # Pegasus PX4 update rate
     control_dt: float = 1.0 / 50.0    # policy / outer-loop rate
 
@@ -86,7 +88,20 @@ class QuadParams:
 
     # --- command limits ---
     max_rate: tuple = (6.0, 6.0, 3.0)       # rad/s, roll / pitch / yaw
-    collision_radius: float = 0.30          # m, drone treated as a sphere
+    collision_radius: float = _V.collision_radius   # m, drone treated as a sphere
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def for_vehicle(cls, name: str, **overrides) -> "QuadParams":
+        """Params of the named vehicle profile (ignores $DRONE_VEHICLE).
+        Non-airframe fields keep their defaults unless overridden. Only for
+        code that reads nothing but QuadParams (QuadSim, ThrustMap); the MPC
+        still takes its limits from $DRONE_VEHICLE (control/vehicles.py)."""
+        v = get_vehicle(name)
+        own = {f.name for f in fields(cls)}
+        kw = {f.name: getattr(v, f.name) for f in fields(Vehicle) if f.name in own}
+        kw.update(overrides)
+        return cls(**kw)
 
     # ------------------------------------------------------------------
     def max_rotor_thrust(self) -> float:
@@ -103,7 +118,7 @@ class QuadParams:
         return math.sqrt(self.hover_thrust() / (4.0 * self.k_f))
 
     def hover_motor_output(self) -> float:
-        """Normalised PX4 motor output u in [0,1] that hovers (about 0.556)."""
+        """Normalised PX4 motor output u in [0,1] that hovers (about 0.556 for the Iris)."""
         return (self.hover_rotor_speed() - self.px4_w_offset) / self.px4_w_scale
 
     def px4_output_to_thrust(self, u: float) -> float:

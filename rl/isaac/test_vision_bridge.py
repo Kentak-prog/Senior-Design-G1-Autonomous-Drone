@@ -36,7 +36,7 @@ from fly_course import make_controller
 from pid_controller import PidController
 from vehicle import SimVehicle, VehicleState
 
-P = QuadParams()
+P = QuadParams.for_vehicle("iris")   # priors sized so the Iris (0.30 m) hits a gate without vision
 BEST = os.path.join(RL, "runs", "best")
 
 
