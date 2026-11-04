@@ -22,10 +22,11 @@ is converted as R_ned_frd = A R_enu_flu B (A swaps x/y and flips z, B flips
 body y and z); body rates (p, q, r) FLU -> (p, -q, -r) FRD.
 
 THRUST: SET_ATTITUDE_TARGET takes a normalized thrust 0..1. Default: invert
-Pegasus' PX4 mapping for the Iris, per rotor omega = 1000 u + 100 rad/s and
-F = 8.54858e-6 omega^2 (workspace/STARLING2_DYNAMICS.md, source S9) -- hover
-(1.5 kg) is about u = 0.556. A measured hover throttle (PX4's MPC_THR_HOVER /
-hover thrust estimate) can be given instead and scales linearly.
+Pegasus' PX4 mapping for the active vehicle profile (control/vehicles.py,
+$DRONE_VEHICLE), per rotor omega = 1000 u + 100 rad/s and F = k_f omega^2
+(workspace/STARLING2_DYNAMICS.md, source S9) -- the Iris (1.5 kg) hovers at
+about u = 0.556. A measured hover throttle (PX4's MPC_THR_HOVER / hover thrust
+estimate) can be given instead and scales linearly; on real hardware, give it.
 """
 
 import math
@@ -43,7 +44,7 @@ for _p in (_HERE, os.path.join(_REPO, "control")):
 
 from fly_min_snap_offboard import PX4Link, PX4_MAIN_OFFBOARD    # noqa: E402
 from fly_gate_approach import ned_to_enu                         # noqa: E402
-from drone_constraints import drone_constraints                 # noqa: E402
+from drone_constraints import drone_constraints, vehicle as VEHICLE   # noqa: E402
 
 
 def rotation_from_quat_xyzw(qx, qy, qz, qw):
@@ -59,10 +60,10 @@ G = 9.81
 A_NED_FROM_ENU = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
 B_FLU_FROM_FRD = np.diag([1.0, -1.0, -1.0])
 
-# Pegasus PX4 backend (Iris): omega = OMEGA_PER_U * u + OMEGA_OFFSET, F = KF * omega^2 per rotor
-KF = 8.54858e-6
-OMEGA_PER_U = 1000.0
-OMEGA_OFFSET = 100.0
+# Pegasus PX4 backend: omega = OMEGA_PER_U * u + OMEGA_OFFSET, F = KF * omega^2 per rotor
+KF = VEHICLE.k_f
+OMEGA_PER_U = VEHICLE.px4_w_scale
+OMEGA_OFFSET = VEHICLE.px4_w_offset
 N_ROTORS = 4
 
 # SET_ATTITUDE_TARGET type_mask: 0 = use attitude, body rates and thrust
@@ -114,7 +115,7 @@ def tilt_deg(q_xyzw):
 def thrust_normalized(thrust_n, hover_thrust=None, mass=drone_constraints["mass"]):
     """
     Total thrust (N) -> PX4 normalized thrust 0..1.
-    hover_thrust None: invert Pegasus' Iris mapping (per rotor omega = 1000 u + 100, F = kf omega^2).
+    hover_thrust None: invert Pegasus' mapping for the vehicle (per rotor omega = 1000 u + 100, F = kf omega^2).
     hover_thrust U:    linear, U at m*g (PX4's own hover-throttle model).
     """
     thrust_n = max(0.0, float(thrust_n))
