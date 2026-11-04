@@ -17,6 +17,9 @@ Two ways to fly the gate course in Isaac Sim through PX4 OFFBOARD:
 | `test_fly_min_snap_offboard.py` | self-tests, including the full OFFBOARD sequence against a fake PX4 (`python3 test_fly_min_snap_offboard.py`) |
 | `attitude_bridge.py` | stage 2: MPC attitude/thrust setpoints → PX4 `SET_ATTITUDE_TARGET` (conversions + OFFBOARD sequence; its ROS 2 front end is `ros2_nodes/mpc_offboard_bridge.py`) |
 | `test_attitude_bridge.py` | frame + thrust conversions and the OFFBOARD sequence against a fake PX4 |
+| `sysid.py` | identify $k_f$, motor lag, inertia, yaw moment and drag from `.ulg` logs (needs `pyulog`); reports what a log can't identify |
+| `test_sysid.py` | the fits recover known parameters from a synthetic Starling 2 Max flight (`python3 test_sysid.py`) |
+| `STARLING2MAX_SYSID_FLIGHTS.md` | the flight cards that give `sysid.py` what it needs |
 
 ## Running it
 

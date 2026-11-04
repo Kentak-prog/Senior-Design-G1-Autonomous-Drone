@@ -9,6 +9,8 @@ per drone.
     starling2max  ModalAI Starling 2 Max (573 g). Mass, thrust curve, motor
                   lag and spin directions from hover flights; geometry from
                   the datasheet; yaw moment, inertia and drag are estimates.
+                  workspace/STARLING2MAX_DYNAMICS.md derives every number;
+                  px4/sysid.py re-fits them from flight logs.
 
 Pick one with the environment variable DRONE_VEHICLE (default "iris"):
 
@@ -162,8 +164,9 @@ VEHICLES = {
         collision_radius=0.17,          # 0.110 m motor radius + 0.06 m prop
     ),
 
-    # ModalAI Starling 2 Max. Datasheet: https://docs.modalai.com/starling-2-max-datasheet/
-    # (checked 2026-11-03). (meas.) = identified from two indoor hover flights
+    # ModalAI Starling 2 Max. workspace/STARLING2MAX_DYNAMICS.md has the derivations;
+    # px4/STARLING2MAX_SYSID_FLIGHTS.md the flights that replace the (est.) values.
+    # Datasheet: https://docs.modalai.com/starling-2-max-datasheet/ (checked 2026-11-03). (meas.) = identified from two indoor hover flights
     # on 2026-11-03 (PX4 on VOXL 2, Position mode, 231 s of steady hover, C29).
     #   mass 0.573 kg (meas.): weighed with batteries and props.
     #   Geometry: datasheet motor-to-motor 260 mm wide x 190 mm long ->
