@@ -16,7 +16,7 @@ params -- reads MC_{ROLL,PITCH,YAW}RATE_MAX (deg/s; for reference only: in
     straight to vehicle_rates_setpoint, and mc_rate_control only scales MANUAL
     acro input by its max rates, so our offboard rates of up to 6/6/3 rad/s are
     not clamped -- checked in the cluster's PX4 source 2026-10-20), THR_MDL_FAC (must
-    be 0 for ThrustMap), MPC_THR_HOVER, COM_OF_LOSS_T and COM_OBL_RC_ACT
+    equal QuadParams.px4_thr_mdl_fac for ThrustMap), MPC_THR_HOVER, COM_OF_LOSS_T and COM_OBL_RC_ACT
     (offboard-loss failsafe), MC_{ROLL,PITCH,YAW}RATE_P and MC_AIRMODE. A name
     PX4 does not answer for prints "no answer" (e.g. COM_OBL_RC_ACT on some
     versions). It never writes; vehicle.set_param exists but nothing calls it.
@@ -46,7 +46,7 @@ hover -- holds position at --alt, then switches to CTBR with zero rates and
     scale, plus the u where az crosses zero by a straight-line fit of az vs u
     (an independent check on u_hover; `--thrust-map linear --u-hover <it>`).
     If the per-step scales disagree strongly the mapping is not a pure scale
-    (THR_MDL_FAC != 0, or a different motor model). Aborts to loiter if
+    (THR_MDL_FAC != the profile's, or a different motor model). Aborts to loiter if
     z < 1 m or z > 8 m.
 
 rates -- from a hover hold, per axis a body-rate doublet at hover thrust:
@@ -135,10 +135,10 @@ def fit_hover(params, us, accs, cos_tilts):
     u_hover_zero_az). scale = argmin sum (y - scale x)^2 with
     y = m (az + g) / cos(tilt), x = model thrust at u."""
     us, accs, cos_tilts = (np.asarray(a, dtype=np.float64) for a in (us, accs, cos_tilts))
-    x = np.array([params.px4_output_to_thrust(u) for u in us])
+    x = np.array([params.px4_setpoint_to_thrust(u) for u in us])
     y = params.mass * (accs + params.gravity) / cos_tilts
     scale = float((x * y).sum() / (x * x).sum())
-    u_fit = params.thrust_to_px4_output(params.hover_thrust() / scale)
+    u_fit = params.thrust_to_px4_setpoint(params.hover_thrust() / scale)
     slope, icpt = np.polyfit(us, accs, 1) if len(us) > 1 else (np.nan, np.nan)
     u0 = float(-icpt / slope) if np.isfinite(slope) and slope != 0 else float("nan")
     return dict(scale=scale, scale_per_step=(y / x).tolist(), u_hover_fit=float(u_fit),
@@ -151,7 +151,7 @@ def cmd_hover(vehicle, args, params):
     yaw = float(frames.yaw_of_quat_enu(s.quat))
     hold = np.array([s.pos[0], s.pos[1], args.alt])
     hold_at(vehicle, params, hold, yaw)
-    us = args.u if args.u else [params.hover_motor_output() + d for d in HOVER_U_OFFSETS]
+    us = args.u if args.u else [params.hover_thrust_setpoint() + d for d in HOVER_U_OFFSETS]
     n_ticks = int(round(STEP_S / dt))
     rows, accs, cos_tilts, us_ok = [], [], [], []
     print(f"{'u':>7} {'az [m/s2]':>10} {'cos(tilt)':>10} {'T_real [N]':>11} "
@@ -191,14 +191,14 @@ def cmd_hover(vehicle, args, params):
         accs.append(az)
         cos_tilts.append(c)
         T_real = params.mass * (az + params.gravity) / c
-        T_model = params.px4_output_to_thrust(u)
+        T_model = params.px4_setpoint_to_thrust(u)
         print(f"{u:7.4f} {az:10.3f} {c:10.4f} {T_real:11.3f} {T_model:12.3f} "
               f"{T_real / T_model:8.4f}" + ("   (cut short)" if len(ts) < n_ticks else ""))
     fit = fit_hover(params, us_ok, accs, cos_tilts)
     print(f"\nthrust scale (real / model, least squares): {fit['scale']:.4f}   "
           f"-> --thrust-scale {fit['scale']:.4f}")
     print(f"u_hover for that scale (model map):           {fit['u_hover_fit']:.4f}   "
-          f"(model prediction with scale 1: {params.hover_motor_output():.4f})")
+          f"(model prediction with scale 1: {params.hover_thrust_setpoint():.4f})")
     print(f"u where az = 0 (straight-line fit of az vs u):  {fit['u_hover_zero_az']:.4f}   "
           f"-> --thrust-map linear --u-hover {fit['u_hover_zero_az']:.4f}")
     if args.out_dir:

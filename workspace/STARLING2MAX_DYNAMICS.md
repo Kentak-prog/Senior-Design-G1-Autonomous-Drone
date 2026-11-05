@@ -138,8 +138,12 @@ mode) predicts $5.62\times0.6/0.139=24.3$ N at $T_{sp}=0.6$; the true value is
 
 $$\omega=\sqrt{\frac{T}{4k_f}},\qquad u=\frac{\omega-209.44}{1047.20},\qquad T_{sp}=f u^2+(1-f)u.$$
 
-`px4/attitude_bridge.py` does not apply the last step yet; it must, before our
-MPC flies the real drone (Phase 5). PX4 battery-voltage compensation
+The profile carries $f$ as `px4_thr_mdl_fac` (0.9; 0 for the Iris), and
+`px4/attitude_bridge.py`, `rl/isaac/frames.ThrustMap` and `rl/isaac/calibrate.py`
+apply the whole chain. PX4 SITL is set to the same $f$ by
+`px4/starling2max_sitl_params.sh`, so the sim maps thrust as the drone does.
+If the drone's parameter file gives another `THR_MDL_FAC`, change the profile
+and the script together (`control/test_vehicles.py` checks they agree). PX4 battery-voltage compensation
 (`MC_BAT_SCALE_EN`) would add a further factor; check whether it is on.
 
 ### 4.3 Thrust per rotor (meas.)
@@ -318,13 +322,14 @@ Everything is in the `starling2max` entry of `control/vehicles.py`;
 `control/drone_constraints.py` and `rl/drone_params.QuadParams` read it, so
 there is one place to change.
 
-| Parameter | `control/vehicles.py` field | Phase 3 Pegasus spawn |
+| Parameter | `control/vehicles.py` field | Pegasus spawn (`workspace/spawn_starling2max.py`) |
 |---|---|---|
 | $m$, $\mathbf I$ | `mass`, `inertia_diag` | body MassAPI |
 | $l_x,l_y$, $d_i$ | `rotor_xy`, `rot_dir` | rotor prims, `rot_dir` |
 | $k_f$, $k_m$ | `k_f`, `k_m` | `QuadraticThrustCurve` |
-| ESC mapping | `px4_w_offset`, `px4_w_scale`, `w_min`, `w_max` | `PX4MavlinkBackend` `input_scaling`, `zero_position_armed` |
-| $\tau_m$ | `tau_motor` | needs a motor-lag model (Pegasus rotors are instantaneous) |
+| ESC mapping | `px4_w_offset`, `px4_w_scale`, `w_min`, `w_max` | `PX4MavlinkBackend` `input_scaling`, `zero_position_armed`; thrust-curve `W_MIN` = 0 so the motors stop when disarmed |
+| `THR_MDL_FAC` | `px4_thr_mdl_fac` | PX4 SITL parameter (`px4/starling2max_sitl_params.sh`) |
+| $\tau_m$ | `tau_motor` | `LaggedQuadraticThrustCurve` in the spawn script (Pegasus rotors are otherwise instantaneous) |
 | $d$ | `drag_coeff` | `LinearDrag` |
 | PX4 cap | `total_thrust_max`, `body_torque_max` | PX4 params (`MPC_THR_MAX`) |
 
@@ -339,6 +344,8 @@ F1 numbers against the profile.
 |---|---|---|
 | F1 logs and analysis script into the repo | copy the two `.ulg` (or CSV extracts) and the script; re-run `python3 px4/sysid.py LOG1.ulg LOG2.ulg --vehicle starling2max` and compare with §2 | to do |
 | `THR_MDL_FAC`, `MPC_THR_HOVER`, `MPC_THR_MAX`, `MC_BAT_SCALE_EN`, rate gains, ESC RPM range | save the drone's full parameter set (QGroundControl, or `param save` in the PX4 shell) and commit it | to do |
+| Sim camera: mount (0.11, 0, 0) m, 15° up, 60° hFOV are placeholders in `spawn_starling2max.py` | replace with the extrinsics and the IMX412 calibration below | to do |
+| SITL rate gains | SITL keeps the Iris airframe's `MC_*RATE_*`; take the drone's from its parameter file | to do |
 | Camera and IMU extrinsics | the extrinsics file on the drone (ModalAI: *Configure Extrinsics*, normally `/etc/modalai/extrinsics.conf`) | to do |
 | Hires camera calibration (IMX412) | the drone's stored intrinsics (normally under `/data/modalai/`), or calibrate with `voxl-camera-calibration` | to do |
 | $k_m$ (yaw) | yaw-rate steps (`px4/STARLING2MAX_SYSID_FLIGHTS.md` card 2) → `fit_rotational` gives $k_m/I_{zz}$; $I_{zz}$ from CAD | to fly |

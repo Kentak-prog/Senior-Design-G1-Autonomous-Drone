@@ -42,7 +42,8 @@ import sys
 _CONTROL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "control")
 if _CONTROL not in sys.path:
     sys.path.insert(0, _CONTROL)
-from vehicles import Vehicle, active_vehicle, get_vehicle   # noqa: E402
+from vehicles import (Vehicle, active_vehicle, get_vehicle,   # noqa: E402
+                      thr_mdl_motor_output, thr_mdl_setpoint)
 
 _V = active_vehicle()
 
@@ -69,6 +70,8 @@ class QuadParams:
     # --- Pegasus PX4MavlinkBackend: w = px4_w_scale * u + px4_w_offset ---
     px4_w_scale: float = _V.px4_w_scale
     px4_w_offset: float = _V.px4_w_offset
+    # PX4 THR_MDL_FAC: thrust setpoint t = f u^2 + (1 - f) u of motor output u
+    px4_thr_mdl_fac: float = _V.px4_thr_mdl_fac
 
     # --- Pegasus LinearDrag: force_body = -coeff * v_body (elementwise) ---
     drag_coeff: tuple = _V.drag_coeff
@@ -133,3 +136,19 @@ class QuadParams:
         w = math.sqrt(max(T_total, 0.0) / (4.0 * self.k_f))
         u = (w - self.px4_w_offset) / self.px4_w_scale
         return min(max(u, 0.0), 1.0)
+
+    # PX4 thrust SETPOINT (what CTBR / SET_ATTITUDE_TARGET carries and
+    # MPC_THR_HOVER is in): PX4 maps it to motor output with THR_MDL_FAC.
+    # Identical to the motor-output functions when px4_thr_mdl_fac = 0.
+    def hover_thrust_setpoint(self) -> float:
+        """Normalised PX4 thrust setpoint that hovers (PX4's MPC_THR_HOVER)."""
+        return thr_mdl_setpoint(self.hover_motor_output(), self.px4_thr_mdl_fac)
+
+    def px4_setpoint_to_thrust(self, t: float) -> float:
+        """Total thrust [N] at PX4 thrust setpoint t (clipped to [0, 1])."""
+        u = thr_mdl_motor_output(min(max(t, 0.0), 1.0), self.px4_thr_mdl_fac)
+        return self.px4_output_to_thrust(u)
+
+    def thrust_to_px4_setpoint(self, T_total: float) -> float:
+        """Inverse of px4_setpoint_to_thrust, clipped to [0, 1]."""
+        return thr_mdl_setpoint(self.thrust_to_px4_output(T_total), self.px4_thr_mdl_fac)

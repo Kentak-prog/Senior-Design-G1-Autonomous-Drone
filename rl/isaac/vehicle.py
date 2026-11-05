@@ -479,6 +479,7 @@ class SimVehicle(Vehicle):
         self._hold = _PositionHold(self.p)
         self._hold_target = (np.asarray(start_pos, dtype=np.float64), float(start_yaw))
         self.params = dict(SIM_PARAM_DEFAULTS)
+        self.params["THR_MDL_FAC"] = self.p.px4_thr_mdl_fac      # the plant follows the profile
         self.n_steps = 0
         self._update_raw()
 

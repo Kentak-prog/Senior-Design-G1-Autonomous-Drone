@@ -1,0 +1,362 @@
+"""
+Spawn a ModalAI Starling 2 Max in Isaac Sim (Pegasus) with the same PX4 / ROS 2 /
+camera setup as spawn_example.py.
+
+Pegasus ships no Starling model, so this loads the Iris USD and re-dimensions
+it before the first physics step (same method as spawn_starling.py):
+  - rotor0..3 moved to the Max motor spacing (190 mm x 260 mm),
+  - body mass / diagonal inertia set so the vehicle is 0.573 kg,
+  - measured thrust curve k_f (2026-11-03 hovers), estimated k_m, drag,
+  - the VOXL ESC mapping in the PX4 backend: PX4 output u in [0, 1] drives
+    the rotor at 209.44 + 1047.20 u rad/s (2,000-12,000 RPM), as on the drone,
+  - a 35 ms first-order motor lag (Pegasus rotors are otherwise instant),
+  - front camera moved to the Max's nose.
+Every number, with its derivation and source, is in STARLING2MAX_DYNAMICS.md;
+the values must equal the starling2max entry of control/vehicles.py
+(control/test_vehicles.py checks). Values marked (est.) are estimates.
+
+PX4 SITL must run with the drone's thrust parameters, or its hover thrust and
+thrust cap will not match the real drone: px4/starling2max_sitl_params.sh.
+
+DRONE_PATH and the ROS namespace keep the Iris names on purpose: spawn_test_gates
+(CAMERA_PRIM_PATH), min_snap_node, the vision eval scripts and the docs all
+hard-code /World/Iris and /iris_0. Rename them here only together with those.
+
+Run ONCE per Isaac Sim process, like spawn_example.py. Run it with
+DRONE_VEHICLE=starling2max set for every controller / bridge process.
+"""
+import asyncio
+import math
+import omni.usd
+from pxr import UsdGeom, UsdPhysics, Gf
+from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
+from pegasus.simulator.logic.vehicles.multirotor import Multirotor, MultirotorConfig
+from pegasus.simulator.logic.backends.px4_mavlink_backend import (
+    PX4MavlinkBackend, PX4MavlinkBackendConfig,
+)
+from pegasus.simulator.logic.backends.ros2_backend import ROS2Backend
+from pegasus.simulator.logic.graphs.ros2_camera_graph import ROS2CameraGraph
+from pegasus.simulator.logic.thrusters.quadratic_thrust_curve import QuadraticThrustCurve
+from pegasus.simulator.logic.dynamics.linear_drag import LinearDrag
+from pegasus.simulator.params import ROBOTS
+
+DRONE_PATH  = "/World/Iris"     # see module docstring before renaming
+NAMESPACE   = "/iris_0"
+CAMERA_NAME = "front_cam"
+
+# None -> re-dimensioned Iris USD; otherwise a path to a Starling USD.
+STARLING_USD = None
+
+# Camera: identical to spawn_example.py. KEEP RESOLUTION IN SYNC with
+# spawn_test_gates.RESOLUTION.
+RESOLUTION = (1280, 720)
+HFOV_DEG   = 60.0
+# The hFOV stays at the Iris value so the vision pipeline is compared like for
+# like; replace it with the IMX412 hires calibration when we have it
+# (STARLING2MAX_DYNAMICS.md section 12).
+# Camera mount in body FLU (m) and up-pitch (deg). (est.) -- the nose of the
+# Max, just ahead of the front motor line (x = 0.095); from the extrinsics file later.
+CAMERA_POS       = (0.11, 0.0, 0.0)
+CAMERA_PITCH_DEG = 15.0
+
+# ---- Starling 2 Max parameters (STARLING2MAX_DYNAMICS.md, section 2) ----
+MASS         = 0.573                        # kg, flight-ready, C29 (meas.)
+INERTIA_DIAG = (2.47e-3, 2.00e-3, 4.23e-3)  # kg m^2 (Ixx, Iyy, Izz), (est.)
+ARM_X        = 0.095                        # m, half of 190 mm (fore-aft)
+ARM_Y        = 0.130                        # m, half of 260 mm (left-right)
+# rotor0 front-right CCW, rotor1 back-left CCW, rotor2 front-left CW,
+# rotor3 back-right CW (meas.) -- the same order and directions as the Iris.
+ROTOR_XY     = ((ARM_X, -ARM_Y), (-ARM_X, ARM_Y), (ARM_X, ARM_Y), (-ARM_X, -ARM_Y))
+ROT_DIR      = [-1, -1, 1, 1]
+K_F          = 4.383e-6                     # N/(rad/s)^2 (meas., 5,300-5,900 RPM)
+K_M          = 3.633e-7                     # N m/(rad/s)^2, (est.)
+DRAG_COEFF   = [0.227, 0.137, 0.0]          # N/(m/s), body FLU, (est.)
+TAU_MOTOR    = 0.035                        # s, first-order rotor lag (meas.)
+# VOXL ESC: RPM = 2000 + 10000 u while armed (meas.). Pegasus' PX4 backend
+# computes w = INPUT_SCALING * (u + 0) + ZERO_POSITION_ARMED.
+INPUT_SCALING       = 1047.20               # rad/s per unit output
+ZERO_POSITION_ARMED = 209.44                # rad/s, 2,000 RPM idle when armed
+# Clip range of the thrust curve. W_MIN is 0, not the ESC's 209.44: Pegasus
+# sends 0 when disarmed, and the motors must then stop. Armed, the backend
+# never commands less than ZERO_POSITION_ARMED anyway.
+W_MIN        = 0.0                          # rad/s
+W_MAX        = 1256.64                      # rad/s = 12,000 RPM (ESC max)
+
+
+
+class LaggedQuadraticThrustCurve(QuadraticThrustCurve):
+    """
+    QuadraticThrustCurve whose rotor speeds follow the commanded speed through
+    a first-order lag, dw/dt = (w_ref - w) / TAU_MOTOR (exact discretization
+    for the physics step dt). Thrust and yaw moment then come from the lagged
+    speed through the parent's update. With tau = 0 it is the parent.
+    """
+
+    def __init__(self, config={}, tau=TAU_MOTOR):
+        super().__init__(config=config)
+        self._tau = float(tau)
+        n = config.get("num_rotors", 4)
+        self._lag_ref = [0.0] * n
+        self._lag_w = [0.0] * n
+
+    def set_input_reference(self, input_reference):
+        self._lag_ref = [float(w) for w in input_reference]
+
+    def update(self, state, dt):
+        if self._tau > 0.0 and dt > 0.0:
+            a = 1.0 - math.exp(-dt / self._tau)
+            self._lag_w = [w + a * (r - w) for w, r in zip(self._lag_w, self._lag_ref)]
+        else:
+            self._lag_w = list(self._lag_ref)
+        super().set_input_reference(self._lag_w)
+        return super().update(state, dt)
+
+
+def ensure_scene(world):
+    if hasattr(world, '_scene') and world._scene is not None:
+        return True
+    try:
+        from isaacsim.core.api.scenes.scene import Scene
+        world._scene = Scene()
+        return True
+    except Exception:
+        pass
+    try:
+        from omni.isaac.core.scenes.scene import Scene
+        world._scene = Scene()
+        return True
+    except Exception:
+        pass
+    return False
+
+
+async def refresh_camera_info_helper():
+    """Re-initialize the camera_info helper node so it reads the configured
+    camera. Same fix as spawn_example.refresh_camera_info_helper (see its
+    docstring for why). Failure only warns."""
+    try:
+        import omni.graph.core as og
+        import omni.kit.app
+        node_path = f"{DRONE_PATH}/body/{CAMERA_NAME}_pub/camera_helper_camera_info"
+        node = og.Controller.node(node_path)
+        if not node.is_valid():
+            print(f"[init] WARNING: {node_path} not found; camera_info may be stale "
+                  f"(pass --hfov-deg to eval_isaac_gates.py as a workaround)")
+            return
+        attr = og.Controller.attribute("inputs:enabled", node)
+        og.Controller.set(attr, False)
+        for _ in range(10):
+            await omni.kit.app.get_app().next_update_async()
+        og.Controller.set(attr, True)
+        for _ in range(10):
+            await omni.kit.app.get_app().next_update_async()
+        print("[init] camera_info helper re-initialized (reads the configured camera)")
+    except Exception as exc:
+        print(f"[init] WARNING: could not refresh camera_info helper ({exc}); "
+              f"camera_info may be stale")
+
+
+def _set_translate(prim, xyz):
+    """Set a prim's local translation, reusing its translate op if it has one."""
+    xf = UsdGeom.Xformable(prim)
+    for op in xf.GetOrderedXformOps():
+        if op.GetOpType() == UsdGeom.XformOp.TypeTranslate:
+            op.Set(Gf.Vec3d(*xyz))
+            return
+    UsdGeom.XformCommonAPI(prim).SetTranslate(Gf.Vec3d(*xyz))
+
+
+def apply_starling_geometry(stage):
+    """
+    Move rotor0..3 to the Starling 2 Max motor spacing and set the body mass /
+    inertia. Must run after Multirotor() creates the prims and before
+    world.reset_async() starts physics.
+
+    Rotors: each rotor prim's x/y are replaced (its z is kept) and so is the
+    body-side anchor (localPos0) of every physics joint whose body1 is that
+    rotor, so the joint does not snap the rotor back to the Iris position.
+    Pegasus applies each rotor's thrust at the rotor prim, so these positions
+    are the moment arms of the roll / pitch torques.
+
+    Mass: the body gets MASS minus the rotors' own masses, and the inertia
+    INERTIA_DIAG minus the rotors' point-mass (parallel-axis) contribution, so
+    the whole vehicle matches MASS / INERTIA_DIAG.
+    """
+    rotor_paths = [f"{DRONE_PATH}/rotor{i}" for i in range(4)]
+    rotor_mass = 0.0
+    rotor_inertia = [0.0, 0.0, 0.0]
+
+    for i, path in enumerate(rotor_paths):
+        prim = stage.GetPrimAtPath(path)
+        if not prim.IsValid():
+            print(f"[starling2max] WARNING: {path} not found; rotor {i} keeps the Iris arm")
+            continue
+        x, y = ROTOR_XY[i]
+        z = UsdGeom.Xformable(prim).GetLocalTransformation().ExtractTranslation()[2]
+        _set_translate(prim, (x, y, z))
+
+        m_r = 0.0
+        if prim.HasAPI(UsdPhysics.MassAPI):
+            m_r = UsdPhysics.MassAPI(prim).GetMassAttr().Get() or 0.0
+        rotor_mass += m_r
+        rotor_inertia[0] += m_r * y * y
+        rotor_inertia[1] += m_r * x * x
+        rotor_inertia[2] += m_r * (x * x + y * y)
+
+    # Joint anchors: find joints (anywhere under the drone) that attach a rotor.
+    n_joints = 0
+    for prim in stage.Traverse():
+        if not str(prim.GetPath()).startswith(DRONE_PATH) or not prim.IsA(UsdPhysics.Joint):
+            continue
+        joint = UsdPhysics.Joint(prim)
+        targets = [str(t) for t in joint.GetBody1Rel().GetTargets()]
+        for i, path in enumerate(rotor_paths):
+            if path in targets:
+                old = joint.GetLocalPos0Attr().Get() or Gf.Vec3f(0.0, 0.0, 0.0)
+                x, y = ROTOR_XY[i]
+                joint.GetLocalPos0Attr().Set(Gf.Vec3f(x, y, old[2]))
+                n_joints += 1
+    print(f"[starling2max] rotors moved to x=+-{ARM_X} m, y=+-{ARM_Y} m "
+          f"({n_joints} rotor joint anchors updated)")
+    if n_joints != 4:
+        print("[starling2max] WARNING: expected 4 rotor joints; check the rotor prims in the "
+              "Physics inspector (if the body is scaled, localPos0 is in scaled units)")
+
+    body = stage.GetPrimAtPath(f"{DRONE_PATH}/body")
+    if not body.IsValid():
+        print(f"[starling2max] WARNING: {DRONE_PATH}/body not found; mass/inertia unchanged")
+        return
+    body_mass = MASS - rotor_mass
+    body_inertia = [max(I - Ir, 1e-7) for I, Ir in zip(INERTIA_DIAG, rotor_inertia)]
+    if body_mass <= 0.0:
+        print(f"[starling2max] WARNING: rotor prims weigh {rotor_mass:.3f} kg >= {MASS} kg; "
+              f"body mass left unchanged")
+        return
+    mass_api = UsdPhysics.MassAPI.Apply(body)
+    mass_api.CreateMassAttr().Set(body_mass)
+    mass_api.CreateDiagonalInertiaAttr().Set(Gf.Vec3f(*body_inertia))
+    print(f"[starling2max] body mass {body_mass:.4f} kg + rotors {rotor_mass:.4f} kg = {MASS} kg, "
+          f"body inertia {tuple(round(v, 7) for v in body_inertia)} kg m^2")
+
+
+async def main():
+    pi = PegasusInterface()
+    if pi.world is None:
+        pi.initialize_world()
+    await pi.world.initialize_simulation_context_async()
+
+    # Clear registries (safe for re-runs)
+    if pi.vehicle_manager.vehicles:
+        pi.vehicle_manager.remove_all_vehicles()
+    if hasattr(pi.world, '_scene') and pi.world._scene is not None:
+        try:
+            pi.world.scene.remove_object(DRONE_PATH, registry_only=True)
+        except Exception:
+            pass
+    stage = omni.usd.get_context().get_stage()
+    if stage.GetPrimAtPath(DRONE_PATH).IsValid():
+        stage.RemovePrim(DRONE_PATH)
+
+    # Load your USD world as sublayer (uncomment and set path):
+    # root_layer = stage.GetRootLayer()
+    # WORLD_USD = "/workspace/assets/your_world.usd"
+    # if WORLD_USD not in root_layer.subLayerPaths:
+    #     root_layer.subLayerPaths.append(WORLD_USD)
+
+    if not ensure_scene(pi.world):
+        print("FATAL: could not initialize scene")
+        return
+
+    # Camera
+    cam_graph = ROS2CameraGraph(
+        camera_prim_path=f"body/{CAMERA_NAME}",
+        config={
+            "resolution":  list(RESOLUTION),
+            "types":       ["rgb", "depth", "camera_info"],
+            "namespace":   NAMESPACE,
+            "topic":       f"/{CAMERA_NAME}",
+            "tf_frame_id": CAMERA_NAME,
+        },
+    )
+
+    # PX4 backend — Pegasus listens on TCP 4560, PX4 connects to it
+    px4_config = PX4MavlinkBackendConfig(config={
+        "vehicle_id":          0,
+        "px4_autolaunch":      False,
+        "connection_type":     "tcpin",       # Pegasus = TCP server
+        "connection_ip":       "localhost",
+        "connection_baseport": 4560,
+        "enable_lockstep":     False,         # Must be False for manual PX4 launch
+        # VOXL ESC mapping (see the parameters above)
+        "input_offset":        [0.0] * 4,
+        "input_scaling":       [INPUT_SCALING] * 4,
+        "zero_position_armed": [ZERO_POSITION_ARMED] * 4,
+    })
+
+    config = MultirotorConfig()
+    # F_i = K_F w_i^2, yaw moment = sum K_M w_i^2 rot_dir_i, w lagged by TAU_MOTOR
+    config.thrust_curve = LaggedQuadraticThrustCurve(config={
+        "num_rotors":                 4,
+        "rotor_constant":             [K_F] * 4,
+        "rolling_moment_coefficient": [K_M] * 4,
+        "rot_dir":                    ROT_DIR,
+        "min_rotor_velocity":         [W_MIN] * 4,
+        "max_rotor_velocity":         [W_MAX] * 4,
+    }, tau=TAU_MOTOR)
+    config.drag = LinearDrag(DRAG_COEFF)
+    config.backends = [
+        PX4MavlinkBackend(px4_config),
+        ROS2Backend(vehicle_id=0, num_rotors=4),
+    ]
+    config.graphical_sensors = []
+    config.graphs            = [cam_graph]
+
+    # Spawn drone
+    Multirotor(
+        stage_prefix=DRONE_PATH,
+        usd_file=STARLING_USD or ROBOTS["Iris"],
+        init_pos=[0.0, 0.0, 2.5],
+        init_orientation=[0.0, 0.0, 0.0, 1.0],   # quaternion [x,y,z,w], NOT euler
+        config=config,
+    )
+
+    apply_starling_geometry(stage)
+
+    await pi.world.reset_async()
+
+    # Fix camera transform (known bug — ROS2CameraGraph bakes spawn height)
+    cam_prim = stage.GetPrimAtPath(f"{DRONE_PATH}/body/{CAMERA_NAME}")
+    if cam_prim.IsValid():
+        xf = UsdGeom.Xformable(cam_prim)
+        xf.ClearXformOpOrder()
+        cam_prim.RemoveProperty("xformOp:translate")
+        cam_prim.RemoveProperty("xformOp:orient")
+        cam_prim.RemoveProperty("xformOp:rotateXYZ")
+        cam_prim.RemoveProperty("xformOp:scale")
+        xf.AddTranslateOp().Set(Gf.Vec3d(*CAMERA_POS))
+        xf.AddRotateXYZOp().Set(Gf.Vec3f(90.0 + CAMERA_PITCH_DEG, 0.0, -90.0))
+        xf.AddScaleOp().Set(Gf.Vec3d(1.0, 1.0, 1.0))
+
+        # Field of view: set focalLength for the requested hFOV, keeping the
+        # prim's own horizontalAperture. (Isaac derives the vertical FOV from
+        # the render aspect ratio, not from verticalAperture.)
+        cam_schema = UsdGeom.Camera(cam_prim)
+        h_ap = cam_schema.GetHorizontalApertureAttr().Get() or 20.955
+        focal = h_ap / (2.0 * math.tan(math.radians(HFOV_DEG) / 2.0))
+        cam_schema.GetFocalLengthAttr().Set(focal)
+        print(f"[init] camera {RESOLUTION[0]}x{RESOLUTION[1]}, hFOV {HFOV_DEG} deg "
+              f"(focalLength={focal:.3f}, horizontalAperture={h_ap:.3f}, "
+              f"expected fx={RESOLUTION[0] / (2.0 * math.tan(math.radians(HFOV_DEG) / 2.0)):.1f})")
+        await refresh_camera_info_helper()
+
+    hover_w = math.sqrt(MASS * 9.81 / (4.0 * K_F))
+    hover_u = (hover_w - ZERO_POSITION_ARMED) / INPUT_SCALING
+    thr_mdl_fac = 0.9                         # inferred, STARLING2MAX_DYNAMICS.md 4.2
+    hover_tsp = thr_mdl_fac * hover_u ** 2 + (1.0 - thr_mdl_fac) * hover_u
+    print(f"[init] Starling 2 Max: {MASS} kg, ESC-limited max thrust {4 * K_F * W_MAX ** 2:.1f} N, "
+          f"hover {hover_w:.0f} rad/s = {hover_w * 60 / (2 * math.pi):.0f} RPM, PX4 motor output "
+          f"{hover_u:.3f}, normalized thrust {hover_tsp:.3f} with THR_MDL_FAC {thr_mdl_fac} "
+          f"(MPC_THR_HOVER; px4/starling2max_sitl_params.sh)")
+    print("[init] Done — start PX4 SITL now")
+
+asyncio.ensure_future(main())

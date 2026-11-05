@@ -20,6 +20,7 @@ Two ways to fly the gate course in Isaac Sim through PX4 OFFBOARD:
 | `sysid.py` | identify $k_f$, motor lag, inertia, yaw moment and drag from `.ulg` logs (needs `pyulog`); reports what a log can't identify |
 | `test_sysid.py` | the fits recover known parameters from a synthetic Starling 2 Max flight (`python3 test_sysid.py`) |
 | `STARLING2MAX_SYSID_FLIGHTS.md` | the flight cards that give `sysid.py` what it needs |
+| `starling2max_sitl_params.sh` | PX4 SITL parameters for the Starling 2 Max sim (`workspace/spawn_starling2max.py`): `THR_MDL_FAC`, hover / max thrust, rotor geometry |
 
 ## Running it
 

@@ -62,6 +62,10 @@ class Vehicle:
     # --- Pegasus PX4MavlinkBackend: w = px4_w_scale * u + px4_w_offset ---
     px4_w_scale: float
     px4_w_offset: float
+    # PX4 thrust model THR_MDL_FAC = f: the normalized thrust setpoint t that
+    # PX4 receives (MPC_THR_HOVER, SET_ATTITUDE_TARGET thrust) and the motor
+    # output u it sends are related by t = f u^2 + (1 - f) u. 0 = u is t.
+    px4_thr_mdl_fac: float
 
     # --- Pegasus LinearDrag: force_body = -drag_coeff * v_body ---
     drag_coeff: tuple           # N / (m/s), body x, y, z
@@ -93,6 +97,34 @@ class Vehicle:
         w = math.sqrt(self.mass * g / (4.0 * self.k_f))
         return (w - self.px4_w_offset) / self.px4_w_scale
 
+    def hover_thrust_setpoint(self, g: float = 9.81) -> float:
+        """Normalized PX4 thrust setpoint that hovers: PX4's MPC_THR_HOVER."""
+        return thr_mdl_setpoint(self.hover_motor_output(g), self.px4_thr_mdl_fac)
+
+    def thrust_to_setpoint(self, T_total: float) -> float:
+        """Collective thrust [N] (four equal rotors) -> PX4 thrust setpoint, clipped to [0, 1]."""
+        w = math.sqrt(max(T_total, 0.0) / (4.0 * self.k_f))
+        u = min(max((w - self.px4_w_offset) / self.px4_w_scale, 0.0), 1.0)
+        return thr_mdl_setpoint(u, self.px4_thr_mdl_fac)
+
+    def setpoint_to_thrust(self, t: float) -> float:
+        """PX4 thrust setpoint in [0, 1] -> collective thrust [N]."""
+        u = thr_mdl_motor_output(min(max(t, 0.0), 1.0), self.px4_thr_mdl_fac)
+        return 4.0 * self.k_f * (self.px4_w_scale * u + self.px4_w_offset) ** 2
+
+
+def thr_mdl_setpoint(u: float, f: float) -> float:
+    """PX4 thrust model: motor output u -> normalized thrust setpoint, t = f u^2 + (1 - f) u."""
+    return f * u * u + (1.0 - f) * u
+
+
+def thr_mdl_motor_output(t: float, f: float) -> float:
+    """Inverse of thr_mdl_setpoint for t >= 0 and 0 <= f <= 1 (what PX4's mixer does)."""
+    if f < 1e-9:
+        return t
+    b = 1.0 - f
+    return (-b + math.sqrt(b * b + 4.0 * f * t)) / (2.0 * f)
+
 
 VEHICLES = {
     # Pegasus Iris. Numbers unchanged from drone_constraints.py / drone_params.py
@@ -117,6 +149,7 @@ VEHICLES = {
         w_max=1100.0,
         px4_w_scale=1000.0,
         px4_w_offset=100.0,
+        px4_thr_mdl_fac=0.0,
         drag_coeff=(0.50, 0.30, 0.0),
         tau_motor=0.0,
         # Max tilt that holds altitude is arccos(1/2.81) = 1.21 rad; 1.0 leaves margin.
@@ -150,6 +183,7 @@ VEHICLES = {
         w_max=1100.0,
         px4_w_scale=1000.0,
         px4_w_offset=100.0,
+        px4_thr_mdl_fac=0.0,
         drag_coeff=(0.106, 0.064, 0.0),                                   # (est.)
         tau_motor=0.0,
         tilt_limit=1.0,                 # hold-altitude limit 1.176 rad (T/W 2.60)
@@ -206,6 +240,7 @@ VEHICLES = {
         w_max=1256.64,                  # 12,000 RPM, ESC limit
         px4_w_scale=1047.20,            # 10,000 RPM per unit of PX4 output
         px4_w_offset=209.44,
+        px4_thr_mdl_fac=0.9,            # (inferred) from MPC_THR_MAX 0.6 = 9,628 RPM
         drag_coeff=(0.227, 0.137, 0.0),                                   # (est.)
         tau_motor=0.035,                                                  # (meas.)
         tilt_limit=1.0,                 # hold-altitude limit at the PX4 cap: 1.250 rad
