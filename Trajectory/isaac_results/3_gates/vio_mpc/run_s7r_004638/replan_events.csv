@@ -1,8 +1,0 @@
-t,event
-928.504,"plan #1 (first plan): window 4 of 4 route gate(s) left, lap 1/1"
-928.504,"plan ready (first plan): 27.43 s through gate_0, gate_1, gate_2, gate_0 from [-0.16 -0.03  2.52]"
-1138.600,engaged: plan #1 starts at t=1138.60
-1143.352,"passed gate_0 [route 0, lap 1] (through)"
-1148.504,"passed gate_1 [route 1, lap 1] (through)"
-1154.712,"passed gate_2 [route 2, lap 1] (MISSED -- 2 s past its planned time)"
-1164.456,"passed gate_0 [route 3, lap 1] (MISSED -- 2 s past its planned time)  -- LAP 1 COMPLETE"

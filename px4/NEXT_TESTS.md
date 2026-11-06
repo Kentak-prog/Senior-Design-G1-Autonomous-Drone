@@ -119,9 +119,10 @@ Run folders: `Trajectory/isaac_results/3_gates/vio_mpc/run_*`. Each has:
 - `bridge_log.csv`, `monitor_events.txt`, `replan_events.csv`;
 - figures from `scripts/plot_vio_flight.py`.
 
-The large CSVs are not in git; the copies on the pod are under
-`/workspace/vio_runs/s7r*_*` (with `vio/vio_log.csv`, the VIO state every
-IMU sample).
+**No CSV under `Trajectory/isaac_results/` is in git** (`.gitignore`). Get
+them from the pod: `/workspace/vio_runs/s7r*_*` and `run_045716` (these
+also have `vio/vio_log.csv`, the VIO state every IMU sample), or from
+whoever ran the flight.
 
 | Attempt | VIO changes flown | gate_0 | gate_1 | Velocity error at gap start | Abort | Folder |
 |---|---|---|---|---|---|---|

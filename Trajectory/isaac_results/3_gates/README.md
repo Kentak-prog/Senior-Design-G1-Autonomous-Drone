@@ -36,7 +36,9 @@ Synthetic vision (0.5 px corner noise) → min-snap plan → the repo NMPC, in
 Each folder is one run of `px4/fly_min_snap_offboard.py`, copied from
 `/workspace/px4_runs/min_snap_<id>/` (same `<id>`). Each one has
 `flight_log.csv` (every 20 ms: setpoint and measured state, ENU),
-`plan_reference.csv`, `summary.json` and the manifest that was flown.
+`plan_reference.csv`, `summary.json` and the manifest that was flown. The
+CSVs are not in git (`.gitignore`): the originals are on the pod in
+`/workspace/px4_runs/`.
 
 | Run | Flags | Outcome |
 |---|---|---|

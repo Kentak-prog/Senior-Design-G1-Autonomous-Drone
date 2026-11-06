@@ -53,6 +53,10 @@ angle from gate normal):
 
 ## Files
 
+**No CSV under `Trajectory/isaac_results/` is in git** (`.gitignore`, from
+2026-11-06). They are several MB each. The figures and summaries are tracked;
+the CSVs stay on the machine or pod that made them.
+
 - `*/min_snap_reference.csv` — the 12-state NMPC reference sampled at 0.02 s
   (`t,x,y,z,phi,theta,psi,vx,vy,vz,p,q,r,U1_ff`).
 - `*/min_snap_sim.png` — 3D path, top-down, speed, attitude, tracking error.
