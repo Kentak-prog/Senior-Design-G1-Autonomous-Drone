@@ -1,0 +1,31 @@
+run ../vio_mpc/run_s7r_004638; t = 0 at sim 1138.63; plan 27.39 s
+in frame = by geometry from the TRUE pose; events are the VIO's own gate matches
+
+gate_0: in flight {'full': 7, 'pos': 0, 'reject': 0}
+  hover (before t=0): center in frame 100 %, whole gate 68 %; range 5.0 m
+  center in frame, in flight: +0.0..+0.2, +0.6..+4.2
+  whole gate in frame, in flight: +0.0..+0.2
+  closest range 0.34 m
+    whole in frame +0.0..+0.2 s: range 5.0->5.0 m, viewing angle 9-9 deg, 7 fixes
+
+gate_1: in flight {'full': 81, 'pos': 0, 'reject': 0}
+  hover (before t=0): center in frame 100 %, whole gate 100 %; range 9.0 m
+  center in frame, in flight: +0.0..+0.3, +0.5..+0.7, +0.9..+1.2, +1.5..+1.8, +2.0..+2.2, +4.7..+8.0
+  whole gate in frame, in flight: +0.0..+0.3, +0.5..+0.7, +1.2..+1.2, +1.6..+1.7, +4.8..+5.6
+  closest range 0.69 m
+    whole in frame +0.0..+0.3 s: range 9.0->9.0 m, viewing angle 7-7 deg, 16 fixes
+    whole in frame +0.5..+0.7 s: range 9.0->8.9 m, viewing angle 6-6 deg, 11 fixes
+    whole in frame +1.2..+1.2 s: range 8.8->8.8 m, viewing angle 6-6 deg, 0 fixes
+    whole in frame +1.6..+1.7 s: range 8.5->8.5 m, viewing angle 6-6 deg, 3 fixes
+    whole in frame +4.8..+5.6 s: range 4.3->3.7 m, viewing angle 31-46 deg, 45 fixes
+
+gate_2: in flight {'full': 226, 'pos': 47, 'reject': 78}
+  hover (before t=0): center in frame 100 %, whole gate 100 %; range 13.0 m
+  center in frame, in flight: +0.0..+0.3, +0.5..+5.2, +9.4..+14.6
+  whole gate in frame, in flight: +0.0..+0.2, +0.6..+5.1, +10.0..+10.9, +11.8..+11.9
+  closest range 2.84 m
+    whole in frame +0.0..+0.2 s: range 13.0->13.0 m, viewing angle 5-5 deg, 13 fixes
+    whole in frame +0.6..+5.1 s: range 13.0->7.0 m, viewing angle 5-12 deg, 258 fixes
+    whole in frame +10.0..+10.9 s: range 4.8->3.5 m, viewing angle 30-46 deg, 0 fixes
+    whole in frame +11.8..+11.9 s: range 3.1->3.1 m, viewing angle 58-58 deg, 0 fixes
+

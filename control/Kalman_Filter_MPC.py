@@ -76,15 +76,19 @@ def _imu_dynamics():
 
 class DroneCasadiEKF12D:
     def __init__(self, dt=0.02, m = drone_constraints["mass"], #kg
-                 accel_noise=0.1, gyro_noise=0.01):
+                 accel_noise=0.1, gyro_noise=0.01, accel_rw=0.0):
         """
         dt:           step of predict() (model mode); predict_imu() takes its own dt
         accel_noise:  accelerometer white noise, 1-sigma per sample (m/s^2)
+        accel_rw:     unmodelled acceleration (tilt error, bias, drag), m/s^2 per sqrt(s):
+                      velocity variance grows accel_rw^2 * t. 0 = white noise only, which
+                      averages out over many samples and leaves dead reckoning overconfident.
         gyro_noise:   gyro white noise, 1-sigma per sample (rad/s)
         """
         self.dt = dt
         self.accel_noise = accel_noise
         self.gyro_noise = gyro_noise
+        self.accel_rw = accel_rw
 
         #Load CasADI Model
         f_continuous, states, controls = get_drone_dynamics(m)
@@ -191,7 +195,16 @@ class DroneCasadiEKF12D:
                             np.full(3, sg2 * dt ** 2),       # angles
                             np.full(3, sa2 * dt ** 2),       # velocity
                             np.full(3, sg2)])                # rates (replaced by update_gyro)
-        self.P = F @ self.P @ F.T + np.diag(q) + 1e-9 * np.eye(12)
+        Q = np.diag(q)
+        if self.accel_rw:
+            # continuous white acceleration (a random walk in velocity) and its position coupling
+            w2 = self.accel_rw ** 2
+            for k in range(3):
+                Q[k, k] += w2 * dt ** 3 / 3
+                Q[k, 6 + k] += w2 * dt ** 2 / 2
+                Q[6 + k, k] += w2 * dt ** 2 / 2
+                Q[6 + k, 6 + k] += w2 * dt
+        self.P = F @ self.P @ F.T + Q + 1e-9 * np.eye(12)
         return self.x
 
     # ------------------------------------------------------------------ update

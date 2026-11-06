@@ -65,7 +65,39 @@ What the Stage 4 log shows (`vio/vio_events.csv`, times from engage):
     top of the frame (it looks that way in the onboard view). Check that and
     the association in `control/vio.py` (`assoc_tol`).
 
-### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`)
+### Update 2026-11-06: first flight with the VIO in charge, and 1b / 1c done
+
+**Flight** (Stage 4R, VIO in charge, logs and figures in
+`Trajectory/isaac_results/3_gates/vio_mpc/run_s7r_004638/`):
+- passed gate_0 for real;
+- from +5.6 s to +10.0 s no gate was whole in frame, and the VIO drifted
+  0.17 → 1.06 m, while it reported only 0.30 m of uncertainty;
+- it passed beside gate_1;
+- gate_2's fixes at +10 s were rejected;
+- the watchdog stopped the flight at +10.5 s.
+
+The drift, fitted over the gap: 0.17 m position error and 0.11 m/s velocity
+error when the fixes stopped, plus about 0.04 m/s² from tilt error.
+
+**1b and 1c are now in `control/vio.py`:**
+- `accel_rw=0.1` (process noise for unmodelled acceleration, in
+  `Kalman_Filter_MPC.py`);
+- re-locking after 5 rejected full fixes of one gate that agree within 0.3 m.
+
+Tests (`control/test_vio.py`):
+- the Isaac gap gives error/std **3.4** without the term and **0.79** with it;
+- a VIO 1 m off re-locks to 0.001 m;
+- disagreeing fixes never re-lock.
+
+Rehearsal at 2/2:
+- VIO max 0.98 → 0.76 m;
+- tracking max 0.88 → 0.75 m.
+
+At 3/3, VIO max is 1.40 m (all gates in the rehearsal, but over the 1 m
+watchdog). **Still open:** the drift itself (1a, 1d). These changes let the
+VIO *recover* at gate_2; they don't keep it under 0.5 m at gate_1.
+
+### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`) — done 2026-11-06
 - [ ] Tune the process noise (`accel_noise`, plus a velocity random walk) so
   that the reported std covers the real error when fixes drop out. Target:
   error / std < 3 for 95 % of samples during a 6 s gap.
@@ -73,7 +105,7 @@ What the Stage 4 log shows (`vio/vio_events.csv`, times from engage):
   6 s, then check the std grew to match and that the first fix after the gap
   is accepted.
 
-### 1c. Recovery after the filter has drifted (`control/vio.py`)
+### 1c. Recovery after the filter has drifted (`control/vio.py`) — done 2026-11-06
 - [ ] Re-localize after N consecutive rejections of consistent fixes (say 5
   within 1 s, agreeing with each other). Accept the fix and inflate the
   covariance instead of rejecting forever.

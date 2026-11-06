@@ -133,7 +133,7 @@ def run(args):
     u = np.array([[m * G], [0.0], [0.0], [0.0]])
     pending = []                                                          # (deliver_time, capture_time, dets)
     buf, t_plan, flying = None, None, False
-    log = {k: [] for k in ("t", "true", "est", "ref")}
+    log = {k: [] for k in ("t", "true", "est", "ref", "std")}
     solve_ms, vio_ms = [], []
     end_t = None
     n_steps = int((args.hover_s + 40.0) / imu_dt)
@@ -160,6 +160,7 @@ def run(args):
                 solve_ms.append(out["solve_ms"])
                 log["t"].append(t); log["true"].append(x[:, 0].copy()); log["est"].append(xe[:, 0].copy())
                 log["ref"].append(ref[:, 0].copy())
+                log["std"].append(float(np.linalg.norm(vio.position_std())))
                 if end_t is None and buf.ended(t):
                     end_t = t
                 if end_t is not None and t - end_t > 1.5:
@@ -210,6 +211,11 @@ def report(L, vio, gates, buf, t_plan, gyro_bias, solve_ms, vio_ms, wall):
     te = np.linalg.norm(L["true"][:, 0:3] - L["ref"][:, 0:3], axis=1)
     print(f"[vio] position error mean {pe.mean():.3f} m, max {pe.max():.3f} m; velocity error mean {ve.mean():.3f} m/s; "
           f"yaw error max {ye.max():.2f} deg")
+    if len(L["std"]):
+        ratio = pe / np.maximum(L["std"], 1e-6)
+        print(f"[vio] honesty: error / reported 3-D std p50 {np.median(ratio):.1f}, p95 {np.percentile(ratio, 95):.1f}, "
+              f"max {ratio.max():.1f} (about 1 = honest; > 3 = overconfident); "
+              f"relocks {vio.stats.get('relocks', 0)}, rejected {vio.stats['rejected']}")
     print(f"[mpc] TRUE drone vs reference: mean {te.mean():.3f} m, max {te.max():.3f} m; "
           f"solve median {np.median(solve_ms):.1f} ms")
     print(f"[cpu] VIO per IMU sample: median {np.median(vio_ms):.2f} ms, p99 {np.percentile(vio_ms, 99):.1f} ms "

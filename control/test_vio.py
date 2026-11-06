@@ -168,6 +168,55 @@ def test_look_at_yaw_keeps_gates_ahead_and_still_passes():
           f"all gates still passed  OK")
 
 
+def _settled_vio(seconds=5.0, **kw):
+    """A VIO hovering at START after `seconds` of good fixes from every gate at 60 Hz, as in Isaac
+    before the gap (hundreds of fixes: the filter is then very sure of its tilt)."""
+    vio = GateVIO(GATES, MOUNT0, calib_s=0.0, initial_guess=(START, START_YAW), **kw)
+    T_wb = _T(rot_rpy(0.0, 0.0, START_YAW), START)
+    t = _hover_imu(vio, 1)
+    for _ in range(int(seconds * 60)):
+        vio.add_detections(t, [_det(T_wb, g) for g in GATES])
+        t = _hover_imu(vio, 4, t0=t)
+    return vio, T_wb, t
+
+
+def test_dead_reckoning_uncertainty_is_honest():
+    # Isaac 2026-11-06: 4.8 s without a usable gate; at the start 0.11 m/s velocity error, then about
+    # 0.04 m/s^2 of unmodelled acceleration (tilt) -> 1.06 m, while the filter claimed 0.30 m.
+    ratio = {}
+    for rw in (0.0, 0.1):
+        vio, T_wb, t = _settled_vio(accel_rw=rw)
+        vio.ekf.x[6, 0] += 0.11                                   # velocity error when the fixes stop
+        for k in range(int(4.8 / vio.dt)):                        # no fixes; the IMU reads 0.04 m/s^2 too much
+            t += vio.dt
+            vio.add_imu(t, FRD_FROM_FLU @ np.array([0.04, 0.0, G]), np.zeros(3))
+        err = float(np.linalg.norm(vio.state[0:3, 0] - START))
+        ratio[rw] = err / float(np.linalg.norm(vio.position_std()))
+    assert ratio[0.0] > 3.0 and ratio[0.1] < 1.5, ratio
+    print(f"  4.8 s blind with Isaac's drift: error / reported std {ratio[0.0]:.1f} (white noise only) -> "
+          f"{ratio[0.1]:.2f} with accel_rw 0.1  OK")
+
+
+def test_relock_after_drift():
+    def drifted(relock_n, spread=0.0):
+        vio, T_wb, t = _settled_vio(relock_n=relock_n)
+        vio.ekf.x[0, 0] += 1.0                                    # 1 m off, and sure of itself
+        vio.ekf.P[0:3, 0:3] = np.eye(3) * 0.03 ** 2
+        for k in range(20):                                       # 15 Hz of gate_0 at about 5 m (Isaac: 3.5-4.8 m)
+            jitter = np.array([0.0, spread * (1 if k % 2 else -1), 0.0])
+            vio.add_detections(t, [_det(_T(rot_rpy(0.0, 0.0, START_YAW), START + jitter), GATES[0])])
+            t = _hover_imu(vio, 17, t0=t)
+        return vio, float(np.linalg.norm(vio.state[0:3, 0] - START))
+    vio, err = drifted(5)
+    assert vio.stats["relocks"] == 1 and err < 0.1, (vio.stats, err)
+    vio0, err0 = drifted(0)
+    assert vio0.stats["relocks"] == 0 and err0 > 0.9, (vio0.stats, err0)
+    vio_j, err_j = drifted(5, spread=0.5)                         # fixes that disagree with each other
+    assert vio_j.stats["relocks"] == 0, vio_j.stats
+    print(f"  1 m off and overconfident: 5 consistent rejected fixes -> re-lock, error {err:.3f} m "
+          f"(without: {err0:.2f} m); disagreeing fixes (+-0.5 m) never re-lock  OK")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:

@@ -299,7 +299,10 @@ def main():
     ap.add_argument("--before", type=float, default=2.0)
     ap.add_argument("--after", type=float, default=2.0)
     ap.add_argument("--dpi", type=int, default=300)
+    ap.add_argument("--title", default=None, help=f"title suffix (default: {SUFFIX!r})")
     args = ap.parse_args()
+    if args.title:
+        globals()["SUFFIX"] = args.title
 
     L = load_flight(os.path.join(args.run_dir, "flight_log.csv"))
     gates = gates_from_manifest(args.gates or os.path.join(args.run_dir, "test_gates.json"))
