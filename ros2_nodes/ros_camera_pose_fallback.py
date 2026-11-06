@@ -89,6 +89,7 @@ class PoseFallbackGatePoseNode:
         detector,
         namespace: str = "/iris_0",
         pose_topic: str = "/drone00/state/pose",
+        odom_topic: str = "",
         body_to_camera: np.ndarray | None = None,
         optical_frame: bool = False,
         gate_side: float = DEFAULT_GATE_SIDE,
@@ -119,8 +120,14 @@ class PoseFallbackGatePoseNode:
         self._intr = None
         self._bridge = None
 
-        self._node.create_subscription(PoseStamped, self._pose_topic,
-                                       self._on_pose, 10)
+        if odom_topic:
+            from nav_msgs.msg import Odometry
+            self._node.create_subscription(Odometry, odom_topic, lambda m: self._on_pose(m.pose), 10)
+            self._node.get_logger().info(f"body pose from {odom_topic} (Odometry)")
+        else:
+            self._node.create_subscription(PoseStamped, self._pose_topic,
+                                           self._on_pose, 10)
+            self._node.get_logger().info(f"body pose from {self._pose_topic} (PoseStamped)")
 
         topic = f"{namespace}/front_cam"
         self._pub = self._node.create_publisher(PoseArray, f"{topic}/gate_poses", 10)
@@ -224,7 +231,11 @@ class PoseFallbackGatePoseNode:
 def main():
     ap = argparse.ArgumentParser(description="No-TF fallback for the gate-pose pipeline")
     ap.add_argument("--namespace", default="/iris_0")
-    ap.add_argument("--pose-topic", default="/drone00/state/pose")
+    ap.add_argument("--pose-topic", default="/drone00/state/pose",
+                    help="geometry_msgs/PoseStamped of the body (default: Pegasus ground truth)")
+    ap.add_argument("--odom-topic", default="",
+                    help="nav_msgs/Odometry of the body instead of --pose-topic, e.g. /vio/odometry: "
+                         "lifts the gates into the world with the VIO's pose (no ground truth)")
     ap.add_argument("--optical-frame", action="store_true")
     ap.add_argument("--gate-side", type=float, default=DEFAULT_GATE_SIDE)
     ap.add_argument("--corner-sigma-px", type=float, default=1.5)
@@ -254,6 +265,7 @@ def main():
         detector=detector,
         namespace=args.namespace,
         pose_topic=args.pose_topic,
+        odom_topic=args.odom_topic,
         optical_frame=args.optical_frame,
         gate_side=args.gate_side,
         corner_sigma_px=args.corner_sigma_px,

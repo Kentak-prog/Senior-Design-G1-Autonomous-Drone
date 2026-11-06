@@ -108,7 +108,8 @@ class Replanner:
     def __init__(self, gate_map, start_pos, start_yaw, v_max=None, a_max=None, m=drone_constraints["mass"],
                  laps=1, close_loop=True, horizon_gates=5, extend_at=2,
                  commit_dist=1.5, pos_tol=0.10, pos_tol_frac=0.02, ang_tol_deg=5.0, min_interval=0.2,
-                 replan=True, search_yaw_rate=0.5, miss_timeout=2.0, verbose=True, fail_backoff=1.0):
+                 replan=True, search_yaw_rate=0.5, miss_timeout=2.0, verbose=True, fail_backoff=1.0,
+                 yaw_mode="velocity"):
         self.map = gate_map
         self.v_max, self.a_max, self.m = v_max, a_max, m
         self.laps, self.close_loop = laps, close_loop
@@ -120,6 +121,9 @@ class Replanner:
         self.search_yaw_rate = search_yaw_rate
         self.miss_timeout = miss_timeout
         self.fail_backoff = fail_backoff
+        if yaw_mode not in ("velocity", "next_gate"):
+            raise ValueError(f"unknown yaw_mode {yaw_mode!r} (use 'velocity' or 'next_gate')")
+        self.yaw_mode = yaw_mode            # next_gate: look at the next gate (keeps gates in the camera)
         self.verbose = verbose
 
         self.plans = []
@@ -357,7 +361,12 @@ class Replanner:
             if traj.duration > 3.0 * left + 10.0:
                 self._fail(t, reason, f"new plan {traj.duration:.1f} s vs {left:.1f} s left on the current one")
                 return
-        ref = TrajectoryReference(traj, start_yaw=yaw, m=self.m, yaw_blend_time=0.5 if moving else None)
+        if self.yaw_mode == "next_gate":
+            from min_snap_planner import look_at_yaw_profile      # here: min_snap_planner is a sibling module
+            ref = TrajectoryReference(traj, start_yaw=yaw, m=self.m,
+                                      yaw_profile=look_at_yaw_profile(traj, wps, gates, yaw))
+        else:
+            ref = TrajectoryReference(traj, start_yaw=yaw, m=self.m, yaw_blend_time=0.5 if moving else None)
         snapshot = {gid: (self.map.gates[gid].center.copy(), self.map.gates[gid].normal.copy(),
                           self.map.gates[gid].normal_reliable) for gid in window}
         self.plans.append(Plan(t, traj, ref, wps, self.progress, list(window), snapshot, reason))

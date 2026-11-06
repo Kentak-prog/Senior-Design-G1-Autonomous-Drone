@@ -85,6 +85,7 @@ def main():
             dp("rate_hz", 20.0)
             dp("prepare_every_s", 1.0)      # before engage: how often to re-check the plan against the map
             dp("use_camera", True)
+            dp("yaw_mode", "velocity")      # next_gate: look at the next gate (needed when the VIO flies)
             dp("gate_side", DEFAULT_GATE_SIDE)
             dp("log_dir", "")
             gp = lambda n: self.get_parameter(n).value   # noqa: E731
@@ -95,7 +96,8 @@ def main():
             self.session = ReplanSession(prior, v_max=float(gp("v_max")), a_max=float(gp("a_max")),
                                          laps=int(gp("laps")), close_loop=bool(gp("close_loop")),
                                          start_tol_m=float(gp("start_tol_m")), gate_side=float(gp("gate_side")),
-                                         prior_sigma=max(float(gp("prior_sigma")), 0.05))
+                                         prior_sigma=max(float(gp("prior_sigma")), 0.05),
+                                         yaw_mode=str(gp("yaw_mode")))
             for p, g in zip(prior, true_gates):
                 self.get_logger().info(f"prior {p.name}: {np.round(p.center, 2)} "
                                        f"({np.linalg.norm(p.center - g.center):.2f} m from the manifest)")
@@ -127,6 +129,7 @@ def main():
             self._n_events = 0
             self.create_timer(1.0 / float(gp("rate_hz")), self.tick)
             self.get_logger().info(f"replanning {gp('laps')} lap(s), close_loop={gp('close_loop')}, "
+                                   f"yaw {gp('yaw_mode')}, state {gp('state_source')}, "
                                    f"v/a {gp('v_max')}/{gp('a_max')}; waiting for True on {gp('start_topic')}; "
                                    f"log {log_dir}; use_sim_time={self.get_parameter('use_sim_time').value}")
 

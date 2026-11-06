@@ -143,6 +143,31 @@ def test_prepare_holds_clock_and_engage_restamps():
     print("  60 s hover: no false MISSED; engage re-stamps to now; 1 m drift -> fresh plan from there  OK")
 
 
+def test_yaw_mode_next_gate():
+    # with the VIO flying, the nose must look at the next gate (keeps it in the camera)
+    worst = {}
+    for mode in ("velocity", "next_gate"):
+        sess = ReplanSession(perturbed_prior(GATES, 0.0, 0), v_max=2.0, a_max=2.0, yaw_mode=mode)
+        sess.prepare(0.0, START, START_YAW)
+        plan = sess.replanner.plans[-1]
+        t_g1 = plan.traj.t_breaks[[i for i, w in enumerate(plan.wps) if w['type'] == 'center'][1]]
+        off = []
+        for t in np.arange(plan.traj.t_breaks[[i for i, w in enumerate(plan.wps) if w['type'] == 'center'][0]] + 0.3,
+                           t_g1 - 0.5, 0.1):                     # leaving gate_0 towards gate_1
+            x = plan.ref.reference_state(t)
+            d = GATES[1].center - x[0:3]
+            off.append(abs(math.degrees((math.atan2(d[1], d[0]) - x[5] + math.pi) % (2 * math.pi) - math.pi)))
+        worst[mode] = max(off)
+    assert worst["next_gate"] < 35.0 < worst["velocity"], worst
+    try:
+        ReplanSession(perturbed_prior(GATES, 0.0, 0), yaw_mode="sideways").prepare(0.0, START, START_YAW)
+        raise AssertionError("bad yaw_mode accepted")
+    except ValueError:
+        pass
+    print(f"  gate_0 -> gate_1: gate_1 at most {worst['next_gate']:.0f} deg off the nose with next_gate "
+          f"({worst['velocity']:.0f} deg with velocity yaw)  OK")
+
+
 def test_closed_lap_with_camera_replanning():
     sess, T, X, switches, err, plan_ms = fly()
     passes = sess.passes()
