@@ -9,6 +9,7 @@ code:
 |---|---|---|
 | `vio_node.py` | IMU + front camera → pose estimate (VIO) on the known gate map | `control/vio.py` (`control/test_vio.py`) |
 | `min_snap_node.py` | gates (detections, or the course map) + current pose → min-snap reference | `Trajectory/min_snap_planner.py` (`Trajectory/test_min_snap_planner.py`) |
+| `replan_node.py` | drop-in for `min_snap_node`: a prior gate map corrected by the camera, replans in flight, laps (Stage 4R) | `Trajectory/replan_session.py` + `replanner.py` (`Trajectory/test_replan_session.py`) |
 | `mpc_node.py` | NMPC tracking the reference → attitude + thrust setpoint, 50 Hz | `control/mpc_core.py` (`control/test_mpc_core.py`) |
 | `mpc_offboard_bridge.py` | setpoints → PX4 OFFBOARD (`SET_ATTITUDE_TARGET`), with aborts | `px4/attitude_bridge.py` (`px4/test_attitude_bridge.py`) |
 | `flight_monitor.py` | preflight GO / NO-GO, the flight log, the sim-only watchdog → `/flight_monitor/abort` | `px4/flight_checks.py` (`px4/test_flight_checks.py`); scored by `px4/analyze_vio_mpc_flight.py` |
@@ -46,7 +47,7 @@ Not here, on purpose:
 | `/mpc/attitude_setpoint` | `drone_msgs/AttitudeThrustSetpoint` | `mpc_node` → `mpc_offboard_bridge` |
 | `/mpc_offboard_bridge/engaged` | `std_msgs/Bool` (latched) | bridge → `min_snap_node` (`start_topic`): the plan starts at OFFBOARD |
 | `/flight_monitor/abort` | `std_msgs/String` (the reason) | `flight_monitor` → bridge (aborts to AUTO.LOITER) |
-| `/iris_0/front_cam/gate_poses` | `geometry_msgs/PoseArray` | `ros_camera_pose_fallback` → `min_snap_node` (detection mode) |
+| `/iris_0/front_cam/gate_poses` | `geometry_msgs/PoseArray` | `ros_camera_pose_fallback` (`--camera-pitch-deg` = the spawn's) → `min_snap_node` (detection mode), `replan_node` |
 | `/drone00/state/pose`, `/twist` | ground truth | `state_source:=pegasus` (bring-up only); `vio_node` logs it for scoring |
 
 ## Running

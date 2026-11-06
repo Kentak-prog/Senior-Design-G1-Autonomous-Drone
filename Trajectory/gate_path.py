@@ -229,7 +229,8 @@ def _avoidance_point(gate, p0, p1, clearance):
 def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
                          standoff: float = 1.0, finish_dist: float = 4.0,
                          clearance: float = 0.5, max_iters: int = 20, verbose: bool = True,
-                         start_state=None, obstacle_gates=(), optimize_times: bool = True):
+                         start_state=None, obstacle_gates=(), optimize_times: bool = True,
+                         segment_times_hint=None):
     """
     Gates -> waypoints -> min-snap trajectory that respects v_max / a_max.
 
@@ -239,7 +240,8 @@ def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
     optimize_times (default): each segment's share of the time is optimized for
     the shortest total time within the limits (min_snap.optimize_segment_times)
     instead of being proportional to its length. Only from rest: with a moving
-    start_state (in-flight replan) the distance-proportional fit is used.
+    start_state (in-flight replan) the distance-proportional fit is used, unless
+    segment_times_hint gives a better split.
 
     Every gate with a reliable normal is crossed perpendicular to its plane
     (velocity direction constraint at the center). If the polynomial bulges
@@ -251,6 +253,11 @@ def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
       start_state:    {1: vel, 2: acc, 3: jerk} at `start` (None = at rest)
       obstacle_gates: gates NOT to fly through any more (already passed) whose
                       frames must still be avoided
+      segment_times_hint: callable(waypoints) -> segment times (len(waypoints) - 1)
+                      or None. Seeds fit_to_limits instead of the distance-
+                      proportional split; Replanner uses it to carry the
+                      previous plan's (optimized) timing into an in-flight replan.
+                      Called again whenever an avoidance waypoint is inserted.
 
     Returns (traj, waypoints).
     """
@@ -268,7 +275,9 @@ def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
         if optimize_times and not moving:
             traj = optimize_segment_times(points, fixed_dir, v_max=v_max, a_max=a_max)
         else:
-            traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, start_state=start_state)
+            hint = segment_times_hint(wps) if segment_times_hint is not None else None
+            traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, start_state=start_state,
+                                 segment_times=hint)
 
         bad = _first_bad_crossing(traj, check_gates, clearance)
         if bad is None:

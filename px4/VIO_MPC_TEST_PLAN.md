@@ -219,6 +219,57 @@ VIO, so perfect state should do better. Also compare:
 - `vio flying position error`: the VIO ran alongside, so this is a free
   stage-5 preview.
 
+## Stage 4R: the course on ground truth, replanning from the camera (one closed lap)
+
+As Stage 4, but `ros2_nodes/replan_node.py` replaces `min_snap_node`. It starts
+from a gate map **off by about 0.5 m** (the manifest perturbed with a fixed
+seed). The camera's gate poses correct it, and it **replans in flight** when a
+gate it is heading for moves. The route is **one closed lap**: gate_0, gate_1,
+gate_2, then back through gate_0. It still flies on ground truth; the camera
+poses are lifted into the world with the true pose.
+
+Same Isaac and PX4 bring-up. In the `ros2-eval` shells (step 3 of the
+runbook in each, with `DRONE_VEHICLE=iris`):
+
+```bash
+export RUN=/workspace/vio_runs/s4r_$(date +%H%M%S) && mkdir -p $RUN
+python3 ros2_nodes/flight_monitor.py --ros-args -p use_sim_time:=true -p log_dir:=$RUN -p max_vio_err_m:=99.0
+python3 ros2_nodes/mpc_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus
+python3 ros2_nodes/ros_camera_pose_fallback.py --camera-pitch-deg 0
+python3 ros2_nodes/replan_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus     -p gates_file:=/workspace/test_gates.json -p prior_sigma:=0.5 -p prior_seed:=0 -p laps:=1     -p close_loop:=true -p v_max:=2.0 -p a_max:=2.0 -p start_topic:=/mpc_offboard_bridge/engaged -p log_dir:=$RUN
+```
+
+`ros_camera_pose_fallback.py` takes plain flags, no `--ros-args`, and needs
+`--camera-pitch-deg 0` (the spawn's level camera). With the default 15° every
+gate lands about 2.6 m low at 10 m range.
+
+Expect:
+- `replan_node` logs `prior gate_N: ... (x m from the manifest)` and then
+  `plan ready (first plan) ... through gate_0, gate_1, gate_2, gate_0`. While
+  hovering, it re-plans whenever the camera moves a gate.
+- The monitor reaches `PREFLIGHT: GO`.
+
+Then:
+
+```bash
+python3 ros2_nodes/mpc_offboard_bridge.py --hover-thrust 0.58 --max-duration 120 --max-tilt-deg 30 --log-dir $RUN --ros-args -p use_sim_time:=true
+```
+
+Offline (`Trajectory/test_replan_session.py`, same course and prior seed): 3 to 4
+replans, gate_0 to gate_0 in about 19.7 s, so the flight is about 27 s of sim
+time, roughly 65 s wall. `--max-duration 120` leaves room.
+
+During the flight `replan_node` logs every `passed gate_N` and every
+`published plan #k (reason)`. Score it with the route order:
+
+```bash
+python3 px4/analyze_vio_mpc_flight.py $RUN --route gate_0,gate_1,gate_2,gate_0
+```
+
+**Pass:** `[route] ... OK` (gate_0 twice) and the watchdog never trips. Also
+keep `replan_events.csv` and `gate_map.csv` from `$RUN`: they show each plan,
+its reason, and how far the camera moved each gate.
+
 ## Stage 5: VIO open-loop on the proven flier
 
 The flight of 2026-10-23, now with look-at yaw, and the VIO watching:

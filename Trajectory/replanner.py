@@ -33,6 +33,11 @@ What it does
   - Each new plan starts from the CURRENT REFERENCE state (position, velocity,
     acceleration, jerk, yaw at time t) rather than the noisy estimate, so the
     reference the controller sees is continuous through every replan.
+  - An in-flight replan keeps the previous plan's timing: every waypoint the two
+    plans share (matched by name, in order) keeps its arrival time, new ones are
+    placed by distance between them, and the result is rescaled to the limits.
+    Without this a moving-start plan falls back to distance-proportional timing,
+    which made the rest of the 3-gate closed lap about 2x slower (2026-11-05).
   - Every known gate outside the window is handed to the planner as an
     obstacle, so the path keeps clear of frames it flies past (e.g. the backs
     of later gates on the way round to the start).
@@ -103,7 +108,7 @@ class Replanner:
     def __init__(self, gate_map, start_pos, start_yaw, v_max=None, a_max=None, m=drone_constraints["mass"],
                  laps=1, close_loop=True, horizon_gates=5, extend_at=2,
                  commit_dist=1.5, pos_tol=0.10, pos_tol_frac=0.02, ang_tol_deg=5.0, min_interval=0.2,
-                 replan=True, search_yaw_rate=0.5, miss_timeout=2.0, verbose=True):
+                 replan=True, search_yaw_rate=0.5, miss_timeout=2.0, verbose=True, fail_backoff=1.0):
         self.map = gate_map
         self.v_max, self.a_max, self.m = v_max, a_max, m
         self.laps, self.close_loop = laps, close_loop
@@ -114,6 +119,7 @@ class Replanner:
         self.replan_enabled = replan
         self.search_yaw_rate = search_yaw_rate
         self.miss_timeout = miss_timeout
+        self.fail_backoff = fail_backoff
         self.verbose = verbose
 
         self.plans = []
@@ -276,6 +282,55 @@ class Replanner:
         x = a.state(t)
         return x[0:3], {}, x[5]
 
+    def _timing_hint(self, t):
+        """segment_times_hint for plan_gate_trajectory: the active plan's arrival times from t on."""
+        a = self.active(t)
+        if not isinstance(a, Plan):
+            return None
+        tau = a.local(t)
+        breaks = a.traj.t_breaks
+        # 'start' and 'finish' are rebuilt by every plan: matching the old finish to a new one that the
+        # extended window moved further on would squeeze every gate in between into no time
+        ahead = [(w['name'], float(breaks[j]) - tau) for j, w in enumerate(a.wps)
+                 if breaks[j] > tau + 1e-3 and w['type'] not in ('start', 'finish')]
+        if not ahead:
+            return None
+
+        def hint(wps):
+            arrive, k = [0.0], 0
+            for w in wps[1:]:
+                m = next((i for i in range(k, len(ahead)) if ahead[i][0] == w['name']), None)
+                if m is None:
+                    arrive.append(None)
+                else:
+                    arrive.append(ahead[m][1])
+                    k = m + 1
+            known = [i for i, v in enumerate(arrive) if v is not None]
+            if len(known) < 2:
+                return None
+            pts = np.array([w['position'] for w in wps])
+            s = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
+            for i, v in enumerate(arrive):                  # unmatched: by distance between matched ones
+                if v is not None:
+                    continue
+                lo = max(j for j in known if j < i)
+                hi = next((j for j in known if j > i), None)
+                if hi is None:                              # past the last match: keep its pace
+                    j0 = known[-2] if len(known) > 1 else 0
+                    pace = (arrive[lo] - arrive[j0]) / max(s[lo] - s[j0], 1e-6)
+                    arrive[i] = arrive[lo] + pace * (s[i] - s[lo])
+                else:
+                    f = (s[i] - s[lo]) / max(s[hi] - s[lo], 1e-6)
+                    arrive[i] = arrive[lo] + f * (arrive[hi] - arrive[lo])
+            T = np.diff(arrive)
+            seg_len = np.diff(s)
+            # a sane split: every segment takes time, none asks for more than twice the speed limit
+            v_lim = self.v_max if self.v_max else 1e9
+            if not np.all(T > 0.05) or np.any(seg_len / T > 2.0 * v_lim):
+                return None
+            return T
+        return hint
+
     def _replan(self, t, reason):
         window = self._window()
         gates = [self.map.gates[gid].as_gate() for gid in window]
@@ -288,10 +343,20 @@ class Replanner:
         try:
             traj, wps = plan_gate_trajectory(gates, start, v_max=self.v_max, a_max=self.a_max,
                                              verbose=False, start_state=ss if moving else None,
-                                             obstacle_gates=obstacles)
-        except np.linalg.LinAlgError as e:
-            self._log(t, f"replan FAILED ({reason}): {e}; keeping the current plan")
+                                             obstacle_gates=obstacles,
+                                             segment_times_hint=self._timing_hint(t) if moving else None)
+        except (np.linalg.LinAlgError, MemoryError, ValueError) as e:
+            self._fail(t, reason, f"{type(e).__name__}: {str(e)[:80]}")
             return
+        # fit_to_limits can fail to converge from a moving start and keep stretching the times (seen on
+        # the 3-gate course's 2-lap window extension, 2026-11-05: a 228 s plan for 15 m). Never switch
+        # to a plan that is absurdly slower than the one being flown.
+        a = self.active(t)
+        if isinstance(a, Plan):
+            left = max(a.end_time() - t, 0.0)
+            if traj.duration > 3.0 * left + 10.0:
+                self._fail(t, reason, f"new plan {traj.duration:.1f} s vs {left:.1f} s left on the current one")
+                return
         ref = TrajectoryReference(traj, start_yaw=yaw, m=self.m, yaw_blend_time=0.5 if moving else None)
         snapshot = {gid: (self.map.gates[gid].center.copy(), self.map.gates[gid].normal.copy(),
                           self.map.gates[gid].normal_reliable) for gid in window}
@@ -300,6 +365,11 @@ class Replanner:
         remaining = len(self.route_ahead())
         self._log(t, f"plan #{len(self.plans)} ({reason}): window {len(window)} of {remaining} "
                      f"route gate(s) left, lap {self.lap_of(self.progress)}/{self.laps}")
+
+    def _fail(self, t, reason, why):
+        self._log(t, f"replan FAILED ({reason}): {why}; keeping the current plan")
+        # back off: do not retry a failing replan every min_interval
+        self._last_plan_t = t + max(0.0, self.fail_backoff - self.min_interval)
 
     # ------------------------------------------------------------------ public API
     def update(self, t, est_pos):

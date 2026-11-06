@@ -93,6 +93,19 @@ def test_watchdog_abort_fails_and_plot():
     print("  watchdog reason in the log -> TRIPPED at its plan time, exit 1; plot renders  OK")
 
 
+def test_route_order():
+    with tempfile.TemporaryDirectory() as d:
+        _write_log(d)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            ok_code = an.main([d, "--gates", an.DEFAULT_GATES, "--no-plot", "--route", "gate_0,gate_1,gate_2"])
+            lap_code = an.main([d, "--gates", an.DEFAULT_GATES, "--no-plot", "--route", "gate_0,gate_1,gate_2,gate_0"])
+        text = out.getvalue()
+        assert ok_code == 0 and "expected gate_0 -> gate_1 -> gate_2: OK" in text, text
+        assert lap_code == 1 and "MISMATCH" in text, text            # the one-pass log never returns through gate_0
+    print("  --route: the flown order must match exactly (a missing closing pass of gate_0 fails)  OK")
+
+
 def test_bridge_log_hover_score():
     with tempfile.TemporaryDirectory() as d:
         _write_log(d)

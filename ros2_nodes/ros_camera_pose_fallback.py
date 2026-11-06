@@ -229,6 +229,11 @@ def main():
     ap.add_argument("--gate-side", type=float, default=DEFAULT_GATE_SIDE)
     ap.add_argument("--corner-sigma-px", type=float, default=1.5)
     ap.add_argument("--max-reprojection-error-px", type=float, default=15.0)
+    ap.add_argument("--camera-pitch-deg", type=float, default=15.0,
+                    help="camera up-tilt the drone was spawned with (spawn_example.py CAMERA_PITCH_DEG; "
+                         "the VIO / replanning runs use 0). A wrong value puts every gate at the wrong height.")
+    ap.add_argument("--camera-pos", type=float, nargs=3, default=(0.30, 0.0, 0.05), metavar=("X", "Y", "Z"),
+                    help="camera position in the body frame (FLU, m); spawn_example.py: 0.30 0 0.05")
     args = ap.parse_args()
 
     try:
@@ -253,7 +258,10 @@ def main():
         gate_side=args.gate_side,
         corner_sigma_px=args.corner_sigma_px,
         max_reprojection_error_px=args.max_reprojection_error_px,
+        body_to_camera=body_to_camera_mount_from_params(
+            translation=tuple(args.camera_pos), rotate_xyz_deg=(90.0 + args.camera_pitch_deg, 0.0, -90.0)),
     )
+    node.node.get_logger().info(f"camera mount: {tuple(args.camera_pos)} m, pitch {args.camera_pitch_deg:.1f} deg up")
 
     try:
         rclpy.spin(node.node)

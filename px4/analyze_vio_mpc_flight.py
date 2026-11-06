@@ -81,8 +81,9 @@ def _cols(L, prefix, keys):
     return np.column_stack([L[f"{prefix}_{k}"] for k in keys])
 
 
-def analyze(L, gates):
-    """Prints the report; returns (ok, numbers)."""
+def analyze(L, gates, route=None):
+    """Prints the report; returns (ok, numbers). route: gate names in the order they must be flown
+    through (e.g. a closed lap gate_0,gate_1,gate_2,gate_0); None = each gate at least once."""
     true = _cols(L, "true", ("x", "y", "z", "roll", "pitch", "yaw", "vx", "vy", "vz"))
     vio = _cols(L, "vio", ("x", "y", "z", "roll", "pitch", "yaw", "vx", "vy", "vz"))
     ref = _cols(L, "ref", ("x", "y", "z"))
@@ -135,15 +136,23 @@ def analyze(L, gates):
     ok = not tripped
     print("[result] TRUE path vs gates:")
     t0 = t[flying][0] if flying.any() else t[0]
+    flown = []
     for gate, cs in gate_crossings(t, true[:, 0:3], true[:, 6:9], gates):
         through = [c for c in cs if c["inside"] and c["forward"]]
-        if not through:
+        flown += [(c["time"], gate.name) for c in through]
+        if not through and route is None:
             ok = False
             print(f"  {gate.name}: MISSED")
         for c in through:
             margin = gate.side / 2 - np.max(np.abs(c["offset"]))
             print(f"  {gate.name}: t={c['time'] - t0:5.2f}s  offset=({c['offset'][0]:+.2f}, {c['offset'][1]:+.2f}) m  "
                   f"frame margin {margin:.2f} m  angle {c['angle_deg']:4.1f} deg  speed {c['speed']:.2f} m/s")
+    if route is not None:
+        order = [name for _, name in sorted(flown)]
+        route_ok = order == list(route)
+        ok = ok and route_ok
+        print(f"[route] flown {' -> '.join(order) or '(none)'}; expected {' -> '.join(route)}: "
+              f"{'OK' if route_ok else 'MISMATCH'}")
     print(f"[result] {'ALL GATES PASSED' if ok else 'NOT ALL GATES PASSED' if not tripped else 'WATCHDOG ABORT'}")
     return ok, n
 
@@ -190,6 +199,9 @@ def main(argv=None):
     ap.add_argument("--gates", default=None,
                     help="gate manifest (default: /workspace/test_gates.json if present, else the repo's 3-gate course)")
     ap.add_argument("--no-plot", action="store_true")
+    ap.add_argument("--route", default=None,
+                    help="comma-separated gate names in flight order, e.g. gate_0,gate_1,gate_2,gate_0 for a "
+                         "closed lap; default: every gate at least once, any order")
     args = ap.parse_args(argv)
     gates_path = args.gates or ("/workspace/test_gates.json" if os.path.exists("/workspace/test_gates.json")
                                 else DEFAULT_GATES)
@@ -198,7 +210,7 @@ def main(argv=None):
     buf = io.StringIO()
     with redirect_stdout(buf):
         print(f"[gates] {gates_path}")
-        ok, _ = analyze(L, gates)
+        ok, _ = analyze(L, gates, route=args.route.split(",") if args.route else None)
         b = bridge_report(os.path.join(args.log_dir, "bridge_log.csv"))
         if b is not None and b["status"].startswith("aborted"):
             ok = False
