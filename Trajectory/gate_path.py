@@ -239,9 +239,12 @@ def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
 
     optimize_times (default): each segment's share of the time is optimized for
     the shortest total time within the limits (min_snap.optimize_segment_times)
-    instead of being proportional to its length. Only from rest: with a moving
-    start_state (in-flight replan) the distance-proportional fit is used, unless
-    segment_times_hint gives a better split.
+    instead of being proportional to its length. Only from rest, and only when
+    no segment_times_hint is given (a hint already carries an optimized split).
+    The avoidance waypoints are found with the fast fit first and the
+    optimization runs ONCE on the final waypoints (it used to run after every
+    inserted point: 124 s for the 3-gate closed lap, 2026-11-06); if the
+    optimized timing clips a frame, the fast fit is kept.
 
     Every gate with a reliable normal is crossed perpendicular to its plane
     (velocity direction constraint at the center). If the polynomial bulges
@@ -267,21 +270,26 @@ def plan_gate_trajectory(gates, start, v_max: float = None, a_max: float = None,
     wps = gate_waypoints(gates, start, standoff=standoff, finish_dist=finish_dist)
     check_gates = list(gates) + list(obstacle_gates)
 
+    optimize = optimize_times and not moving and segment_times_hint is None
+
+    def finish(traj, points, fixed_dir):
+        if not optimize:
+            return traj
+        opt = optimize_segment_times(points, fixed_dir, v_max=v_max, a_max=a_max)
+        return opt if _first_bad_crossing(opt, check_gates, clearance) is None else traj
+
     traj = None
     for _ in range(max_iters):
         points = np.array([w['position'] for w in wps])
         fixed_dir = {i: gates[w['gate']].normal for i, w in enumerate(wps)
                      if w['type'] == 'center' and gates[w['gate']].normal_reliable}
-        if optimize_times and not moving:
-            traj = optimize_segment_times(points, fixed_dir, v_max=v_max, a_max=a_max)
-        else:
-            hint = segment_times_hint(wps) if segment_times_hint is not None else None
-            traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, start_state=start_state,
-                                 segment_times=hint)
+        hint = segment_times_hint(wps) if segment_times_hint is not None else None
+        traj = fit_to_limits(points, fixed_dir, v_max=v_max, a_max=a_max, start_state=start_state,
+                             segment_times=hint)
 
         bad = _first_bad_crossing(traj, check_gates, clearance)
         if bad is None:
-            return traj, wps
+            return finish(traj, points, fixed_dir), wps
 
         gate, c, edge_dist = bad
         seg = int(traj.segment_index(c['time']))

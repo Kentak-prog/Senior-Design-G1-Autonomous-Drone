@@ -33,7 +33,7 @@ What it does
   - Each new plan starts from the CURRENT REFERENCE state (position, velocity,
     acceleration, jerk, yaw at time t) rather than the noisy estimate, so the
     reference the controller sees is continuous through every replan.
-  - An in-flight replan keeps the previous plan's timing: every waypoint the two
+  - A replan (in flight, or while hovering before the start) keeps the previous plan's timing: every waypoint the two
     plans share (matched by name, in order) keeps its arrival time, new ones are
     placed by distance between them, and the result is rescaled to the limits.
     Without this a moving-start plan falls back to distance-proportional timing,
@@ -348,7 +348,7 @@ class Replanner:
             traj, wps = plan_gate_trajectory(gates, start, v_max=self.v_max, a_max=self.a_max,
                                              verbose=False, start_state=ss if moving else None,
                                              obstacle_gates=obstacles,
-                                             segment_times_hint=self._timing_hint(t) if moving else None)
+                                             segment_times_hint=self._timing_hint(t))
         except (np.linalg.LinAlgError, MemoryError, ValueError) as e:
             self._fail(t, reason, f"{type(e).__name__}: {str(e)[:80]}")
             return

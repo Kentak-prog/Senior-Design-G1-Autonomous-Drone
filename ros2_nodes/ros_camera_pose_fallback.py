@@ -167,7 +167,15 @@ class PoseFallbackGatePoseNode:
         # This is the world->camera transform for the no-TF fallback path.
         return T_world_body @ self._body_to_camera
 
+    min_period = 0.0          # s between processed images (wall clock); main() sets it from --max-rate-hz
+    _last_processed = 0.0
+
     def _on_image(self, msg):
+        import time
+        now = time.monotonic()
+        if self.min_period and now - self._last_processed < self.min_period:
+            return
+        self._last_processed = now
         if self._intr is None:
             self._node.get_logger().warn("no camera_info yet; skipping frame")
             return
@@ -240,6 +248,9 @@ def main():
     ap.add_argument("--gate-side", type=float, default=DEFAULT_GATE_SIDE)
     ap.add_argument("--corner-sigma-px", type=float, default=1.5)
     ap.add_argument("--max-reprojection-error-px", type=float, default=15.0)
+    ap.add_argument("--max-rate-hz", type=float, default=0.0,
+                    help="process at most this many images per second (wall); 0 = every image. The pod's "
+                         "ros2-eval container has 2 CPUs: 10 is plenty for the gate map and leaves CPU for the MPC")
     ap.add_argument("--camera-pitch-deg", type=float, default=15.0,
                     help="camera up-tilt the drone was spawned with (spawn_example.py CAMERA_PITCH_DEG; "
                          "the VIO / replanning runs use 0). A wrong value puts every gate at the wrong height.")
@@ -273,7 +284,9 @@ def main():
         body_to_camera=body_to_camera_mount_from_params(
             translation=tuple(args.camera_pos), rotate_xyz_deg=(90.0 + args.camera_pitch_deg, 0.0, -90.0)),
     )
-    node.node.get_logger().info(f"camera mount: {tuple(args.camera_pos)} m, pitch {args.camera_pitch_deg:.1f} deg up")
+    node.min_period = 1.0 / args.max_rate_hz if args.max_rate_hz > 0 else 0.0
+    node.node.get_logger().info(f"camera mount: {tuple(args.camera_pos)} m, pitch {args.camera_pitch_deg:.1f} deg up; "
+                                f"max {args.max_rate_hz or 'every'} images/s")
 
     try:
         rclpy.spin(node.node)
