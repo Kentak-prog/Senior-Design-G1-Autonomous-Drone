@@ -113,6 +113,21 @@ error at the start of the gap was also about 2x larger (0.2 m/s).
 The rehearsal can't test this: its camera always reports reliable normals.
 Only Isaac can.
 
+**Attempt 3, far position-only fixes dropped** (`vio_mpc/run_s7r3_014449/`).
+The furthest yet:
+- first true pass of **gate_1** (margin 0.42 m);
+- gap drift 0.12 m/s;
+- recovery to 0.11 m once gates were back;
+- watchdog at +13.47 s.
+
+But it **missed gate_0** (0.95 m off). At +0.27 s a re-lock took gate_0's
+consistent but biased fixes (half clipped at the start) over a healthy
+estimate (0.09 m off). That set off a drift, and gate_2's far fixes then
+looked wrong and were rejected.
+
+**Fix:** a re-lock now needs a blind spell first: no fix accepted for 1 s
+(`relock_blind_s`, test `test_no_relock_while_fixes_flow`).
+
 ### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`) — done 2026-11-06
 - [ ] Tune the process noise (`accel_noise`, plus a velocity random walk) so
   that the reported std covers the real error when fixes drop out. Target:

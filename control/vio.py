@@ -92,7 +92,7 @@ class GateVIO:
                  calib_s=2.0, history_s=1.5, max_range=15.0, min_pos_std=0.05, min_ang_std_deg=1.0,
                  assoc_tol=1.0, chi2_full=22.5, chi2_pos=16.3, initial_guess=None, delay_compensation=True,
                  accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=10.0,
-                 pos_only_max_range=8.0):
+                 pos_only_max_range=8.0, relock_blind_s=1.0):
         """
         gates:          map gates (gate_path.Gate, world ENU), e.g. gates_from_manifest(test_gates.json)
         T_body_cam_usd: static camera mount, body FLU -> camera USD (eval_isaac_gates.T_body_cam_usd_from_mount)
@@ -111,6 +111,10 @@ class GateVIO:
                         relock_window_s and agreeing within relock_spread_m (range under
                         relock_max_range), mean the estimate is wrong, not the camera: widen the
                         covariance to the innovation and accept the fix. relock_n=0 disables.
+                        Only after a BLIND SPELL (no fix accepted for relock_blind_s): while fixes
+                        are flowing, a gate that keeps disagreeing is the biased one. Isaac
+                        2026-11-06, attempt 3: a re-lock at engage took the half-clipped gate_0's
+                        biased fixes over a healthy estimate (0.09 m off), and the drone missed gate_0.
         """
         self.gates = list(gates)
         self.T_body_cam_usd = np.asarray(T_body_cam_usd, dtype=float)
@@ -121,6 +125,8 @@ class GateVIO:
         self.relock_n, self.relock_window = relock_n, relock_window_s
         self.relock_spread, self.relock_max_range = relock_spread_m, relock_max_range
         self.pos_only_max_range = pos_only_max_range
+        self.relock_blind = relock_blind_s
+        self._last_fix_t = None                         # image time of the last accepted fix
         self._rejected = deque()                        # (t_img, gate index, z) of recently rejected full fixes
         self.calib_n = int(round(calib_s * imu_rate))
         self.max_range, self.assoc_tol = max_range, assoc_tol
@@ -325,6 +331,7 @@ class GateVIO:
                 self.events.append((t_img, "reject", self.gates[i].name, d2))
                 continue
             self._rejected.clear()
+            self._last_fix_t = t_img if self._last_fix_t is None else max(self._last_fix_t, t_img)
             self.ekf.update_measurement(z, idx, R)
             self.stats["fixes_full" if kind == "full" else "fixes_pos"] += 1
             self.events.append((t_img, kind, self.gates[i].name, d2))
@@ -346,6 +353,8 @@ class GateVIO:
         rejected fixes of this gate agree with each other; otherwise remember it and return False."""
         if not self.relock_n or det.range_m > self.relock_max_range:
             return False
+        if self._last_fix_t is not None and t_img - self._last_fix_t < self.relock_blind:
+            return False                                  # fixes are flowing: this gate is the odd one out
         self._rejected.append((t_img, gate_idx, np.asarray(z, dtype=float).copy()))
         while self._rejected and (t_img - self._rejected[0][0] > self.relock_window
                                   or self._rejected[0][1] != gate_idx):

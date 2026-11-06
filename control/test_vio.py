@@ -218,6 +218,20 @@ def test_relock_after_drift():
 
 
 
+def test_no_relock_while_fixes_flow():
+    # Isaac 2026-11-06, attempt 3: just after engage gate_0 (half clipped) gave consistent but biased
+    # fixes while gate_1 / gate_2 kept fixing the estimate. Re-locking to gate_0 then was wrong.
+    vio, T_wb, t = _settled_vio(seconds=1.0)
+    biased = _T(rot_rpy(0.0, 0.0, START_YAW), START + np.array([0.0, 0.0, 0.6]))
+    for _ in range(20):
+        vio.add_detections(t, [_det(biased, GATES[0]), _det(T_wb, GATES[1]), _det(T_wb, GATES[2])])
+        t = _hover_imu(vio, 4, t0=t)
+    err = float(np.linalg.norm(vio.state[0:3, 0] - START))
+    assert vio.stats["relocks"] == 0 and vio.stats["rejected"] >= 15 and err < 0.1, (vio.stats, err)
+    print(f"  one gate consistently 0.6 m off while the others keep fixing: rejected, no re-lock "
+          f"(error {err:.3f} m)  OK")
+
+
 def test_far_position_only_fixes_are_dropped():
     # Isaac 2026-11-06: position-only fixes of gate_2 at 9-11 m (normal unreliable) pulled the estimate
     # 0.64 m sideways. A biased far one must be ignored; a near one is still used, and weighted by
