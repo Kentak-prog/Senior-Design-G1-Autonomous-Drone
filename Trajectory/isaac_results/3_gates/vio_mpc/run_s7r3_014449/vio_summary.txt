@@ -1,0 +1,36 @@
+run ../vio_mpc/run_s7r3_014449; t = 0 at sim 2295.64; plan 25.71 s
+in frame = by geometry from the TRUE pose; events are the VIO's own gate matches
+
+gate_0: in flight {'full': 7, 'pos': 0, 'reject': 4}
+  hover (before t=0): center in frame 100 %, whole gate 100 %; range 5.0 m
+  center in frame, in flight: +0.0..+0.3, +0.7..+4.0
+  whole gate in frame, in flight: +0.0..+0.1, +0.2..+0.3
+  closest range 0.91 m
+    whole in frame +0.0..+0.1 s: range 5.0->5.0 m, viewing angle 8-9 deg, 6 fixes
+    whole in frame +0.2..+0.3 s: range 5.0->5.0 m, viewing angle 9-9 deg, 0 fixes
+
+gate_1: in flight {'full': 63, 'pos': 0, 'reject': 0}
+  hover (before t=0): center in frame 100 %, whole gate 100 %; range 9.0 m
+  center in frame, in flight: +0.0..+0.2, +0.8..+1.0, +1.3..+1.6, +1.9..+2.1, +2.5..+2.6, +4.6..+8.3, +8.7..+8.8
+  whole gate in frame, in flight: +0.0..+0.2, +0.9..+1.0, +1.4..+1.5, +4.7..+4.8, +5.0..+5.5
+  closest range 0.36 m
+    whole in frame +0.0..+0.2 s: range 9.0->9.0 m, viewing angle 6-7 deg, 6 fixes
+    whole in frame +0.9..+1.0 s: range 8.9->8.9 m, viewing angle 5-5 deg, 6 fixes
+    whole in frame +1.4..+1.5 s: range 8.6->8.6 m, viewing angle 5-5 deg, 4 fixes
+    whole in frame +4.7..+4.8 s: range 4.0->3.8 m, viewing angle 22-25 deg, 11 fixes
+    whole in frame +5.0..+5.5 s: range 3.7->3.4 m, viewing angle 29-43 deg, 30 fixes
+
+gate_2: in flight {'full': 109, 'pos': 0, 'reject': 15}
+  hover (before t=0): center in frame 100 %, whole gate 100 %; range 13.0 m
+  center in frame, in flight: +0.0..+0.3, +0.8..+1.1, +1.2..+1.6, +1.8..+2.2, +2.4..+2.8, +2.9..+3.3, +3.4..+3.9, +4.0..+5.1, +9.2..+12.5
+  whole gate in frame, in flight: +0.0..+0.2, +0.8..+1.1, +1.3..+1.6, +1.9..+2.2, +2.4..+2.7, +2.9..+3.2, +3.5..+3.8, +4.0..+5.1
+  closest range 1.06 m
+    whole in frame +0.0..+0.2 s: range 13.0->13.0 m, viewing angle 5-6 deg, 6 fixes
+    whole in frame +0.8..+1.1 s: range 13.0->12.9 m, viewing angle 5-5 deg, 13 fixes
+    whole in frame +1.3..+1.6 s: range 12.7->12.5 m, viewing angle 5-5 deg, 16 fixes
+    whole in frame +1.9..+2.2 s: range 12.2->11.8 m, viewing angle 6-6 deg, 9 fixes
+    whole in frame +2.4..+2.7 s: range 11.5->11.0 m, viewing angle 7-7 deg, 0 fixes
+    whole in frame +2.9..+3.2 s: range 10.6->10.1 m, viewing angle 7-7 deg, 0 fixes
+    whole in frame +3.5..+3.8 s: range 9.6->9.2 m, viewing angle 6-7 deg, 0 fixes
+    whole in frame +4.0..+5.1 s: range 8.7->6.9 m, viewing angle 6-7 deg, 63 fixes
+

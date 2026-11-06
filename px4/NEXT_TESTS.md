@@ -1,216 +1,187 @@
-# What to fix before the next Isaac tests (after 2026-10-29)
+# Next tests: what to work on (updated 2026-11-06)
 
-Where we stopped (`px4/VIO_MPC_TEST_PLAN.md`):
+**Goal:** the NMPC flies the 3-gate course in Isaac Sim using only the VIO
+(IMU + camera). Ground truth is used only by the safety watchdog and for
+scoring. The test plan is `px4/VIO_MPC_TEST_PLAN.md`.
+
+## Status
 
 | Stage | Result |
 |---|---|
-| 0. Pod prep | done. Lost on a container restart: redo it |
-| 1. Isaac + PX4 | GO |
-| 2. Dry run | GO |
-| 3. Hover hold, truth | **pass** after 3 fixes (bridge prompt, hover thrust 0.58, attitude lead 0.1 s): within 0.19 m, altitude ± 0.01 m |
-| 4. Course, truth, 2/2 | **pass**: all gates, margins 0.47–0.71 m, tracking 0.12 m mean / 0.41 m max. Video: `Downloads/isaac_stage4_course_truth.webm` (not in git) |
-| 5. VIO open-loop | **fails** (from Stage 4's side-by-side VIO): lost the gates after gate_0, 13 m error by the end |
-| 6–8 | blocked by 5 |
+| 0–2. Pod prep, Isaac + PX4, dry run | done. A pod restart wipes the Stage 0 installs: redo them |
+| 3. Hover hold, ground truth | **pass** (within 0.19 m, altitude ± 0.01 m) |
+| 4. Course, ground truth, 2/2 | **pass**: all gates, margins 0.47–0.71 m, tracking 0.12 m mean |
+| 4R. Closed lap with in-flight replanning | node ready (`ros2_nodes/replan_node.py`); flown only with the VIO in charge, below |
+| **7. Closed lap, VIO in charge, 2/2** | **4 attempts, 4 watchdog aborts.** Best: attempt 3, through gate_1, 13.5 s |
 
-Logs: `/workspace/vio_runs/run_045716/` in the pod (`s3`, `s3b`, `s3c`, `s4`,
-`vio/`). Copy back before the PVC is cleaned (`VIO_MPC_TEST_PLAN.md`, "What
-every run leaves").
+**The flight stack works.** The bridge, the MPC (on VIO state only), the
+planner (plan starts at engage), PX4 and the watchdog all behaved. **What
+stops us is the VIO.**
 
 ---
 
-## 1. VIO: must fix before Stage 6/7
+## 1. For the VIO / vision team
 
-What the Stage 4 log shows (`vio/vio_events.csv`, times from engage):
+### The problem in one paragraph
 
-- **Fixes in flight:** 147 full fixes on gate_1 and 260 on gate_2; none on
-  gate_0.
-- **Last full fix:** +4.83 s, just after passing gate_0 (+3.73 s).
-- **Rejections:** 69, all of gate_2, from +2.23 s to +9.36 s, chi² 34 to
-  4032. The first ones came while the VIO was still within 0.15 m of the
-  truth.
-- **From +4.83 s to +8 s, and after +9.36 s:** no logged events, although
-  gate_2 (passed at +12.2 s) was ahead. This does **not** prove the gates
-  weren't detected: `vio_events.csv` has no row for a frame with no detection,
-  a failed PnP, or a detection that didn't match a map gate. The drifted
-  estimate makes that last one plausible after about +10 s (error 1.5 m and
-  growing; the match tolerance is 1 m + 10 % of range). The only other hint is
-  indirect: camera time fell to 5-6 ms/frame.
-- **Labels:** the gate names are the VIO's own matches, not ground truth.
-- **Geometry (`vio_mpc/run_045716_s4/fig5_gate_visibility.png`):** 315 of the 316
-  in-flight fixes fall in the moments when the WHOLE gate is in frame, by
-  calculation from the true pose. gate_0 is never whole in frame (its top edge is
-  clipped even at hover), and it has no fixes. From +4.8 s to +8.4 s no gate is
-  whole in frame. gate_2 is whole in frame only once after that, +8.4 to +9.4 s,
-  and every fix then was rejected (VIO already about 1 m off).
-- **Dead reckoning:** the error grew from 0.26 m to 1.1 m (gate_1) to 2.7 m
-  (gate_2) to 13 m. The VIO's own std stayed far below its real error
-  (0.17 m reported against 1.13 m actual).
+Between gate_0 and gate_1 (about **+5.6 s to +10 s** after engage at 2 m/s)
+**no gate fits wholly in the 60° × 36° camera frame**. The color detector
+needs the whole opening, so the VIO gets no fixes and dead-reckons on the
+IMU. It drifts **0.12–0.5 m/s** and the 1 m watchdog trips. Before and after
+that gap, fixes flow at about 60 Hz and the VIO holds about 0.1–0.3 m.
 
-### 1a. Find out what the camera saw (do first, it drives the rest)
-- [ ] **Record the camera in Stage 5:** `ros2 bag record
-  /iris_0/front_cam/rgb /iris_0/front_cam/camera_info /drone00/state/pose`.
-  The VIO gets fed the frames, but nobody saves them.
-- [ ] Log every frame in `vio_node`: detections found, PnP failures, unmatched,
-  fixes and rejections. Today the unmatched count isn't logged in flight.
-- [ ] Run the detector and PnP offline on the bag, frame by frame, against
-  the true gate poses. That answers four questions:
-  - Is gate_1 detected from +4.8 s to +8.6 s? If not, is that the side-on
-    approach, then being too close? (Untested guess: a 1.5 m frame at 1.2 m
-    doesn't fit in the 60° field of view.)
-  - Is gate_2 detected after +9.4 s? If so, was it dropped as unmatched?
-  - Why were early gate_2 fixes rejected (chi² 34–58) while the VIO was
-    accurate? It could be a range bias at about 11 m, the gate seen through
-    or behind another frame, or a wrong association.
-  - Why are there no gate_0 fixes, even at hover? It may be clipped by the
-    top of the frame (it looks that way in the onboard view). Check that and
-    the association in `control/vio.py` (`assoc_tol`).
+Evidence: `fig5_gate_visibility.png` in every run folder below. 315 of 316
+fixes in the Stage 4 run came while a whole gate was in frame, by geometry
+from the true pose.
 
-### Update 2026-11-06: first flight with the VIO in charge, and 1b / 1c done
+### Tasks, in priority order
 
-**Flight** (Stage 4R, VIO in charge, logs and figures in
-`Trajectory/isaac_results/3_gates/vio_mpc/run_s7r_004638/`):
-- passed gate_0 for real;
-- from +5.6 s to +10.0 s no gate was whole in frame, and the VIO drifted
-  0.17 → 1.06 m, while it reported only 0.30 m of uncertainty;
-- it passed beside gate_1;
-- gate_2's fixes at +10 s were rejected;
-- the watchdog stopped the flight at +10.5 s.
+**V1. Record a flight's raw data. Nothing else can be tuned without it.**
+- [ ] Record everything in the next Isaac flight:
+  ```
+  ros2 bag record /iris_0/front_cam/rgb /iris_0/front_cam/camera_info /drone00/sensors/imu /drone00/state/pose /drone00/state/twist /clock
+  ```
+  None of the four flights recorded images or raw IMU.
+- [ ] Log every frame in `vio_node`: detections found, PnP failures,
+  unmatched, fixes, rejections. Today a frame with no row in
+  `vio_events.csv` could be any of those.
+- **Done when:** a bag of one full course flight exists, and `vio_node`
+  logs every frame.
 
-The drift, fitted over the gap: 0.17 m position error and 0.11 m/s velocity
-error when the fixes stopped, plus about 0.04 m/s² from tilt error.
+**V2. Get fixes through the blind turn (vision).** This is the blocker.
+- [ ] Run `vision/color_gate_detector.py` + `vision/gate_pose.py` frame by
+  frame on the bag from V1, against the true gate poses. During the gap,
+  what does the detector see of gate_1? A clipped frame? A side-on view
+  (31–46°)? Nothing?
+- [ ] Get a measurement from a **partly visible** gate: 2–3 corners, or
+  the frame's edges, even if only a position or bearing fix.
+- [ ] Check what a wider camera would do. In Isaac, the spawn's HFOV can be
+  changed (`workspace/spawn_example.py`); what does the real Starling 2 Max
+  camera have?
+- **Done when:** on the bag, gate fixes (any kind) arrive at **at least 10 Hz
+  for the whole +5.6 to +10 s window**.
 
-**1b and 1c are now in `control/vio.py`:**
-- `accel_rw=0.1` (process noise for unmodelled acceleration, in
-  `Kalman_Filter_MPC.py`);
-- re-locking after 5 rejected full fixes of one gate that agree within 0.3 m.
+**V3. Stop biased fixes from clipped gates (vision).**
+- [ ] At the start hover, gate_0 is about 10° above the camera axis at
+  4.6 m, and its top edge sits about 1° out of frame. In attempt 3 its
+  fixes were consistent but biased, and they pulled the VIO off course
+  (drone missed gate_0 by 0.95 m). Reject quads that touch the image
+  border, or flag them as unreliable.
+- **Done when:** no fix is produced from a gate that isn't fully in view.
 
-Tests (`control/test_vio.py`):
-- the Isaac gap gives error/std **3.4** without the term and **0.79** with it;
-- a VIO 1 m off re-locks to 0.001 m;
-- disagreeing fixes never re-lock.
+**V4. Tune the filter offline, on the bag (VIO).**
+`control/vio.py` has new knobs (section 1.3). In flight they trade one
+error for another:
+- [ ] `accel_rw` (process noise for unmodelled acceleration, default 0.1):
+  - Good: it made the reported uncertainty honest in the gap (error/std
+    3.6 → 1.4).
+  - Bad: it made the **velocity estimate 2–3× noisier while fixes flow**
+    (0.2–0.37 m/s against 0.10 m/s with `accel_rw` = 0), and that velocity
+    error is what drives the drift in the gap.
+  - Sweep 0 / 0.03 / 0.05 / 0.1 by replaying the bag through `GateVIO`.
+- [ ] Measurement noise of far full-pose fixes: gate_2 at 9–13 m gives most
+  of the fixes, and some are off by chi² in the thousands (attempt 3,
+  +2.4 to +3.8 s). `_stds()` uses 0.004·range² for position and the PnP
+  normal std for angles. Check them against the bag's truth.
+- **Done when:** on the bag, the velocity error is at or below 0.1 m/s when
+  the gap starts, and error/std is at or below 2 in the gap.
 
-Rehearsal at 2/2:
-- VIO max 0.98 → 0.76 m;
-- tracking max 0.88 → 0.75 m.
+**V5. Make the rehearsal behave like Isaac (`Trajectory/simulate_vio_mpc.py`).**
+Its camera already needs the whole gate in frame (it reproduces the gap:
+VIO max 0.76–0.98 m). But it lacks Isaac's other effects:
+- [ ] PnP noise and bias that grow with range, as measured in V4.
+- [ ] Unreliable normals (position-only fixes): it never produces them, so
+  `pos_only_max_range` can't be tested offline.
+- [ ] Clipped gates producing biased fixes (V3).
+- **Done when:** the rehearsal's VIO error and velocity error match the bag
+  within a factor of 1.5, so VIO changes can be judged offline first.
 
-At 3/3, VIO max is 1.40 m (all gates in the rehearsal, but over the 1 m
-watchdog). **Still open:** the drift itself (1a, 1d). These changes let the
-VIO *recover* at gate_2; they don't keep it under 0.5 m at gate_1.
+**Related, not VIO (planner / team):** a path that keeps a gate whole in
+frame through the turn. For example, an aligned approach of 3 m or more to
+each gate, or a planner check that flags stretches over 1 s with no usable
+gate (`Trajectory/gate_path.py`). Faster speeds (3/3, 4/4) are pointless
+until V2 is done: the rehearsal's VIO hits 1.40 m at 3/3.
 
-**Attempt 2, the same day, with 1b + 1c** (`vio_mpc/run_s7r2_012950/`): worse,
-aborted at +9.46 s (VIO 1.13 m). Its uncertainty was honest in the gap
-(error/std 1.4, against 3.6 before), but the wider uncertainty also made the
-filter accept **91 position-only fixes of gate_2 at 9-11 m**. Those go through
-the estimated attitude, and they moved the estimate 0.64 m sideways at +3 s,
-so the drone crossed gate_0 0.64 m off-centre (margin 0.11 m). The velocity
-error at the start of the gap was also about 2x larger (0.2 m/s).
+### 1.3 What is already in the VIO (2026-11-06, `control/vio.py`, tests in `control/test_vio.py`, 11/11)
 
-**Fix:**
-- position-only fixes from farther than 8 m are dropped (`pos_only_max_range`);
-- the remaining ones carry range x attitude uncertainty in their noise
-  (`control/test_vio.py`, `test_far_position_only_fixes_are_dropped`).
+| Change | Parameter | Why | Verdict in flight |
+|---|---|---|---|
+| Unmodelled acceleration in the process noise | `accel_rw=0.1` (in `Kalman_Filter_MPC.py`, default 0 there) | std was 3.5× too small in the gap, so good fixes were rejected | honest std, but noisier velocity: **retune (V4)** |
+| Re-lock: accept consistent rejected fixes | `relock_n=5`, `relock_window_s=0.5`, `relock_spread_m=0.3`, `relock_max_range=10` | a drifted VIO never recovered | works (recovers to about 0.1 m) |
+| ...only after a blind spell | `relock_blind_s=1.0` | attempt 3 re-locked to biased gate_0 fixes over a healthy estimate | worked in attempt 4 |
+| Drop far position-only fixes; weight the rest by range × attitude std | `pos_only_max_range=8.0` | attempt 2: 91 position-only fixes of gate_2 at 9–11 m moved the VIO 0.64 m sideways | worked in attempts 3–4 |
 
-The rehearsal can't test this: its camera always reports reliable normals.
-Only Isaac can.
+### 1.4 The four flights (Stage 7, VIO in charge, 2/2, exact gate map, look-at yaw, closed lap)
 
-**Attempt 3, far position-only fixes dropped** (`vio_mpc/run_s7r3_014449/`).
-The furthest yet:
-- first true pass of **gate_1** (margin 0.42 m);
-- gap drift 0.12 m/s;
-- recovery to 0.11 m once gates were back;
-- watchdog at +13.47 s.
+Run folders: `Trajectory/isaac_results/3_gates/vio_mpc/run_*`. Each has:
+- `flight_log.csv` (truth, VIO, reference, setpoints at 50 Hz);
+- `vio_events.csv` (every fix and rejection);
+- `bridge_log.csv`, `monitor_events.txt`, `replan_events.csv`;
+- figures from `scripts/plot_vio_flight.py`.
 
-But it **missed gate_0** (0.95 m off). At +0.27 s a re-lock took gate_0's
-consistent but biased fixes (half clipped at the start) over a healthy
-estimate (0.09 m off). That set off a drift, and gate_2's far fixes then
-looked wrong and were rejected.
+The large CSVs are not in git; the copies on the pod are under
+`/workspace/vio_runs/s7r*_*` (with `vio/vio_log.csv`, the VIO state every
+IMU sample).
 
-**Fix:** a re-lock now needs a blind spell first: no fix accepted for 1 s
-(`relock_blind_s`, test `test_no_relock_while_fixes_flow`).
+| Attempt | VIO changes flown | gate_0 | gate_1 | Velocity error at gap start | Abort | Folder |
+|---|---|---|---|---|---|---|
+| 1 | original | through, 0.27 m off | missed (beside it) | 0.10 m/s | +10.5 s, VIO 1.07 m | `run_s7r_004638` |
+| 2 | + `accel_rw`, re-lock | through, 0.64 m off | missed | 0.20 m/s | +9.46 s, 1.13 m | `run_s7r2_012950` |
+| 3 | + far position-only cap | **missed** (re-lock to clipped gate_0) | **through**, 0.42 m margin | 0.19 m/s | **+13.47 s**, 1.02 m | `run_s7r3_014449` |
+| 4 | + blind-spell rule | through, 0.47 m off | not reached | 0.28–0.37 m/s | +7.84 s, 1.14 m | `run_s7r4_015739` |
 
-### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`) — done 2026-11-06
-- [ ] Tune the process noise (`accel_noise`, plus a velocity random walk) so
-  that the reported std covers the real error when fixes drop out. Target:
-  error / std < 3 for 95 % of samples during a 6 s gap.
-- [ ] Add a test in `control/test_vio.py`: fly the course, drop all fixes for
-  6 s, then check the std grew to match and that the first fix after the gap
-  is accepted.
+Also `run_045716_s4`: Stage 4 on ground truth, with the VIO running
+alongside (same gap, 13 m drift by the end, no watchdog).
 
-### 1c. Recovery after the filter has drifted (`control/vio.py`) — done 2026-11-06
-- [ ] Re-localize after N consecutive rejections of consistent fixes (say 5
-  within 1 s, agreeing with each other). Accept the fix and inflate the
-  covariance instead of rejecting forever.
-- [ ] Test: start with a 2 m error and a falsely small std; the filter must
-  converge within 1 s of seeing a gate.
-
-### 1d. Keep a gate in view on every leg (planner)
-- [ ] The path from gate_0 to gate_1 goes sideways (-y) and swings into
-  gate_1 at about 1.2 m. Options, simplest first:
-  - Approach waypoints further out: an aligned approach of 3 m or more
-    before each gate (`gate_path.plan_gate_trajectory` pre/post distances).
-  - A look-at yaw that also counts the gate after next as "in view".
-  - Change the course layout so consecutive gates face each other more.
-- [ ] Add a planner check: for every point of the plan, which gate is in
-  the camera's field of view, and at what range and viewing angle. Flag
-  stretches longer than 1 s without a gate that is usable (whole frame in
-  view, viewing angle within about 45° of head-on).
-
-### 1e. Make the rehearsal predict Isaac (`Trajectory/simulate_vio_mpc.py`)
-- [ ] `SimCamera` sees ideal corners from any angle, which is why the
-  rehearsal passed. Add the limits the real detector shows (from 1a):
-  - a maximum viewing angle;
-  - frames that must be fully in view;
-  - a minimum range;
-  - occlusion by other frames.
-- [ ] Then re-check 2/2, 3/3 and 4/4 offline before flying them.
+Each flight is a single sample, so some of the differences are luck. **The
+gap is in every run.**
 
 ---
 
-## 2. MPC / bridge follow-ups (not blocking Stage 7 at 2/2)
+## 2. MPC / bridge follow-ups (not blocking)
 
 - [ ] **Steady 0.12 m hover offset.** PX4 flies about 0.3° short of the
-  commanded pitch, and the MPC has no integral term. Add integral or
-  disturbance estimation in `mpc_node` (a slow position-error integrator,
-  bounded and frozen when not in OFFBOARD). Alternatively, estimate the
-  bias at hover and subtract it.
-- [ ] **`mpc_node` latches its hold point at its first state.** On VIO
-  that's before the filter settles (0.3 m low in Stage 2). Wait for the
-  state to be steady, or for the monitor's GO. Until then, restart
-  `mpc_node` after the VIO settles.
-- [ ] **Hover thrust 0.58** is measured. Consider making it the bridge's
-  default instead of a flag, or reading PX4's hover thrust estimate over
-  MAVLink.
-- [ ] **Attitude lead (option A) costs tracking.** Isaac's tracking was
-  better than the PX4-like model predicted, so the real attitude loop is
-  probably faster than 0.08 s. Measure it with a pitch step test (a small
-  bridge test mode), set `attitude_lead_s` and the rehearsal's
-  `--attitude-tau` from the data, and re-check 3/3 and 4/4. If tracking
-  degrades with speed, take option B (an MPC with attitude or rate inputs
-  that models PX4's loop) to the team.
-- [ ] **Minor:** in `mpc_offboard_bridge.py`, start the spin thread inside
-  the `try`. Today, if `connect()` raises, the thread isn't joined.
+  commanded pitch, and the MPC has no integral term. Add a slow, bounded
+  position-error integrator in `mpc_node`, frozen when not in OFFBOARD.
+- [ ] **`mpc_node` latches its hold point at its first state.** Start it
+  after the VIO has settled (the runbook does), or make it wait for the
+  monitor's GO.
+- [ ] **Hover thrust 0.58** is measured for the Iris. Make it the bridge's
+  default, or read PX4's hover-thrust estimate.
+- [ ] **Attitude lead 0.1 s** fixed the hold. Measure PX4's real attitude lag
+  with a pitch step test and set `attitude_lead_s` and the rehearsal's
+  `--attitude-tau` from it.
+- [ ] **`min_snap.fit_to_limits` can fail to converge from a moving start**
+  (2-lap window extension: a 228 s plan). The replanner now rejects such
+  plans, but the root cause is still there.
+- [ ] **Minor:** start the bridge's spin thread inside the `try`.
 
----
+## 3. Running a flight (what worked on 2026-11-06)
 
-## 3. Next session's run order
-
-1. **Pod:** if the container restarted, redo Stage 0 (`casadi`, `scipy`,
-   `matplotlib`, the one-thread BLAS line in `~/.bashrc`, the `drone_msgs`
-   rebuild).
-2. **Isaac:** fresh process, Flat Grid, then the spawn with
-   `CAMERA_PITCH_DEG=0`, Play, PX4, `commander takeoff`, `sim_clock.py`, the
-   gates. This took about 10 minutes on 2026-10-29.
-3. **Stage 5 with a bag recording**, to get the data for 1a.
-4. **Offline:** 1a, then 1b–1e, with the new tests passing.
-5. **Stage 5 again:** the VIO must stay under 0.6 m max over the course.
-6. **Stage 6:** hover hold on the VIO, restarting `mpc_node` after the VIO
-   settles.
-7. **Stage 7, recorded:** the goal.
+1. **Pod:** after a restart, redo Stage 0 (packages, the one-thread BLAS
+   line in `~/.bashrc`, the `drone_msgs` build). `ros2-eval` is limited to
+   **2 CPUs**: VIO + monitor + MPC + planner fit, and adding the camera
+   gate-pose node pushes MPC solves over 15 ms.
+2. **Isaac:** fresh process, Flat Grid, `spawn_example.py` with
+   `CAMERA_PITCH_DEG=0`, Play, PX4, `commander takeoff`, `sim_clock.py`,
+   gates.
+3. **Nodes:** `vio_node` + `flight_monitor` first. Once the VIO has
+   settled, start `mpc_node` (odometry) and `replan_node` (odometry,
+   `prior_sigma 0`, `use_camera false`, `yaw_mode next_gate`). Wait for
+   `plan ready` and `PREFLIGHT: GO`, then run the bridge
+   (`--hover-thrust 0.58 --max-duration 120 --max-tilt-deg 30`).
+4. **Between attempts:** at `pxh>`, run `param set RTL_RETURN_ALT 5`,
+   `param set RTL_DESCEND_ALT 5`, then `commander mode auto:rtl`, then
+   `commander takeoff`. A straight line home clips gate_1. Restart the
+   nodes for each attempt (the watchdog latches).
+5. **After:** stop `vio_node` with Ctrl-C (SIGINT) so it writes
+   `vio_events.csv`, then copy the run folder back.
 
 ## 4. Housekeeping
 
-- [ ] Copy `run_045716` back to
-  `Trajectory/isaac_results/3_gates/vio_mpc/`. Commit only the summaries and
-  plots, and link the video.
-- [ ] Write an update next to `PX4_FLIGHT_UPDATE_2026-10-23.md` for
-  2026-10-29 (Stages 0–4 and the findings above).
+- [ ] Commit the figures and `vio_summary.txt` of runs 3 and 4. Leave the
+  CSVs out (several MB each).
+- [ ] Reconcile the two Starling 2 Max spawns: `workspace/spawn_starling.py`
+  now holds the Max (and `control/test_vehicles.py` fails on `main`),
+  while Tony's `vehicle/starling2max-sim` branch adds
+  `spawn_starling2max.py`.
