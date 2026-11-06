@@ -91,7 +91,8 @@ class GateVIO:
     def __init__(self, gates, T_body_cam_usd, imu_rate=250.0, accel_noise=0.07, gyro_noise=0.006,
                  calib_s=2.0, history_s=1.5, max_range=15.0, min_pos_std=0.05, min_ang_std_deg=1.0,
                  assoc_tol=1.0, chi2_full=22.5, chi2_pos=16.3, initial_guess=None, delay_compensation=True,
-                 accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=10.0):
+                 accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=10.0,
+                 pos_only_max_range=8.0):
         """
         gates:          map gates (gate_path.Gate, world ENU), e.g. gates_from_manifest(test_gates.json)
         T_body_cam_usd: static camera mount, body FLU -> camera USD (eval_isaac_gates.T_body_cam_usd_from_mount)
@@ -101,6 +102,11 @@ class GateVIO:
                         (2026-11-06) with white accel noise only, the reported std was 3.5x too small
                         after 4.8 s without fixes (0.30 m against 1.06 m), so good gate_2 fixes were
                         rejected. The drift was a 0.11 m/s velocity error plus about 0.04 m/s^2 (tilt).
+        pos_only_max_range: position-only fixes (gate normal unreliable) from farther than this are
+                        dropped. Such a fix goes through the ESTIMATED attitude, so its error grows with
+                        range x attitude error, and the remaining ones carry that in their noise.
+                        Isaac 2026-11-06, attempt 2: 91 position-only fixes of gate_2 at 9-11 m moved
+                        the estimate 0.64 m sideways before gate_0 (frame margin 0.11 m).
         relock_*:       RE-LOCK. relock_n full fixes of the same gate, all rejected within
                         relock_window_s and agreeing within relock_spread_m (range under
                         relock_max_range), mean the estimate is wrong, not the camera: widen the
@@ -114,6 +120,7 @@ class GateVIO:
         self.ekf = DroneCasadiEKF12D(dt=self.dt, accel_noise=accel_noise, gyro_noise=gyro_noise, accel_rw=accel_rw)
         self.relock_n, self.relock_window = relock_n, relock_window_s
         self.relock_spread, self.relock_max_range = relock_spread_m, relock_max_range
+        self.pos_only_max_range = pos_only_max_range
         self._rejected = deque()                        # (t_img, gate index, z) of recently rejected full fixes
         self.calib_n = int(round(calib_s * imu_rate))
         self.max_range, self.assoc_tol = max_range, assoc_tol
@@ -131,7 +138,7 @@ class GateVIO:
         self.hist = deque(maxlen=n_hist)                # (t, x, P) after each IMU sample
         self.imu_hist = deque(maxlen=n_hist)            # (t, acc_flu, gyro_flu_corrected)
         self.stats = {"imu": 0, "fixes_full": 0, "fixes_pos": 0, "rejected": 0, "unmatched": 0,
-                      "too_old": 0, "relocks": 0, "init_time": None}
+                      "too_old": 0, "relocks": 0, "pos_only_far": 0, "init_time": None}
         self.events = []                                # (t, kind, gate, innovation norm)
 
     # ------------------------------------------------------------------ IMU
@@ -285,12 +292,18 @@ class GateVIO:
                 kind, chi2 = "full", self.chi2_full
             else:
                 # position only, through the ESTIMATED attitude
+                if det.range_m > self.pos_only_max_range:
+                    self.stats["pos_only_far"] += 1
+                    continue
                 x = self.ekf.x[:, 0]
                 R_wb = rot_rpy(*x[3:6])
                 R_wc = R_wb @ self.T_body_cam_cv[:3, :3]
                 p_cam = self.gates[i].center - R_wc @ det.T_cam_gate[:3, 3]
                 z = p_cam - R_wb @ self.T_body_cam_cv[:3, 3]
-                idx, R = [0, 1, 2], np.array([pos_std ** 2] * 3)
+                # the attitude estimate's own error, lifted through the range, adds to the PnP error
+                att_std = max(self.min_ang_std, float(np.sqrt(np.max(np.diag(self.ekf.P)[3:6]))))
+                lift = det.range_m * att_std
+                idx, R = [0, 1, 2], np.array([pos_std ** 2 + lift ** 2] * 3)
                 kind, chi2 = "pos", self.chi2_pos
             # chi-square gate on the innovation
             H_x = self.ekf.x[idx, 0]

@@ -97,6 +97,22 @@ At 3/3, VIO max is 1.40 m (all gates in the rehearsal, but over the 1 m
 watchdog). **Still open:** the drift itself (1a, 1d). These changes let the
 VIO *recover* at gate_2; they don't keep it under 0.5 m at gate_1.
 
+**Attempt 2, the same day, with 1b + 1c** (`vio_mpc/run_s7r2_012950/`): worse,
+aborted at +9.46 s (VIO 1.13 m). Its uncertainty was honest in the gap
+(error/std 1.4, against 3.6 before), but the wider uncertainty also made the
+filter accept **91 position-only fixes of gate_2 at 9-11 m**. Those go through
+the estimated attitude, and they moved the estimate 0.64 m sideways at +3 s,
+so the drone crossed gate_0 0.64 m off-centre (margin 0.11 m). The velocity
+error at the start of the gap was also about 2x larger (0.2 m/s).
+
+**Fix:**
+- position-only fixes from farther than 8 m are dropped (`pos_only_max_range`);
+- the remaining ones carry range x attitude uncertainty in their noise
+  (`control/test_vio.py`, `test_far_position_only_fixes_are_dropped`).
+
+The rehearsal can't test this: its camera always reports reliable normals.
+Only Isaac can.
+
 ### 1b. Honest uncertainty while dead-reckoning (`control/vio.py`) — done 2026-11-06
 - [ ] Tune the process noise (`accel_noise`, plus a velocity random walk) so
   that the reported std covers the real error when fixes drop out. Target:

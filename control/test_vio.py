@@ -217,6 +217,26 @@ def test_relock_after_drift():
           f"(without: {err0:.2f} m); disagreeing fixes (+-0.5 m) never re-lock  OK")
 
 
+
+def test_far_position_only_fixes_are_dropped():
+    # Isaac 2026-11-06: position-only fixes of gate_2 at 9-11 m (normal unreliable) pulled the estimate
+    # 0.64 m sideways. A biased far one must be ignored; a near one is still used, and weighted by
+    # range x attitude uncertainty.
+    def run(gate, offset):
+        vio, T_wb, t = _settled_vio(seconds=1.0)
+        before = vio.state[0:3, 0].copy()
+        wrong = _T(rot_rpy(0.0, 0.0, START_YAW), START + offset)       # what a biased fix implies
+        for _ in range(30):
+            vio.add_detections(t, [_det(wrong, gate, normal_std=40.0)])   # normal unreliable -> position-only
+            t = _hover_imu(vio, 4, t0=t)
+        return vio, float(np.linalg.norm(vio.state[0:3, 0] - before))
+    far, moved_far = run(GATES[2], np.array([0.0, 0.6, 0.0]))         # gate_2, about 13 m away
+    assert far.stats["pos_only_far"] == 30 and far.stats["fixes_pos"] == 0 and moved_far < 0.05, (far.stats, moved_far)
+    near, moved_near = run(GATES[0], np.array([0.0, 0.3, 0.0]))       # gate_0, about 5 m away
+    assert near.stats["fixes_pos"] > 0 and moved_near > 0.1, (near.stats, moved_near)
+    print(f"  position-only fixes: gate_2 at 13 m dropped (estimate moved {moved_far:.3f} m); "
+          f"gate_0 at 5 m still used (moved {moved_near:.2f} m toward it)  OK")
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:
