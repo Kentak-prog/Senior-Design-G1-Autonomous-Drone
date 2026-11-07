@@ -43,10 +43,30 @@ DRONE_VEHICLE=starling2max python3 control/test_mpc_core.py 2>&1 | grep -E "solv
 **Every ROS shell** from here on:
 ```bash
 source /opt/ros/humble/setup.bash && source /workspace/ros_ws/install/setup.bash \
-  && cd /workspace/Senior-Design-G1-Autonomous-Drone && export DRONE_VEHICLE=starling2max
+  && cd /workspace/Senior-Design-G1-Autonomous-Drone && export DRONE_VEHICLE=starling2max \
+  && export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/fastdds_udp.xml
 ```
 `DRONE_VEHICLE` sets the MPC's model and the bridge's thrust conversion.
 Forgetting it in one shell flies the Starling with Iris numbers.
+`FASTRTPS_DEFAULT_PROFILES_FILE`: since the 2026-11-06 pod reset, Isaac's
+topics reach `ros2-eval` only over UDP (shared memory between the containers
+does not work). Without it, `ros2 topic echo` and the nodes see nothing.
+
+**PX4 parameters from a shell** (instead of pasting them at `pxh>`): in a
+second `px4-sitl` shell, with PX4 already running,
+`PX4_PARAM=/workspace/PX4-Autopilot/build/px4_sitl_default/bin/px4-param sh px4/starling2max_sitl_params.sh`.
+If a client says `PX4 server not running` while PX4 is up, a stale
+`/tmp/px4-sock-0` from an earlier PX4 is in the way: stop PX4,
+`rm -f /tmp/px4-sock-0 /tmp/px4_lock-0`, start it again. PX4's logs are in
+`/workspace/PX4-Autopilot/log/<date>/`.
+
+**Isaac geometry check** (no Isaac needed; `isaac-sim` container), after
+any change to `workspace/spawn_starling.py`:
+```bash
+cd /workspace/Senior-Design-G1-Autonomous-Drone && L=$(ls -d /isaac-sim/extscache/omni.usd.libs-*) \
+  && PYTHONPATH=$L LD_LIBRARY_PATH=$L/bin /isaac-sim/kit/python/bin/python3 workspace/test_starling_geometry.py
+```
+It must end with `ALL OK`.
 
 ## Stage 1: Isaac + PX4
 
@@ -64,6 +84,11 @@ import os; os.environ["GATES_MANIFEST"] = "/workspace/Senior-Design-G1-Autonomou
 ```
 The spawn log must show:
 - `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
+- four `[starling] rotorN anchor in body frame (...)` lines: rotor0
+  (+0.095, −0.130), rotor1 (−0.095, +0.130), rotor2 (+0.095, +0.130),
+  rotor3 (−0.095, −0.130). Any other order means the rotors are not where
+  PX4 mixes them, and it will flip on takeoff (what happened on 2026-11-07,
+  before the fix in `apply_starling_geometry`).
 - `[starling] rotors moved to x=+-0.095 m, y=+-0.13 m (4 rotor joint anchors updated)`
 - `[starling] body mass ... = 0.573 kg`
 - `[init] ... hover 5407 RPM = motor output 0.341 = hover thrust 0.139`, then

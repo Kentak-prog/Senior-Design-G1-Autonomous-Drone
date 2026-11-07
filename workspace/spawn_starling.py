@@ -40,7 +40,7 @@ Run ONCE per Isaac Sim process, like spawn_example.py.
 import asyncio
 import math
 import omni.usd
-from pxr import UsdGeom, UsdPhysics, Gf
+from pxr import Usd, UsdGeom, UsdPhysics, Gf
 from pegasus.simulator.logic.interface.pegasus_interface import PegasusInterface
 from pegasus.simulator.logic.vehicles.multirotor import Multirotor, MultirotorConfig
 from pegasus.simulator.logic.backends.px4_mavlink_backend import (
@@ -248,6 +248,15 @@ def apply_starling_geometry(stage):
     Pegasus applies each rotor's thrust at the rotor prim, so these positions
     are the moment arms of the roll / pitch torques.
 
+    ROTOR_XY is in the rigid body's frame ({DRONE_PATH}/body: x forward,
+    y left), the frame PX4's CA_ROTORn_PX/PY describe. localPos0 is in the
+    frame of the joint's body0, which for the Iris is the mesh prim
+    {DRONE_PATH}/body/body, rotated 90 deg about z from the rigid body.
+    Writing ROTOR_XY into localPos0 unconverted put every rotor 90 deg CCW
+    from where PX4 mixes it (2026-11-07: roll and pitch swapped through the
+    motors, and the drone flipped on takeoff). So both the rotor prims and the
+    anchors are converted through the stage transforms here.
+
     Mass: the body gets MASS minus the rotors' own masses, and the inertia
     INERTIA_DIAG minus the rotors' point-mass (parallel-axis) contribution, so
     the whole vehicle matches MASS / INERTIA_DIAG.
@@ -256,14 +265,25 @@ def apply_starling_geometry(stage):
     rotor_mass = 0.0
     rotor_inertia = [0.0, 0.0, 0.0]
 
+    # Frames: points are written p_frame * M (Gf row-vector convention), so
+    # body-frame point -> world is p * body_w, and world -> X's local is
+    # p * inverse(X_w).
+    xc = UsdGeom.XformCache(Usd.TimeCode.Default())
+    body_prim = stage.GetPrimAtPath(f"{DRONE_PATH}/body")
+    body_w = xc.GetLocalToWorldTransform(body_prim) if body_prim.IsValid() else Gf.Matrix4d(1.0)
+    body_w_inv = body_w.GetInverse()
+
     for i, path in enumerate(rotor_paths):
         prim = stage.GetPrimAtPath(path)
         if not prim.IsValid():
             print(f"[starling] WARNING: {path} not found; rotor {i} keeps the Iris arm")
             continue
         x, y = ROTOR_XY[i]
-        z = UsdGeom.Xformable(prim).GetLocalTransformation().ExtractTranslation()[2]
-        _set_translate(prim, (x, y, z))
+        # The rotor's current position in the body frame (keep its height).
+        p_body = body_w_inv.Transform(xc.GetLocalToWorldTransform(prim).ExtractTranslation())
+        target_w = body_w.Transform(Gf.Vec3d(x, y, p_body[2]))
+        parent_w = xc.GetLocalToWorldTransform(prim.GetParent())
+        _set_translate(prim, tuple(parent_w.GetInverse().Transform(target_w)))
 
         m_r = 0.0
         if prim.HasAPI(UsdPhysics.MassAPI):
@@ -280,17 +300,28 @@ def apply_starling_geometry(stage):
             continue
         joint = UsdPhysics.Joint(prim)
         targets = [str(t) for t in joint.GetBody1Rel().GetTargets()]
+        body0 = [str(t) for t in joint.GetBody0Rel().GetTargets()]
+        b0_prim = stage.GetPrimAtPath(body0[0]) if body0 else body_prim
+        # body frame -> body0 frame, and back
+        body_to_b0 = body_w * xc.GetLocalToWorldTransform(b0_prim).GetInverse()
+        b0_to_body = body_to_b0.GetInverse()
         for i, path in enumerate(rotor_paths):
             if path in targets:
-                old = joint.GetLocalPos0Attr().Get() or Gf.Vec3f(0.0, 0.0, 0.0)
+                old = Gf.Vec3d(joint.GetLocalPos0Attr().Get() or Gf.Vec3f(0.0, 0.0, 0.0))
                 x, y = ROTOR_XY[i]
-                joint.GetLocalPos0Attr().Set(Gf.Vec3f(x, y, old[2]))
+                old_body = b0_to_body.Transform(old)
+                new_b0 = body_to_b0.Transform(Gf.Vec3d(x, y, old_body[2]))
+                joint.GetLocalPos0Attr().Set(Gf.Vec3f(new_b0))
+                check = b0_to_body.Transform(Gf.Vec3d(joint.GetLocalPos0Attr().Get()))
+                print(f"[starling] rotor{i} anchor in body frame ({check[0]:+.3f}, {check[1]:+.3f}, "
+                      f"{check[2]:+.3f}) m (written in {b0_prim.GetPath()} as "
+                      f"({new_b0[0]:+.3f}, {new_b0[1]:+.3f}, {new_b0[2]:+.3f}))")
                 n_joints += 1
     print(f"[starling] rotors moved to x=+-{ARM_X} m, y=+-{ARM_Y} m "
           f"({n_joints} rotor joint anchors updated)")
     if n_joints != 4:
         print("[starling] WARNING: expected 4 rotor joints; check the rotor prims in the "
-              "Physics inspector (if the body is scaled, localPos0 is in scaled units)")
+              "Physics inspector")
 
     body = stage.GetPrimAtPath(f"{DRONE_PATH}/body")
     if not body.IsValid():
