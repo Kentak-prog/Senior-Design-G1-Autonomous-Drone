@@ -127,6 +127,28 @@ def test_prior_and_detection_conversion():
     print(f"  prior off by {np.round(off, 2)} m; 6 sightings pull gate_1 from {before:.2f} to {after:.2f} m  OK")
 
 
+def test_far_detections_are_ignored_with_a_range_limit():
+    # Starling C29 in Isaac (2026-11-07): gate_1 seen from 12 m came in up to ~1 m and ~100 deg
+    # off; fused, it turned gate_1 sideways and every replan failed. max_detection_range_m drops
+    # sightings farther than the limit; nearer ones still correct the map.
+    prior = perturbed_prior(GATES, 0.5, 0)
+    g = GATES[1]
+    rng = float(np.linalg.norm(g.center - START))
+    q = _quat_xyzw(g.T_world_gate[:3, :3])
+    far = ReplanSession(prior, max_detection_range_m=rng - 1.0)
+    near = ReplanSession(prior, max_detection_range_m=rng + 1.0)
+    for k in range(6):
+        far.add_detections(0.1 * k, [(g.center, q)], START)
+        near.add_detections(0.1 * k, [(g.center, q)], START)
+    c_far = {n: c for n, c, *_ in far.map_snapshot()}["gate_1"]
+    c_near = {n: c for n, c, *_ in near.map_snapshot()}["gate_1"]
+    assert far.n_far_ignored == 6 and far.n_detections == 0, (far.n_far_ignored, far.n_detections)
+    assert np.allclose(c_far, prior[1].center), c_far                   # untouched: still the prior
+    assert near.n_far_ignored == 0 and np.linalg.norm(c_near - g.center) < 0.5 * np.linalg.norm(prior[1].center - g.center)
+    assert ReplanSession(prior, max_detection_range_m=0.0).max_range is None   # 0 = no limit
+    print(f"  gate_1 at {rng:.1f} m: limit {rng - 1:.1f} m ignores all 6 sightings, {rng + 1:.1f} m uses them  OK")
+
+
 def test_prior_gate_more_than_1m_off_is_corrected_not_duplicated():
     # prior_sigma 0.5 m is PER AXIS, so a prior gate is often > 1 m off in 3-D (circle course,
     # seed 1: gate_1 1.08 m). Distance gating alone (max(1 m, 10 % of range)) then started a new
