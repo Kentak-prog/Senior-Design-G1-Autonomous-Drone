@@ -127,6 +127,23 @@ def test_prior_and_detection_conversion():
     print(f"  prior off by {np.round(off, 2)} m; 6 sightings pull gate_1 from {before:.2f} to {after:.2f} m  OK")
 
 
+def test_first_plan_keeps_the_hover_yaw_on_a_sim_clock():
+    # Isaac's clock is sim time (~2400 s by Stage 4R). The hover-and-search reference started
+    # its yaw search at t = 0, so the first plan started at yaw 0.5 rad/s x 2400 s = 1210 rad,
+    # and the MPC's first solve asked for a 53 deg tilt; the bridge aborted (2026-11-07).
+    t0 = 2420.6
+    sess = ReplanSession(perturbed_prior(GATES, 0.5, 0), v_max=2.0, a_max=2.0)
+    assert sess.prepare(t0, START, START_YAW).startswith("plan ready")
+    for t in (t0 + 1.0, t0 + 60.0, t0 + 112.0):                         # a long hover before engage
+        sess.prepare(t, START, START_YAW)
+    p = sess.engage(t0 + 113.0, START, START_YAW)
+    yaw0 = float(p.states[5, 0])
+    assert abs(yaw0 - START_YAW) < np.radians(5.0), (yaw0, START_YAW)
+    assert np.all(np.abs(p.states[5]) < 2 * np.pi), (p.states[5].min(), p.states[5].max())
+    print(f"  clock starting at {t0} s: first plan starts at yaw {np.degrees(yaw0):+.1f} deg "
+          f"(hover {np.degrees(START_YAW):+.1f})  OK")
+
+
 def test_far_detections_are_ignored_with_a_range_limit():
     # Starling C29 in Isaac (2026-11-07): gate_1 seen from 12 m came in up to ~1 m and ~100 deg
     # off; fused, it turned gate_1 sideways and every replan failed. max_detection_range_m drops

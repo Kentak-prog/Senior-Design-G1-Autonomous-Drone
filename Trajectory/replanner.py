@@ -92,10 +92,16 @@ class HoldReference:
     """
 
     def __init__(self, pos, yaw, t0, yaw_rate=0.0, search_delay=1.0):
+        """t0: when the hover starts; None = at the first state() call. The clock can be
+        sim time (thousands of seconds in Isaac): a fixed t0 = 0 there made the "search"
+        yaw 0.5 rad/s x 2400 s = 1210 rad, the first plan inherited it, and the MPC's first
+        solve asked for a 53 deg tilt (Stage 4R, 2026-11-07)."""
         self.pos, self.yaw, self.t0 = np.asarray(pos, dtype=float), yaw, t0
         self.yaw_rate, self.search_delay = yaw_rate, search_delay
 
     def state(self, t):
+        if self.t0 is None:
+            self.t0 = t
         searching = t - self.t0 - self.search_delay
         x = np.zeros(12)
         x[0:3] = self.pos
@@ -127,7 +133,7 @@ class Replanner:
         self.verbose = verbose
 
         self.plans = []
-        self.hold = HoldReference(start_pos, start_yaw, 0.0, yaw_rate=search_yaw_rate)
+        self.hold = HoldReference(start_pos, start_yaw, None, yaw_rate=search_yaw_rate)   # t0 = first use
         self.progress = 0                # route entries passed
         self.passes = []                 # (t, route index, gate_id, how)
         self.events = []                 # (t, text)
