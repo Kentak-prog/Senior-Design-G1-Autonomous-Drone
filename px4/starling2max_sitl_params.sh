@@ -15,11 +15,15 @@
 # and STARLING2MAX_DYNAMICS.md; replace them with the drone's saved parameter
 # file when we have it.
 #
-# Not set here, on purpose: the rate-loop gains (MC_*RATE_P/I/D/K). SITL keeps
-# the Iris airframe's gains. The Max has much more roll/pitch authority per
-# unit of output relative to its inertia, so if the hover oscillates, halve
-# MC_ROLLRATE_P / MC_PITCHRATE_P (and their D) first, then take the real
-# drone's gains from its parameter file.
+# Rate-loop gains (end of this file): SITL's Iris gains act ~3.4x (roll) and
+# ~5.0x (pitch) harder on the Starling, which went into a pitch oscillation at
+# liftoff with them (2026-11-07). The values below are the Iris gains scaled by
+# those ratios (see PX4_SITL_PARAMS in workspace/spawn_starling.py); the
+# Starling hovered with them. Replace them with the real drone's gains from its
+# parameter file when we have it.
+#
+# MPC_USE_HTE does not exist in the pod's PX4 build (the hover-thrust
+# estimator always runs there), so that one line prints "not found"; harmless.
 #
 # From Tony's vehicle/starling2max-sim branch; KM is kappa = 0.0129 m
 # (propeller theory, STARLING2_DYNAMICS.md 4.6) instead of 0.0829 m.
@@ -58,6 +62,14 @@ $P set CA_ROTOR3_KM -0.0129
 # airmode keeps attitude authority at low thrust).
 $P set COM_LOW_BAT_ACT 0
 $P set MC_AIRMODE 1
+
+# Rate-loop gains, scaled from the Iris for the Starling (see the header).
+$P set MC_ROLLRATE_P 0.044
+$P set MC_ROLLRATE_I 0.06
+$P set MC_ROLLRATE_D 0.0009
+$P set MC_PITCHRATE_P 0.03
+$P set MC_PITCHRATE_I 0.04
+$P set MC_PITCHRATE_D 0.0006
 
 $P show THR_MDL_FAC
 $P show MPC_THR_HOVER

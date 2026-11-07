@@ -108,7 +108,9 @@ cd /workspace/PX4-Autopilot && PX4_SIM_MODEL=none_iris ./build/px4_sitl_default/
 At `pxh>`, once `Ready for takeoff!` appears:
 1. **Paste the `param set` lines** from the spawn log (the same set as
    `px4/starling2max_sitl_params.sh`): thrust model, Starling rotor geometry
-   and yaw ratio, `MPC_USE_HTE`, and two sim-only settings.
+   and yaw ratio, `MPC_USE_HTE`, two sim-only settings, and the Starling's
+   roll and pitch rate gains. `MPC_USE_HTE` prints "not found" on the pod's
+   PX4 build (its hover-thrust estimator always runs); that is harmless.
 2. Run `commander takeoff`.
 3. After about 20 s of hover, check the motors:
    ```
@@ -118,8 +120,11 @@ At `pxh>`, once `Ready for takeoff!` appears:
 
 **GO:**
 - **Hover:** steady at about (0, 0, 2.5), with no growing wobble.
-- **Motors:** `actuator_motors` all about **0.34** (5,407 RPM, the real
-  drone's hover), and `hover_thrust` about **0.14**.
+  2026-11-07: 2.51 m within 5 mm, body rates within 0.25°/s.
+- **Thrust:** `actuator_motors` all about **0.139**, and `hover_thrust`
+  about **0.139**. `actuator_motors` is the thrust command; PX4's thrust
+  model (`THR_MDL_FAC` 0.9) turns 0.139 into motor output 0.341, which is
+  5,407 RPM, the real drone's hover. Neither readout shows the 0.341.
 - **Clock:** these stamps agree within a few tenths of a second:
   ```bash
   ros2 topic echo --once /clock
@@ -132,9 +137,15 @@ At `pxh>`, once `Ready for takeoff!` appears:
   centered, and gate_1 is whole on the right.
 
 If it fails:
-- **Wobble:** SITL keeps the Iris rate gains. Halve `MC_ROLLRATE_P`,
-  `MC_PITCHRATE_P` and their `_D` (`param set`).
-- **Motors far from 0.34:** the mass or k_f didn't apply. Check the
+- **Oscillates and climbs away:** the rate gains weren't set, so SITL kept
+  the Iris gains. They act 3.4× (roll) and 5× (pitch) harder on the
+  Starling: it went into a ±270°/s pitch oscillation and climbed to 86 m
+  (2026-11-07). Check `param show MC_PITCHRATE_P` reads 0.03.
+- **Spins on the ground as soon as it arms:** the prop colliders are on.
+  Check the four `rotorN: 1 prop collider(s) disabled` spawn lines.
+- **Flips at liftoff, roll and pitch mixed up:** the rotors aren't where PX4
+  mixes them. Check the four `rotorN anchor in body frame` spawn lines.
+- **Thrust far from 0.139:** the mass or k_f didn't apply. Check the
   `[starling]` lines.
 - **`hover_thrust` far from 0.14:** the `param set` lines weren't pasted
   (`THR_MDL_FAC` must be 0.9).
@@ -190,7 +201,8 @@ If it fails:
   `bridge_log.csv` and give `--hover-thrust`, as was done for the Iris
   (0.58).
 - **Flips, or drifts sideways at once:** stop. Send `bridge_log.csv`.
-- **Wobbles:** halve the rate gains (Stage 1).
+- **Wobbles:** check the rate gains are the Starling's (Stage 1); if they
+  are, lower `MC_PITCHRATE_P` / `MC_ROLLRATE_P` by a quarter.
 
 Between runs at `pxh>`, if it moved away from the hover point:
 `commander mode loiter`, then let it settle.

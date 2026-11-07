@@ -155,6 +155,15 @@ PX4_SITL_PARAMS = {
     "CA_ROTOR2_PX": 0.095, "CA_ROTOR2_PY": -0.13, "CA_ROTOR2_KM": -0.0129,
     "CA_ROTOR3_PX": -0.095, "CA_ROTOR3_PY": 0.13, "CA_ROTOR3_KM": -0.0129,
     "COM_LOW_BAT_ACT": 0, "MC_AIRMODE": 1,   # sim only: no battery model; attitude authority at low thrust
+    # Rate-loop gains. SITL's Iris gains (P 0.15, I 0.2, D 0.003) act ~3.4x (roll)
+    # and ~5.0x (pitch) harder on the Starling: angular acceleration per unit of
+    # normalized torque, 4 * T_max * arm / I, is 1041 / 1067 rad/s^2 here against
+    # 307 / 215 for the Iris. With them it went into a +-270 deg/s pitch
+    # oscillation at liftoff (2026-11-07). Scaled by those ratios, it hovered at
+    # 2.51 m within 5 mm, body rates within 0.25 deg/s. Replace with the real
+    # drone's gains from its parameter file when we have it.
+    "MC_ROLLRATE_P": 0.044, "MC_ROLLRATE_I": 0.06, "MC_ROLLRATE_D": 0.0009,
+    "MC_PITCHRATE_P": 0.03, "MC_PITCHRATE_I": 0.04, "MC_PITCHRATE_D": 0.0006,
 }
 
 
