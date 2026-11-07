@@ -11,6 +11,7 @@ gate in view for the color detector + PnP.
 | `circle_course.json` | the manifest (same format as `test_gates.json`), written by `Trajectory/make_circle_course.py` |
 | `camera_check_circle.png` | `Trajectory/check_course_camera.py`, Iris camera: 3.5 s longest gap, 0 bad fixes |
 | `camera_check_circle_c29.png` | the same with the Starling C29 front camera: 1.2 s longest gap, fixes on 89% of frames |
+| `starling_c29_2026-11-07/` | Isaac + PX4 run of the Starling 2 Max (C29), Stages 0–4: **all gates passed** on ground truth (margins 0.68–0.69 m, tracking max 0.21 m) |
 
 | Gate | x | y | z | yaw |
 |---|---|---|---|---|

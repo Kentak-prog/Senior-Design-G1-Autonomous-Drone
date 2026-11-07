@@ -7,8 +7,11 @@ and "The Starling 2 Max (C29) on the circle course".
 
 The sim uses our numbers: `workspace/spawn_starling.py`, the `starling2max`
 profile and `px4/starling2max_sitl_params.sh`, which `control/test_vehicles.py`
-checks against each other. No Starling run of these stages is logged yet, so
-go in order and stop at the first failed GO.
+checks against each other. Go in order and stop at the first failed GO.
+
+**First run, 2026-11-07: Stages 0–4 passed** (Stage 4: all gates on ground
+truth, margins 0.68–0.69 m). Results, the three sim fixes it took, and the
+open items: `Trajectory/isaac_results/circle_course/starling_c29_2026-11-07/README.md`.
 
 **Before:** commit and push the working tree, then pull in the pod (Stage 0).
 
@@ -254,3 +257,10 @@ Run the bridge with `--max-duration 120 --log-dir $RUN/s4r`. Score with
 - Stop `vio_node` with **Ctrl-C** (SIGINT) so it writes `vio_events.csv`.
 - Copy `$RUN` back.
 - CSVs stay out of git; figures and summaries can go in.
+
+**Recovering mid-session:**
+- Lost the `pxh>` prompt (a dropped terminal)? In `px4-sitl`,
+  `cd /workspace/PX4-Autopilot && python3 Tools/mavlink_shell.py 0.0.0.0:14550`
+  gives the same shell over MAVLink. Don't start a second PX4.
+- Drone crashed or flipped? Disarm, run `workspace/reset_drone.py` in the
+  Script Editor (back upright at the takeoff spot), then restart PX4.

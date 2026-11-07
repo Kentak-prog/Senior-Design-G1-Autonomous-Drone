@@ -1,0 +1,15 @@
+[gates] /workspace/test_gates.json
+[log] 3498 samples over 70.0 s; flying 2178 samples (43.5 s)
+[vio hover position error] mean 0.109 m, max 0.208 m (1319 samples)
+[vio flying position error] mean 8.394 m, max 58.306 m (2178 samples)
+[vio flying velocity error] mean 1.426 m/s, max 6.889 m/s (2178 samples)
+[vio flying yaw error] mean 1.036 deg, max 3.697 deg (2178 samples)
+[mpc TRUE drone vs reference] mean 0.081 m, max 0.206 m (2178 samples)
+[mpc] solve median 24.0 ms, p95 30.0 ms, 0 invalid of 2178 logged samples
+[watchdog] never tripped
+[result] TRUE path vs gates:
+  gate_0: t= 3.96s  offset=(-0.00, +0.06) m  frame margin 0.69 m  angle  1.0 deg  speed 1.57 m/s
+  gate_1: t=10.48s  offset=(+0.07, +0.06) m  frame margin 0.68 m  angle  2.8 deg  speed 1.55 m/s
+  gate_2: t=17.11s  offset=(+0.06, +0.06) m  frame margin 0.69 m  angle  2.2 deg  speed 1.59 m/s
+[result] ALL GATES PASSED
+[bridge] OFFBOARD 60.0 s wall, 3000 setpoints; PX4 position vs where OFFBOARD began: max horizontal 12.54 m, max vertical 0.06 m; mean throttle 0.158; completed: reached --max-duration 60 s

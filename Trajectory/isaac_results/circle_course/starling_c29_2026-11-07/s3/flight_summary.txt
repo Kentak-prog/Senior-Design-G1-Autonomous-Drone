@@ -1,0 +1,13 @@
+[gates] /workspace/test_gates.json
+[log] 2600 samples over 52.0 s; flying 0 samples (0.0 s)
+[vio position error, whole log] mean 0.108 m, max 0.202 m (2599 samples)
+[vio velocity error, whole log] mean 0.096 m/s, max 0.246 m/s (2599 samples)
+[vio yaw error, whole log] mean 3.484 deg, max 5.757 deg (2599 samples)
+[mpc TRUE drone vs reference] no samples
+[watchdog] never tripped
+[result] TRUE path vs gates:
+  gate_0: MISSED
+  gate_1: MISSED
+  gate_2: MISSED
+[result] NOT ALL GATES PASSED
+[bridge] OFFBOARD 15.0 s wall, 750 setpoints; PX4 position vs where OFFBOARD began: max horizontal 0.01 m, max vertical 0.06 m; mean throttle 0.150; completed: reached --max-duration 15 s
