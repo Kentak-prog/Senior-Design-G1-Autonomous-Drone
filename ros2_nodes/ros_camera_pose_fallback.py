@@ -120,13 +120,19 @@ class PoseFallbackGatePoseNode:
         self._intr = None
         self._bridge = None
 
+        # Best-effort: Pegasus publishes /drone00/state/pose BEST_EFFORT, and a
+        # RELIABLE subscriber never matches it ("incompatible policy:
+        # RELIABILITY"; 2026-11-07 this node logged "no pose yet" forever). A
+        # best-effort subscriber also matches reliable publishers (/vio/odometry).
+        from rclpy.qos import qos_profile_sensor_data
         if odom_topic:
             from nav_msgs.msg import Odometry
-            self._node.create_subscription(Odometry, odom_topic, lambda m: self._on_pose(m.pose), 10)
+            self._node.create_subscription(Odometry, odom_topic, lambda m: self._on_pose(m.pose),
+                                           qos_profile_sensor_data)
             self._node.get_logger().info(f"body pose from {odom_topic} (Odometry)")
         else:
             self._node.create_subscription(PoseStamped, self._pose_topic,
-                                           self._on_pose, 10)
+                                           self._on_pose, qos_profile_sensor_data)
             self._node.get_logger().info(f"body pose from {self._pose_topic} (PoseStamped)")
 
         topic = f"{namespace}/front_cam"
