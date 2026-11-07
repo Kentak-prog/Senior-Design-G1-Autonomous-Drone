@@ -117,6 +117,11 @@ ARM_Y        = 0.130                        # m, half of 260 mm (left-right), CA
 # rotor0 front-right, rotor1 back-left, rotor2 front-left, rotor3 back-right.
 ROTOR_XY     = ((ARM_X, -ARM_Y), (-ARM_X, ARM_Y), (ARM_X, ARM_Y), (-ARM_X, -ARM_Y))
 ROT_DIR      = [-1, -1, 1, 1]
+# Each rotor link's own mass and inertia, set explicitly (the Iris USD leaves
+# them to PhysX's density default). Small, so Pegasus' spinning prop animation
+# carries almost no angular momentum; MASS / INERTIA_DIAG stay the totals.
+ROTOR_MASS   = 0.005                        # kg, prop + bell (est.)
+ROTOR_INERTIA = (1.0e-6, 1.0e-6, 2.0e-6)    # kg m^2 about the rotor's own axes (est.)
 K_F          = 4.383e-6                     # N/(rad/s)^2, measured: hover logs 2026-11-03, 5,407 RPM
 K_M          = 5.65e-8                      # N m/(rad/s)^2, (est.) torque/thrust 0.0129 m x K_F
 TAU_MOTOR    = 0.035                        # s, first-order rotor lag, measured (30-40 ms)
@@ -257,6 +262,14 @@ def apply_starling_geometry(stage):
     motors, and the drone flipped on takeoff). So both the rotor prims and the
     anchors are converted through the stage transforms here.
 
+    Prop colliders are disabled. The rotors keep the Iris' 10-inch props, and
+    at the Starling spacing the front and rear props on each side overlap
+    (hubs 0.19 m apart, props 0.247 m across). Pegasus spins the rotor joints
+    for the animation, so the counter-rotating blades hit each other and spun
+    the drone at -200 deg/s on the ground as soon as it armed (2026-11-07).
+    Thrust is applied as forces at the rotor prims, so the props need no
+    collision. Each rotor gets an explicit ROTOR_MASS / ROTOR_INERTIA.
+
     Mass: the body gets MASS minus the rotors' own masses, and the inertia
     INERTIA_DIAG minus the rotors' point-mass (parallel-axis) contribution, so
     the whole vehicle matches MASS / INERTIA_DIAG.
@@ -285,9 +298,19 @@ def apply_starling_geometry(stage):
         parent_w = xc.GetLocalToWorldTransform(prim.GetParent())
         _set_translate(prim, tuple(parent_w.GetInverse().Transform(target_w)))
 
-        m_r = 0.0
-        if prim.HasAPI(UsdPhysics.MassAPI):
-            m_r = UsdPhysics.MassAPI(prim).GetMassAttr().Get() or 0.0
+        # No prop collisions (see the docstring), and a defined rotor mass.
+        n_off = 0
+        for sub in Usd.PrimRange(prim):
+            if sub.HasAPI(UsdPhysics.CollisionAPI):
+                UsdPhysics.CollisionAPI(sub).CreateCollisionEnabledAttr().Set(False)
+                n_off += 1
+        rotor_mass_api = UsdPhysics.MassAPI.Apply(prim)
+        rotor_mass_api.CreateMassAttr().Set(ROTOR_MASS)
+        rotor_mass_api.CreateDiagonalInertiaAttr().Set(Gf.Vec3f(*ROTOR_INERTIA))
+        rotor_mass_api.CreateCenterOfMassAttr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+        print(f"[starling] rotor{i}: {n_off} prop collider(s) disabled, mass {ROTOR_MASS} kg")
+
+        m_r = ROTOR_MASS
         rotor_mass += m_r
         rotor_inertia[0] += m_r * y * y
         rotor_inertia[1] += m_r * x * x

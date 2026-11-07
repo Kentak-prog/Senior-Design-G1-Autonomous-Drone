@@ -5,7 +5,10 @@ mixes it (ROTOR_XY, in the rigid body's frame), without starting Isaac.
 Builds an in-memory stage shaped like Pegasus' Iris: /World/Iris/body (rigid
 body) with a mesh child body/body rotated 90 deg about z, rotor0..3 siblings,
 and revolute joints whose body0 is body/body. That rotation is what put every
-rotor 90 deg off on 2026-11-07 (the drone flipped on takeoff). The function is
+rotor 90 deg off on 2026-11-07 (the drone flipped on takeoff). It also checks
+that the prop colliders are disabled (the Iris' 10-inch props overlap at the
+Starling spacing and hit each other), each rotor has ROTOR_MASS, and body +
+rotors add up to MASS / INERTIA_DIAG. The function is
 extracted from spawn_starling.py with ast, so omni / Pegasus are not needed,
 only pxr. In the isaac-sim container:
 
@@ -24,7 +27,7 @@ path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.pat
 src = open(path).read()
 tree = ast.parse(src)
 want = {"_set_translate", "apply_starling_geometry"}
-consts = {"DRONE_PATH", "ARM_X", "ARM_Y", "ROTOR_XY", "MASS", "INERTIA_DIAG"}
+consts = {"DRONE_PATH", "ARM_X", "ARM_Y", "ROTOR_XY", "MASS", "INERTIA_DIAG", "ROTOR_MASS", "ROTOR_INERTIA"}
 g = {"Usd": Usd, "UsdGeom": UsdGeom, "UsdPhysics": UsdPhysics, "Gf": Gf, "print": print}
 for node in tree.body:
     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in consts for t in node.targets):
@@ -53,6 +56,11 @@ for i, (x, y) in enumerate(iris_xy):
     # Iris anchor in the mesh frame: rotate the body-frame point by -90 deg
     j.CreateLocalPos0Attr().Set(Gf.Vec3f(y, -x, 0.023))
     j.CreateLocalPos1Attr().Set(Gf.Vec3f(0, 0, 0))
+    # the Iris prop mesh, with a collider, under each rotor
+    prop = UsdGeom.Xform.Define(stage, f"{D}/rotor{i}/iris_prop_{'ccw' if i < 2 else 'cw'}")
+    UsdPhysics.CollisionAPI.Apply(prop.GetPrim())
+# the body hull collider
+UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
 
 g["apply_starling_geometry"](stage)
 
@@ -69,5 +77,31 @@ for i, (x, y) in enumerate(g["ROTOR_XY"]):
     ok &= good
     print(f"rotor{i}: want ({x:+.3f},{y:+.3f})  anchor in body ({a[0]:+.3f},{a[1]:+.3f},{a[2]:+.3f})  "
           f"prim in body ({p[0]:+.3f},{p[1]:+.3f},{p[2]:+.3f})  {'OK' if good else 'WRONG'}")
+
+# Prop colliders off (overlapping 10-inch props hit each other), rotor mass set.
+for i in range(4):
+    rotor = stage.GetPrimAtPath(f"{D}/rotor{i}")
+    cols = [p for p in Usd.PrimRange(rotor) if p.HasAPI(UsdPhysics.CollisionAPI)]
+    off = all(UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get() is False for p in cols)
+    m = UsdPhysics.MassAPI(rotor).GetMassAttr().Get() if rotor.HasAPI(UsdPhysics.MassAPI) else None
+    good = bool(cols) and off and m is not None and abs(m - g["ROTOR_MASS"]) < 1e-9
+    ok &= good
+    print(f"rotor{i}: {len(cols)} prop collider(s), all disabled={off}, mass={m}  {'OK' if good else 'WRONG'}")
+hull_on = UsdPhysics.CollisionAPI(mesh.GetPrim()).GetCollisionEnabledAttr().Get() is not False
+ok &= hull_on
+print(f"body hull collider still enabled: {hull_on}  {'OK' if hull_on else 'WRONG'}")
+
+# Totals: body + 4 rotors (point masses at ROTOR_XY) = MASS / INERTIA_DIAG.
+bm = UsdPhysics.MassAPI(body.GetPrim())
+mb, Ib = bm.GetMassAttr().Get(), bm.GetDiagonalInertiaAttr().Get()
+mr = g["ROTOR_MASS"]
+tot_m = mb + 4 * mr
+tot_I = [Ib[0] + sum(mr * y * y for x, y in g["ROTOR_XY"]),
+         Ib[1] + sum(mr * x * x for x, y in g["ROTOR_XY"]),
+         Ib[2] + sum(mr * (x * x + y * y) for x, y in g["ROTOR_XY"])]
+good = abs(tot_m - g["MASS"]) < 1e-6 and all(abs(a - b) < 1e-8 for a, b in zip(tot_I, g["INERTIA_DIAG"]))
+ok &= good
+print(f"total mass {tot_m:.4f} kg (want {g['MASS']}), inertia {tuple(round(v, 7) for v in tot_I)} "
+      f"(want {g['INERTIA_DIAG']})  {'OK' if good else 'WRONG'}")
 print("ALL OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

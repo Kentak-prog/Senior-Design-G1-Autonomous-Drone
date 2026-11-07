@@ -90,7 +90,11 @@ The spawn log must show:
   PX4 mixes them, and it will flip on takeoff (what happened on 2026-11-07,
   before the fix in `apply_starling_geometry`).
 - `[starling] rotors moved to x=+-0.095 m, y=+-0.13 m (4 rotor joint anchors updated)`
-- `[starling] body mass ... = 0.573 kg`
+- four `[starling] rotorN: 1 prop collider(s) disabled, mass 0.005 kg`. The
+  Iris' 10-inch props overlap at the Starling spacing; with their colliders
+  on, the blades hit each other and the drone spun at −200°/s on the ground
+  as soon as it armed (2026-11-07).
+- `[starling] body mass 0.5530 kg + rotors 0.0200 kg = 0.573 kg`
 - `[init] ... hover 5407 RPM = motor output 0.341 = hover thrust 0.139`, then
   a block of `param set` lines. Copy them.
 
