@@ -62,6 +62,10 @@ class Vehicle:
     # --- Pegasus PX4MavlinkBackend: w = px4_w_scale * u + px4_w_offset ---
     px4_w_scale: float
     px4_w_offset: float
+    # PX4 thrust model THR_MDL_FAC = f: the normalized thrust setpoint t that
+    # PX4 receives (MPC_THR_HOVER, SET_ATTITUDE_TARGET thrust) and the motor
+    # output u it sends are related by t = f u^2 + (1 - f) u. 0 = u is t.
+    px4_thr_mdl_fac: float
 
     # --- Pegasus LinearDrag: force_body = -drag_coeff * v_body ---
     drag_coeff: tuple           # N / (m/s), body x, y, z
@@ -93,6 +97,34 @@ class Vehicle:
         w = math.sqrt(self.mass * g / (4.0 * self.k_f))
         return (w - self.px4_w_offset) / self.px4_w_scale
 
+    def hover_thrust_setpoint(self, g: float = 9.81) -> float:
+        """Normalized PX4 thrust setpoint that hovers: PX4's MPC_THR_HOVER."""
+        return thr_mdl_setpoint(self.hover_motor_output(g), self.px4_thr_mdl_fac)
+
+    def thrust_to_setpoint(self, T_total: float) -> float:
+        """Collective thrust [N] (four equal rotors) -> PX4 thrust setpoint, clipped to [0, 1]."""
+        w = math.sqrt(max(T_total, 0.0) / (4.0 * self.k_f))
+        u = min(max((w - self.px4_w_offset) / self.px4_w_scale, 0.0), 1.0)
+        return thr_mdl_setpoint(u, self.px4_thr_mdl_fac)
+
+    def setpoint_to_thrust(self, t: float) -> float:
+        """PX4 thrust setpoint in [0, 1] -> collective thrust [N]."""
+        u = thr_mdl_motor_output(min(max(t, 0.0), 1.0), self.px4_thr_mdl_fac)
+        return 4.0 * self.k_f * (self.px4_w_scale * u + self.px4_w_offset) ** 2
+
+
+def thr_mdl_setpoint(u: float, f: float) -> float:
+    """PX4 thrust model: motor output u -> normalized thrust setpoint, t = f u^2 + (1 - f) u."""
+    return f * u * u + (1.0 - f) * u
+
+
+def thr_mdl_motor_output(t: float, f: float) -> float:
+    """Inverse of thr_mdl_setpoint for t >= 0 and 0 <= f <= 1 (what PX4's mixer does)."""
+    if f < 1e-9:
+        return t
+    b = 1.0 - f
+    return (-b + math.sqrt(b * b + 4.0 * f * t)) / (2.0 * f)
+
 
 VEHICLES = {
     # Pegasus Iris. Numbers unchanged from drone_constraints.py / drone_params.py
@@ -117,6 +149,7 @@ VEHICLES = {
         w_max=1100.0,
         px4_w_scale=1000.0,
         px4_w_offset=100.0,
+        px4_thr_mdl_fac=0.0,
         drag_coeff=(0.50, 0.30, 0.0),
         tau_motor=0.0,
         # Max tilt that holds altitude is arccos(1/2.81) = 1.21 rad; 1.0 leaves margin.
@@ -150,6 +183,7 @@ VEHICLES = {
         w_max=1100.0,
         px4_w_scale=1000.0,
         px4_w_offset=100.0,
+        px4_thr_mdl_fac=0.0,
         drag_coeff=(0.106, 0.064, 0.0),                                   # (est.)
         tau_motor=0.0,
         tilt_limit=1.0,                 # hold-altitude limit 1.176 rad (T/W 2.60)
@@ -185,31 +219,37 @@ VEHICLES = {
     #     4.46 N per rotor, 17.82 N total (T/W 3.17). The control limits below
     #     use this cap, not the ESC limit.
     #   tau_motor = 0.035 s (meas.): measured RPM lags commanded RPM 30-35 ms.
-    #   k_m (est.): yaw maneuvers not flown yet. Iris kappa 0.117 m scaled by
-    #     prop diameter 180 / 254 mm -> kappa = 0.0829 m (STARLING2_DYNAMICS.md
-    #     4.6). Tri-blade props likely have a somewhat higher C_Q/C_T.
-    #   Inertia (est.): Starling 2 values x mass ratio 2.011 x (arm ratio)^2
-    #     per axis (ly for Ixx, lx for Iyy, R for Izz).
-    #   Drag (est.): Starling 2 values x (R ratio)^2 = 2.14 (area).
+    #   k_m (est.): yaw maneuvers not flown yet. Propeller theory, kappa =
+    #     C_P / (2 pi C_T) x D = 0.0716 x 0.180 m = 0.0129 m (range 0.007-0.022),
+    #     STARLING2_DYNAMICS.md 4.6. (Until 2026-11-06 this was the Pegasus Iris
+    #     kappa 0.117 m scaled by prop diameter, 0.0829 m: above that whole range;
+    #     4.6 explains why the Pegasus default is not a propeller value.)
+    #   Inertia (provisional): CAD mass properties of ModalAI's STEP model with a
+    #     573 g whole-assembly override, STARLING2_DYNAMICS.md 6.2. (Until
+    #     2026-11-06: Starling 2 estimates scaled by mass and arm, (2.47, 2.00,
+    #     4.23)e-3.)
+    #   Drag (est.): STARLING2_DYNAMICS.md 7.
+    #   These must equal workspace/spawn_starling.py (control/test_vehicles.py).
     #   Battery: two 2S 18650 packs in series = 4S.
     "starling2max": Vehicle(
         name="starling2max",
         description="ModalAI Starling 2 Max (0.573 kg), hover-identified rotors + estimates",
         mass=0.573,                                                       # (meas.)
-        inertia_diag=(2.47e-3, 2.00e-3, 4.23e-3),                         # (est.)
+        inertia_diag=(3.456e-3, 2.465e-3, 5.469e-3),                      # CAD, provisional
         rotor_xy=((0.095, -0.130), (-0.095, 0.130), (0.095, 0.130), (-0.095, -0.130)),
         rotor_z=0.023,                                                    # (est.)
         rot_dir=(-1.0, -1.0, 1.0, 1.0),                                   # (meas.)
         k_f=4.383e-6,                                                     # (meas.)
-        k_m=3.633e-7,                                                     # (est.)
+        k_m=5.65e-8,                    # (est.) kappa 0.0129 m x k_f
         w_min=209.44,                   # 2,000 RPM, ESC minimum while armed
         w_max=1256.64,                  # 12,000 RPM, ESC limit
         px4_w_scale=1047.20,            # 10,000 RPM per unit of PX4 output
         px4_w_offset=209.44,
-        drag_coeff=(0.227, 0.137, 0.0),                                   # (est.)
+        px4_thr_mdl_fac=0.9,            # (inferred) from MPC_THR_MAX 0.6 = 9,628 RPM
+        drag_coeff=(0.226, 0.136, 0.0),                                   # (est.)
         tau_motor=0.035,                                                  # (meas.)
         tilt_limit=1.0,                 # hold-altitude limit at the PX4 cap: 1.250 rad
-        body_torque_max=(1.15, 0.84, 0.73),   # at 4.46 N per rotor: 1.158 / 0.847 / 0.739
+        body_torque_max=(1.15, 0.84, 0.11),   # at 4.46 N per rotor: 1.158 / 0.847 / 0.115 (kappa 0.0129)
         total_thrust_max=17.8,          # PX4 MPC_THR_MAX 0.6: 4 x 4.46 = 17.82 N
         max_velocity=15.0,              # datasheet cruise 15 m/s (dash 20)
         max_accel=15.0,                 # g tan(1.0) = 15.3 at the tilt limit

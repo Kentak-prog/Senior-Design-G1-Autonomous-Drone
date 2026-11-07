@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(REPO, "Trajectory"))
 
 from gate_path import gates_from_manifest, gate_crossings      # noqa: E402
 
-DEFAULT_GATES = os.path.join(REPO, "Trajectory", "isaac_results", "3_gates", "course", "pod_test_gates.json")
+DEFAULT_GATES = os.path.join(REPO, "Trajectory", "isaac_results", "3_gates", "course", "3_gate_course_pod.json")
 
 
 def load_log(path):

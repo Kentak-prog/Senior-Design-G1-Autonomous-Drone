@@ -5,7 +5,7 @@ recreate steps are in `../PX4_FLIGHT_UPDATE_2026-10-23.md`.
 
 ```
 3_gates/
-  course/        the gate course
+  course/        the gate course (3_gate_course.json)
   python_sim/    the repo's Python simulator (plan + NMPC), no Isaac in the loop
   px4_flights/   real Isaac Sim + PX4 OFFBOARD flights (logs copied from the pod)
   scripts/       plotting and recording tools
@@ -15,8 +15,11 @@ recreate steps are in `../PX4_FLIGHT_UPDATE_2026-10-23.md`.
 
 | File | |
 |---|---|
-| `test_gates.json` | 3 gates + the drone's spawn hover pose, transcribed from Isaac's Script Editor (values rounded) |
-| `pod_test_gates.json` | the same manifest copied straight from `/workspace/test_gates.json` on the pod; includes the camera rotation that `--reposition` uses |
+| `3_gate_course.json` | 3 gates + the drone's spawn hover pose, transcribed from Isaac's Script Editor (values rounded) |
+| `3_gate_course_pod.json` | the same manifest copied straight from `/workspace/test_gates.json` on the pod; includes the camera rotation that `--reposition` uses. This is the spawner's default course |
+| `camera_check_3_gate_course.png` | `Trajectory/check_course_camera.py` on this course (Iris camera): 4.7 s longest gap with no usable gate, 6 bad fixes |
+
+The circle course is a separate course: `../circle_course/`.
 
 ## python_sim/
 

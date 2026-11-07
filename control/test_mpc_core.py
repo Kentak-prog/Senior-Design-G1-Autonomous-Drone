@@ -29,7 +29,7 @@ from px4_attitude_plant import Px4AttitudePlant                             # no
 
 M = drone_constraints["mass"]
 
-# The 3-gate course (Trajectory/isaac_results/3_gates/course/test_gates.json) and its hover pose.
+# The 3-gate course (Trajectory/isaac_results/3_gates/course/3_gate_course.json) and its hover pose.
 GATES_3 = [(5.1644, 0.5666, 3.3667, 7.909), (8.6018, -3.2453, 3.6556, -22.091), (13.0455, -2.0747, 3.7681, -7.091)]
 START = np.array([-0.0469, -0.0367, 2.5484])
 START_YAW = math.radians(-7.24)

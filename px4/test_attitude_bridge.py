@@ -59,9 +59,11 @@ def test_attitude_and_rates_to_ned_frd():
 
 def test_thrust_normalization():
     hover = br.thrust_normalized(M * 9.81)
-    omega = br.OMEGA_PER_U * hover + br.OMEGA_OFFSET
+    f = br.THR_MDL_FAC
+    u = hover if f == 0 else (-(1 - f) + math.sqrt((1 - f) ** 2 + 4 * f * hover)) / (2 * f)  # PX4 mixer
+    omega = br.OMEGA_PER_U * u + br.OMEGA_OFFSET
     assert abs(4 * br.KF * omega ** 2 - M * 9.81) < 1e-6, hover
-    assert abs(hover - br.VEHICLE.hover_motor_output()) < 1e-9 and 0.3 < hover < 0.6, hover
+    assert abs(hover - br.VEHICLE.hover_thrust_setpoint()) < 1e-9 and 0.1 < hover < 0.6, hover
     assert br.thrust_normalized(0.0) == 0.0 and br.thrust_normalized(1e6) == 1.0
     assert abs(br.thrust_normalized(M * 9.81, hover_thrust=0.47) - 0.47) < 1e-12
     print(f"  thrust: hover {M * 9.81:.2f} N -> {hover:.3f} (Pegasus {br.VEHICLE.name} curve), or the given hover throttle  OK")

@@ -784,6 +784,11 @@ Hover power in the logs was about $15.1\ \text{V}\times4.7\ \text{A}=71$ W.
 
 ## 12. Where each parameter goes in the repo
 
+All of these are also the `starling2max` profile in `control/vehicles.py`, which
+`control/drone_constraints.py`, `rl/drone_params.QuadParams` and `px4/attitude_bridge.py`
+read with `DRONE_VEHICLE=starling2max`. `control/test_vehicles.py` checks that the
+spawn, the profile and `px4/starling2max_sitl_params.sh` agree (2026-11-06).
+
 | Parameter | `workspace/spawn_starling.py` | `rl/drone_params.py` | `control/` |
 |---|---|---|---|
 | $m$ | `MASS` (body MassAPI) | `mass` | `drone_constraints.m` |
@@ -792,14 +797,16 @@ Hover power in the logs was about $15.1\ \text{V}\times4.7\ \text{A}=71$ W.
 | $k_f$ | `K_F` → `LaggedQuadraticThrustCurve` | `k_f` | `total_thrust_limits.max` = 17.82 N (cap) |
 | $k_m$ | `K_M` → `LaggedQuadraticThrustCurve` | `k_m` | — |
 | $\tau_m$ | `TAU_MOTOR` | `tau_motor` | — |
-| $\omega_0$, $s$ | `ESC_RPM_MIN/MAX` → PX4 backend `zero_position_armed`, `input_scaling` | `px4_w_offset` = 209.4, `px4_w_scale` = 1047.2 | — |
+| $\omega_0$, $s$ | `ZERO_POSITION_ARMED`, `INPUT_SCALING` → PX4 backend | `px4_w_offset` = 209.44, `px4_w_scale` = 1047.20 | — |
 | $\omega_{max}$ | `W_MAX` | `w_max` = 1256.6 | `motor_rpm_limits.max` = 12000 |
 | $d$ | `DRAG_COEFF` → `LinearDrag` | `drag_coeff` | — |
 | $r_{col}$ | — | `collision_radius` | — |
-| PX4 thrust settings | printed at spawn (`PX4_THRUST_PARAMS`) | (`hover_motor_output()` assumes a linear mapping) | PX4 SITL params |
+| PX4 thrust model, rotor geometry, κ | `PX4_SITL_PARAMS`, printed at spawn for pxh> (= `px4/starling2max_sitl_params.sh`) | `px4_thr_mdl_fac` = 0.9 (profile; `hover_thrust_setpoint()` = 0.139) | `px4/attitude_bridge.thrust_normalized` applies `THR_MDL_FAC` |
 | 4S battery | — | — | `battery_voltage_limits` (11.2–16.4 V) |
 
-Only `spawn_starling.py` uses these numbers so far. `rl/` and `control/` still hold Iris values.
+With `DRONE_VEHICLE=starling2max`, `rl/` and `control/` use these numbers through the profile
+(default: the Iris). The `rl/` thrust maps (`rl/isaac/frames.ThrustMap`, `rl/isaac/calibrate.py`)
+do not apply `THR_MDL_FAC` yet; Tony's `vehicle/starling2max-sim` branch has that change.
 
 ## 13. Open items
 

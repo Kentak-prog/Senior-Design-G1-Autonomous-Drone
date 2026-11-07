@@ -39,7 +39,7 @@ Inside `Trajectory/isaac_results/`:
 |---|---|
 | `truth_perception/`, `synthetic_perception/`, `README.md` | Python-sim min-snap + NMPC on the earlier 5-gate staggered course |
 | `3_gates/README.md` | index of the 3-gate folder |
-| `3_gates/course/` | `test_gates.json`: the 3-gate course + spawn hover pose, as transcribed from Isaac. `pod_test_gates.json`: the same, copied straight from the pod, with the camera rotation |
+| `3_gates/course/` | `3_gate_course.json`: the 3-gate course + spawn hover pose, as transcribed from Isaac. `3_gate_course_pod.json`: the same, copied straight from the pod, with the camera rotation |
 | `3_gates/python_sim/` | min-snap plan in camera orientation (`min_snap_plan.png`), and the repo NMPC flying it in the Python sim (`mpc_course.png`, cached `mpc_log.npz`) |
 | `3_gates/px4_flights/20261023_152804_all_gates_passed/` | **the successful Isaac/PX4 flight**: `flight_log.csv` (every 20 ms: setpoint + measured), `plan_reference.csv`, `summary.json`, `px4_flight.png` |
 | `3_gates/px4_flights/20261023_150758_aborted/`, `20261023_151426_aborted/` | the two aborted attempts (see "What went wrong") |

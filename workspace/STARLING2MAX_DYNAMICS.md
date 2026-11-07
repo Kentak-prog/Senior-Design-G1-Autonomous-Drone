@@ -9,6 +9,17 @@ reuses its derivations where the method is the same.
 
 Unlike the Starling 2, much of this is measured on our own drone.
 
+> **2026-11-06: one set of numbers.** `workspace/spawn_starling.py` (the Isaac
+> spawn of our C29 drone), the `starling2max` profile and
+> `px4/starling2max_sitl_params.sh` now carry the same values, and
+> `control/test_vehicles.py` checks that they agree. Two estimates changed to
+> the better-sourced ones in `STARLING2_DYNAMICS.md`:
+> - **Inertia:** CAD mass properties (§7.2), not Starling 2 values scaled.
+> - **Yaw moment:** κ = 0.0129 m from propeller theory (§4.5), not the
+>   Pegasus Iris value scaled (0.0829 m).
+>
+> Both are still estimates until the sysid flights.
+
 **Confidence labels used below**
 
 - **(meas.)**: identified from our flight logs or weighed (§1, F1). Valid in the range that was flown.
@@ -44,9 +55,9 @@ Unlike the Starling 2, much of this is measured on our own drone.
 | $\omega_{min},\omega_{max}$ | ESC speed range | 209.44, 1256.64 rad/s (2,000, 12,000 RPM) | meas. (F1) |
 | $\omega_{hover}$ | hover rotor speed | 566.2 rad/s (5,407 RPM) | meas. (F1) |
 | $\tau_m$ | motor time constant | 0.035 s | meas. (F1) |
-| $\kappa=k_m/k_f$ | yaw-moment-to-thrust ratio | 0.0829 m | est. |
-| $k_m$ | yaw-moment coefficient | $3.633\times10^{-7}$ N·m/(rad/s)² | est. |
-| $I_{xx},I_{yy},I_{zz}$ | principal inertia | $2.47\times10^{-3}$, $2.00\times10^{-3}$, $4.23\times10^{-3}$ kg·m² | est. |
+| $\kappa=k_m/k_f$ | yaw-moment-to-thrust ratio | 0.0129 m (range 0.007–0.022) | est. |
+| $k_m$ | yaw-moment coefficient | $5.65\times10^{-8}$ N·m/(rad/s)² | est. |
+| $I_{xx},I_{yy},I_{zz}$ | principal inertia | $3.456\times10^{-3}$, $2.465\times10^{-3}$, $5.469\times10^{-3}$ kg·m² | CAD, provisional |
 | $d_x,d_y,d_z$ | linear drag coefficients | 0.227, 0.137, 0 N/(m/s) | est. |
 | `THR_MDL_FAC` | PX4 thrust model factor | 0.9 | inferred (§4.2) |
 | $T_{cap}$ | total thrust at PX4's `MPC_THR_MAX` = 0.6 | 17.82 N | derived |
@@ -138,8 +149,15 @@ mode) predicts $5.62\times0.6/0.139=24.3$ N at $T_{sp}=0.6$; the true value is
 
 $$\omega=\sqrt{\frac{T}{4k_f}},\qquad u=\frac{\omega-209.44}{1047.20},\qquad T_{sp}=f u^2+(1-f)u.$$
 
-`px4/attitude_bridge.py` does not apply the last step yet; it must, before our
-MPC flies the real drone (Phase 5). PX4 battery-voltage compensation
+The profile carries $f$ as `px4_thr_mdl_fac` (0.9; 0 for the Iris), and
+`px4/attitude_bridge.py` applies the whole chain (from Tony's
+`vehicle/starling2max-sim` branch, 2026-11-06; its `rl/` side,
+`rl/isaac/frames.ThrustMap` and `rl/isaac/calibrate.py`, is not ported yet).
+PX4 SITL is set to the same $f$ by `px4/starling2max_sitl_params.sh`, or the
+`param set` lines `spawn_starling.py` prints, so the sim maps thrust as the
+drone does. If the drone's parameter file gives another `THR_MDL_FAC`, change
+the profile, the spawn's `PX4_SITL_PARAMS` and the script together
+(`control/test_vehicles.py` checks they agree). PX4 battery-voltage compensation
 (`MC_BAT_SCALE_EN`) would add a further factor; check whether it is on.
 
 ### 4.3 Thrust per rotor (meas.)
@@ -170,14 +188,20 @@ directly (and a pure delay alongside), so re-run it on the logs (§12).
 
 $$M_{z,i}=d_i\,k_m\,\omega_i^2=d_i\,\kappa\,F_i.$$
 
-No yaw maneuvers were flown, so $k_m$ is not identified. The estimate scales
-the Iris value by prop diameter (`STARLING2_DYNAMICS.md` §4.6):
+No yaw maneuvers were flown, so $k_m$ is not identified. The estimate is
+propeller theory (`STARLING2_DYNAMICS.md` §4.6): $\kappa=Q/T=C_P/(2\pi C_T)\,D$
+with typical static coefficients of small props,
 
-$$\kappa=0.11698\times\frac{0.180}{0.254}=0.0829\ \text{m},\qquad
-k_m=\kappa\,k_f=0.0829\times4.383\times10^{-6}=3.633\times10^{-7}.$$
+$$\kappa=0.0716\times0.180=0.0129\ \text{m}\ (\text{range }0.007\text{–}0.022),\qquad
+k_m=\kappa\,k_f=0.0129\times4.383\times10^{-6}=5.65\times10^{-8}.$$
 
 Tri-blade props probably have a higher $C_Q/C_T$ than this assumes, so $k_m$
 is more likely low than high.
+
+Until 2026-11-06 this section scaled the Pegasus Iris value by prop
+diameter, $0.11698\times0.180/0.254=0.0829$ m. That is above the whole
+propeller range: Pegasus' Iris $k_m/k_f$ is not a propeller value
+(`STARLING2_DYNAMICS.md` §4.6, "Why not the Pegasus default").
 
 **Yaw trim seen in hover (F1).** The CW rotors (2, 3) hover about 38 RPM
 above the mean and the CCW rotors (0, 1) about 38 below. At steady yaw the
@@ -185,7 +209,7 @@ rotors cancel some bias torque (motor or prop misalignment, CW / CCW prop
 differences). With the estimated $k_m$ its size is
 
 $$k_m\cdot2\big[(\omega_h+\delta)^2-(\omega_h-\delta)^2\big]=k_m\cdot8\,\omega_h\delta
-=3.633\times10^{-7}\times8\times566.2\times3.98=0.0065\ \text{N·m},$$
+=5.65\times10^{-8}\times8\times566.2\times3.98=0.0010\ \text{N·m},$$
 
 with $\delta=38$ RPM $=3.98$ rad/s. That is about 1 % of the yaw authority at
 the PX4 cap (§6). `fit_rotational` fits it as the bias term.
@@ -199,7 +223,7 @@ The same form as `STARLING2_DYNAMICS.md` §5 with the Max's arms:
 $$\begin{bmatrix}U_1\\U_2\\U_3\\U_4\end{bmatrix}=
 \begin{bmatrix}1&1&1&1\\-l_y&l_y&l_y&-l_y\\-l_x&l_x&-l_x&l_x\\-\kappa&-\kappa&\kappa&\kappa\end{bmatrix}
 \begin{bmatrix}F_0\\F_1\\F_2\\F_3\end{bmatrix}
-=\begin{bmatrix}1&1&1&1\\-0.130&0.130&0.130&-0.130\\-0.095&0.095&-0.095&0.095\\-0.0829&-0.0829&0.0829&0.0829\end{bmatrix}\mathbf F$$
+=\begin{bmatrix}1&1&1&1\\-0.130&0.130&0.130&-0.130\\-0.095&0.095&-0.095&0.095\\-0.0129&-0.0129&0.0129&0.0129\end{bmatrix}\mathbf F$$
 
 $U_1$ is total thrust, $U_2..U_4$ the body torques (FLU). Inverse:
 $F_i=\tfrac14\big(U_1\pm U_2/l_y\pm U_3/l_x\pm U_4/\kappa\big)$ with the signs of
@@ -228,13 +252,13 @@ sits between the two, as it should.
 
 $$\tau_{x,max}=2l_yF_{max}=1.158\ \text{N·m},\quad
 \tau_{y,max}=2l_xF_{max}=0.847\ \text{N·m},\quad
-\tau_{z,max}=2\kappa F_{max}=0.739\ \text{N·m}.$$
+\tau_{z,max}=2\kappa F_{max}=0.115\ \text{N·m}.$$
 
-The profile uses 1.15 / 0.84 / 0.73 (`body_torque_max`, a little below).
+The profile uses 1.15 / 0.84 / 0.11 (`body_torque_max`, a little below).
 
-$$\dot p_{max}=\frac{1.158}{2.47\times10^{-3}}=469,\quad
-\dot q_{max}=\frac{0.847}{2.00\times10^{-3}}=423,\quad
-\dot r_{max}=\frac{0.739}{4.23\times10^{-3}}=175\ \ \text{rad/s}^2\ \text{(est. inertia)}.$$
+$$\dot p_{max}=\frac{1.158}{3.456\times10^{-3}}=335,\quad
+\dot q_{max}=\frac{0.847}{2.465\times10^{-3}}=344,\quad
+\dot r_{max}=\frac{0.115}{5.469\times10^{-3}}=21\ \ \text{rad/s}^2\ \text{(CAD inertia)}.$$
 
 $$a_{z,max}=\frac{17.82-5.62}{0.573}=21.3\ \text{m/s}^2,\qquad
 \theta_{hold}=\arccos\frac{5.62}{17.82}=1.250\ \text{rad}\ (71.6^\circ),\qquad
@@ -251,9 +275,25 @@ The profile limits tilt to 1.0 rad, horizontal acceleration to 15 m/s²
 
 0.573 kg, weighed flight-ready (F1).
 
-### 7.2 Inertia (est.)
+### 7.2 Inertia (CAD, provisional)
 
-Not yet identified. The estimate scales the Starling 2 estimate
+Not yet identified in flight. The profile and the spawn use the CAD mass
+properties of ModalAI's STEP model with a 573 g whole-assembly override
+(`STARLING2_DYNAMICS.md` §6.2, provisional until part masses are set):
+
+$$I_{xx}=3.456\times10^{-3},\quad I_{yy}=2.465\times10^{-3},\quad
+I_{zz}=5.469\times10^{-3}\ \text{kg·m}^2.$$
+
+Before 2026-11-06 the profile used the scaling below instead. The two
+bracket the truth from opposite sides:
+- The CAD override spreads the mass at uniform density.
+- The scaling assumes the Starling 2's mass distribution.
+- The concentrated 18650 packs probably put the real values below the CAD
+  ones.
+
+Roll / pitch doublets through `fit_rotational` replace both (§12).
+
+The earlier estimate scaled the Starling 2 estimate
 (`STARLING2_DYNAMICS.md` §6.2) by mass and, per axis, by the square of the arm
 that dominates it: $l_y$ for roll, $l_x$ for pitch, $l$ for yaw.
 
@@ -318,18 +358,22 @@ Everything is in the `starling2max` entry of `control/vehicles.py`;
 `control/drone_constraints.py` and `rl/drone_params.QuadParams` read it, so
 there is one place to change.
 
-| Parameter | `control/vehicles.py` field | Phase 3 Pegasus spawn |
+| Parameter | `control/vehicles.py` field | Pegasus spawn (`workspace/spawn_starling.py`) |
 |---|---|---|
-| $m$, $\mathbf I$ | `mass`, `inertia_diag` | body MassAPI |
-| $l_x,l_y$, $d_i$ | `rotor_xy`, `rot_dir` | rotor prims, `rot_dir` |
-| $k_f$, $k_m$ | `k_f`, `k_m` | `QuadraticThrustCurve` |
-| ESC mapping | `px4_w_offset`, `px4_w_scale`, `w_min`, `w_max` | `PX4MavlinkBackend` `input_scaling`, `zero_position_armed` |
-| $\tau_m$ | `tau_motor` | needs a motor-lag model (Pegasus rotors are instantaneous) |
-| $d$ | `drag_coeff` | `LinearDrag` |
+| $m$, $\mathbf I$ | `mass`, `inertia_diag` | `MASS`, `INERTIA_DIAG` → body MassAPI |
+| $l_x,l_y$, $d_i$ | `rotor_xy`, `rot_dir` | `ARM_X`, `ARM_Y`, `ROT_DIR` → rotor prims |
+| $k_f$, $k_m$ | `k_f`, `k_m` | `K_F`, `K_M` → `QuadraticThrustCurve` |
+| ESC mapping | `px4_w_offset`, `px4_w_scale`, `w_min`, `w_max` | `ZERO_POSITION_ARMED`, `INPUT_SCALING`, `W_MAX` → `PX4MavlinkBackend`; thrust-curve `W_MIN` = 0 so the motors stop when disarmed |
+| `THR_MDL_FAC`, rotor geometry, κ for PX4 | `px4_thr_mdl_fac`, `rotor_xy`, `k_m/k_f` | `PX4_SITL_PARAMS` (printed for pxh>) = `px4/starling2max_sitl_params.sh` |
+| $\tau_m$ | `tau_motor` | `TAU_MOTOR` → `LaggedQuadraticThrustCurve` (Pegasus rotors are otherwise instantaneous) |
+| $d$ | `drag_coeff` | `DRAG_COEFF` → `LinearDrag` |
 | PX4 cap | `total_thrust_max`, `body_torque_max` | PX4 params (`MPC_THR_MAX`) |
 
-`control/test_vehicles.py test_starling2max_matches_hover_flights` checks the
-F1 numbers against the profile.
+`control/test_vehicles.py`:
+- `test_starling2max_matches_hover_flights` checks the F1 numbers against the
+  profile;
+- `test_starling2max_matches_spawn_script` checks the profile, the spawn and
+  the SITL script against each other.
 
 ---
 
@@ -339,7 +383,7 @@ F1 numbers against the profile.
 |---|---|---|
 | F1 logs and analysis script into the repo | copy the two `.ulg` (or CSV extracts) and the script; re-run `python3 px4/sysid.py LOG1.ulg LOG2.ulg --vehicle starling2max` and compare with §2 | to do |
 | `THR_MDL_FAC`, `MPC_THR_HOVER`, `MPC_THR_MAX`, `MC_BAT_SCALE_EN`, rate gains, ESC RPM range | save the drone's full parameter set (QGroundControl, or `param save` in the PX4 shell) and commit it | to do |
-| Camera and IMU extrinsics | the extrinsics file on the drone (ModalAI: *Configure Extrinsics*, normally `/etc/modalai/extrinsics.conf`) | to do |
+| Camera and IMU extrinsics | the drone's `/etc/modalai/extrinsics.conf`, copied to `workspace/starling2max_c29_extrinsics.conf` | **done 2026-11-06**: hires_front is level, at (0.0711, −0.0003, −0.0070) m body FLU, in `spawn_starling.py` |
 | Hires camera calibration (IMX412) | the drone's stored intrinsics (normally under `/data/modalai/`), or calibrate with `voxl-camera-calibration` | to do |
 | $k_m$ (yaw) | yaw-rate steps (`px4/STARLING2MAX_SYSID_FLIGHTS.md` card 2) → `fit_rotational` gives $k_m/I_{zz}$; $I_{zz}$ from CAD | to fly |
 | $I_{xx}$, $I_{yy}$ | roll / pitch doublets (card 1) → `fit_rotational` | to fly |

@@ -61,7 +61,7 @@ from vio import GateVIO, rot_rpy, FRD_FROM_FLU, camera_mount_usd                
 from ros_camera import T_world_cam_from_transform                                 # noqa: E402
 
 G = 9.81
-DEFAULT_MANIFEST = os.path.join(HERE, "isaac_results", "3_gates", "course", "pod_test_gates.json")
+DEFAULT_MANIFEST = os.path.join(HERE, "isaac_results", "3_gates", "course", "3_gate_course_pod.json")
 GYRO_ND, ACCEL_ND = 0.0003393695767766752, 0.004       # Pegasus imu.py defaults (per sqrt(Hz))
 GYRO_TURN_ON_SIGMA = 0.008726646259971648              # rad/s (0.5 deg/s)
 
@@ -78,10 +78,11 @@ def spawn_pose(manifest_path):
 
 
 class SimCamera:
-    def __init__(self, gates, corner_noise_px, range_bias, max_range, rng, mount_usd):
+    def __init__(self, gates, corner_noise_px, range_bias, max_range, rng, mount_usd,
+                 resolution=CAMERA_RESOLUTION, hfov_deg=CAMERA_HFOV_DEG):
         self.gates = gates
         self.mount = mount_usd
-        self.intr = CameraIntrinsics.from_horizontal_fov(*CAMERA_RESOLUTION, CAMERA_HFOV_DEG)
+        self.intr = CameraIntrinsics.from_horizontal_fov(*resolution, hfov_deg)
         self.noise, self.bias, self.max_range, self.rng = corner_noise_px, range_bias, max_range, rng
 
     def detect(self, x_true):
@@ -120,11 +121,13 @@ def run(args):
     core = MpcCore(N=10, dt=1.0 / args.mpc_rate, m=m, attitude_lead_s=args.attitude_lead_s)
     px4 = Px4AttitudePlant(m, tau=args.attitude_tau)
     x_cmd = None
-    mount = camera_mount_usd(args.camera_pitch_deg)
+    mount = camera_mount_usd(args.camera_pitch_deg, tuple(float(v) for v in args.camera_pos.split(",")))
     vio = GateVIO(gates, mount, imu_rate=args.imu_rate,
                   initial_guess=(start + rng.normal(0, args.guess_error, 3), start_yaw),
                   delay_compensation=not args.no_delay_compensation)
-    camera = SimCamera(gates, args.corner_noise_px, args.range_bias, args.max_range, rng, mount)
+    camera = SimCamera(gates, args.corner_noise_px, args.range_bias, args.max_range, rng, mount,
+                       resolution=tuple(int(v) for v in args.camera_resolution.lower().split("x")),
+                       hfov_deg=args.camera_hfov)
 
     gyro_bias = rng.normal(0.0, GYRO_TURN_ON_SIGMA, 3)                  # FRD, constant
     sg, sa = GYRO_ND / math.sqrt(imu_dt), ACCEL_ND / math.sqrt(imu_dt)
@@ -280,6 +283,9 @@ def main():
     ap.add_argument("--hover-s", type=float, default=3.0)
     ap.add_argument("--camera-pitch-deg", type=float, default=15.0,
                     help="front camera up-tilt (spawn_example.py today: 15)")
+    ap.add_argument("--camera-resolution", default=f"{CAMERA_RESOLUTION[0]}x{CAMERA_RESOLUTION[1]}")
+    ap.add_argument("--camera-hfov", type=float, default=CAMERA_HFOV_DEG, help="horizontal FOV, deg")
+    ap.add_argument("--camera-pos", default="0.30,0.0,0.05", help="camera in body FLU, m (Iris; spawn_starling CAMERA_POS)")
     ap.add_argument("--yaw-mode", choices=["velocity", "next_gate"], default="next_gate",
                     help="nose along the velocity, or at the next gate (keeps gates in view)")
     ap.add_argument("--v-max", type=float, default=None, help="default: 80%% of the drone's max (9.6 m/s)")

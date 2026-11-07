@@ -1,6 +1,6 @@
 """
 Spawn a ModalAI Starling 2 Max (C29) in Isaac Sim (Pegasus) with the same
-PX4 / ROS 2 / camera setup as spawn_example.py.
+PX4 / ROS 2 setup as spawn_example.py, and the C29 front camera (see Camera below).
 
 Pegasus ships no Starling model, so this loads the Iris USD and re-dimensions
 it before the first physics step:
@@ -11,15 +11,21 @@ it before the first physics step:
     linear drag passed to Pegasus through MultirotorConfig,
   - PX4 output -> rotor speed mapped to the drone's real ESC range
     (VOXL_ESC_RPM_MIN/MAX = 2000/12000 RPM),
-  - front camera moved to the Starling's nose.
+  - front camera: the C29 front IMX412 (FOV from its datasheet) at its
+    mount from the drone's extrinsics.conf (level, on the nose).
 Every number, with its derivation and source, is in STARLING2_DYNAMICS.md.
 Mass is the measured 573 g; k_f and the motor lag are measured from hover logs.
 PROVISIONAL: inertia is the CAD value (whole-assembly override, uniform density)
 until part masses are set in CAD; k_m is estimated (no yaw test yet).
 
-For PX4 SITL to command thrust like the real drone, set the drone's thrust
-parameters in the SITL shell (printed at the end of the spawn):
-THR_MDL_FAC 0.9, MPC_THR_HOVER 0.14, MPC_THR_MAX 0.6, MPC_THR_MIN 0.04.
+The values must equal the starling2max entry of control/vehicles.py, which the
+controllers and bridges use with DRONE_VEHICLE=starling2max
+(control/test_vehicles.py checks).
+
+PX4 SITL must get the drone's thrust model and rotor geometry (PX4_SITL_PARAMS
+below, printed at the end of the spawn as `param set` lines for pxh>; the same
+set is px4/starling2max_sitl_params.sh). Without them SITL keeps the Iris
+airframe's rotor geometry and a linear thrust model.
 
 If a converted Starling USD exists (e.g. from ModalAI's STEP file), set
 STARLING_USD to it. The rotor / mass overrides still run, so the USD only has
@@ -53,15 +59,54 @@ CAMERA_NAME = "front_cam"
 # None -> re-dimensioned Iris USD; otherwise a path to a Starling USD.
 STARLING_USD = None
 
-# Camera: identical to spawn_example.py. KEEP RESOLUTION IN SYNC with
-# spawn_test_gates.RESOLUTION.
-RESOLUTION = (1280, 720)
-HFOV_DEG   = 60.0
-# Camera mount in body FLU (m) and up-pitch (deg). (est.) -- the Iris used
-# (0.30, 0, 0.05). Replace with the front IMX412 entry of the drone's
-# extrinsics file.
-CAMERA_POS       = (0.07, 0.0, 0.0)
-CAMERA_PITCH_DEG = 15.0
+# Camera: the C29 front hires camera, ModalAI M0161 (IMX412, 4056x3040 active,
+# 1.55 um square pixels = 6.29 x 4.71 mm, 2.7 mm lens; https://docs.modalai.com/M0161/,
+# Sony IMX412-AACK flyer p. 2).
+# Its FOV row reads "DxHxV 120.4 x 93.5 x 146", which is impossible as labeled;
+# as H x V x D it sits between a pinhole (98.7 x 82.2 x 111) and an equidistant
+# fisheye (133 x 100 x 167) of that lens, i.e. barrel distortion. Isaac renders
+# an ideal pinhole, so this is the UNDISTORTED image with the lens's central
+# focal length: fx = 2.7 mm / 1.55 um = 1742 px at full width = 439.8 px at
+# 1024 wide, HFOV 2*atan(512/439.8) = 98.7 deg (VFOV 82.3 deg at 4:3).
+# 1024x768 (the sensor's 4:3 full-resolution mode) is ASSUMED: the mode in the
+# drone's voxl-camera-server.conf is not checked yet. The sensor's 16:9 modes
+# CROP rows (4K2K 4056x2288, 1080p binned from 4056x2224), so they keep the
+# 98.7 deg HFOV and see only ~66 deg vertically: for those set
+# CAMERA_RESOLUTION="1024x578" (Isaac derives the vertical FOV from the aspect).
+# An extra horizontal resolution only adds pixels; the FOV does not depend on it.
+# The Iris (spawn_example.py) is 1280x720 / 60 deg. spawn_test_gates' camera-
+# relative layout assumes that; spawn courses from a manifest
+# (spawn_gates_from_manifest.py) with this camera.
+RESOLUTION = (1024, 768)
+HFOV_DEG   = 98.7
+# Camera mount in body FLU (m) and up-pitch (deg): the drone's own
+# /etc/modalai/extrinsics.conf (copy: starling2max_c29_extrinsics.conf),
+# hires_front (the front IMX412) chained through imu_apps:
+#   body->imu_apps   T (0.0303, -0.0057, -0.0116), RPY (0, 0, 0)
+#   imu_apps->hires_front T (0.0408, 0.006, 0.0186), RPY (0, 90, 90)
+# ModalAI frames are FRD, so the camera is at (0.0711, 0.0003, 0.0070) FRD =
+# (0.0711, -0.0003, -0.0070) FLU, and RPY (0, 90, 90) points the lens straight
+# along body +X with image-right = body right: a LEVEL camera (pitch 0).
+CAMERA_POS       = (0.0711, -0.0003, -0.0070)
+CAMERA_PITCH_DEG = 0.0
+
+# Overrides, set BEFORE exec'ing this file (os.environ, not Script Editor
+# variables -- see spawn_test_gates.main's note), e.g. the C29 front camera:
+#   import os; os.environ.update(CAMERA_RESOLUTION="1280x720", CAMERA_HFOV_DEG="60")   # the Iris camera
+# Isaac renders an ideal pinhole with square pixels and a centered principal
+# point, so only the horizontal FOV is set; take it from the calibration as
+# 2*atan(width / (2*fx)).
+import os as _os
+if "CAMERA_RESOLUTION" in _os.environ:
+    RESOLUTION = tuple(int(v) for v in _os.environ.pop("CAMERA_RESOLUTION").lower().split("x"))
+if "CAMERA_HFOV_DEG" in _os.environ:
+    HFOV_DEG = float(_os.environ.pop("CAMERA_HFOV_DEG"))
+if "CAMERA_POS" in _os.environ:
+    CAMERA_POS = tuple(float(v) for v in _os.environ.pop("CAMERA_POS").split(","))
+if "CAMERA_PITCH_DEG" in _os.environ:
+    CAMERA_PITCH_DEG = float(_os.environ.pop("CAMERA_PITCH_DEG"))
+print(f"[starling] camera {RESOLUTION[0]}x{RESOLUTION[1]}, hFOV {HFOV_DEG} deg, "
+      f"at {CAMERA_POS} m (body FLU), pitch {CAMERA_PITCH_DEG} deg up")
 
 # ---- Starling 2 Max parameters (STARLING2_DYNAMICS.md, section 2) ----
 MASS         = 0.573                        # kg, measured with both batteries (C29)
@@ -75,38 +120,65 @@ ROT_DIR      = [-1, -1, 1, 1]
 K_F          = 4.383e-6                     # N/(rad/s)^2, measured: hover logs 2026-11-03, 5,407 RPM
 K_M          = 5.65e-8                      # N m/(rad/s)^2, (est.) torque/thrust 0.0129 m x K_F
 TAU_MOTOR    = 0.035                        # s, first-order rotor lag, measured (30-40 ms)
-RPM_TO_RAD   = 2.0 * math.pi / 60.0
-ESC_RPM_MIN  = 2000.0                       # VOXL_ESC_RPM_MIN: rotor speed at PX4 output 0 (armed)
-ESC_RPM_MAX  = 12000.0                      # VOXL_ESC_RPM_MAX: rotor speed at PX4 output 1
-W_MIN        = 0.0                          # rad/s (0 when disarmed)
-W_MAX        = ESC_RPM_MAX * RPM_TO_RAD     # 1256.6 rad/s
+# VOXL ESC: RPM = 2000 + 10000 u while armed (VOXL_ESC_RPM_MIN/MAX, measured).
+# Pegasus' PX4 backend computes w = INPUT_SCALING * (u + 0) + ZERO_POSITION_ARMED.
+INPUT_SCALING       = 1047.20               # rad/s per unit PX4 output (10,000 RPM)
+ZERO_POSITION_ARMED = 209.44                # rad/s, 2,000 RPM idle when armed
+# Clip range of the thrust curve. W_MIN is 0, not the ESC's 209.44: Pegasus
+# sends 0 when disarmed and the motors must then stop; armed, the backend never
+# commands less than ZERO_POSITION_ARMED anyway.
+W_MIN        = 0.0                          # rad/s
+W_MAX        = 1256.64                      # rad/s = 12,000 RPM (ESC max)
 DRAG_COEFF   = [0.226, 0.136, 0.0]          # N/(m/s), body FLU, (est.)
 
-# PX4 thrust settings from the drone, for the SITL shell (see module docstring).
-PX4_THRUST_PARAMS = {"THR_MDL_FAC": 0.9, "MPC_THR_HOVER": 0.14, "MPC_THR_MAX": 0.6, "MPC_THR_MIN": 0.04}
+# PX4 SITL parameters (the same set is px4/starling2max_sitl_params.sh;
+# control/test_vehicles.py checks both against the profile). Thrust model from
+# the drone (THR_MDL_FAC inferred from MPC_THR_MAX 0.6 = 9,628 RPM,
+# STARLING2MAX_DYNAMICS.md 4.2). Control allocation in FRD (x forward, y right),
+# PX4 motor order 0 front-right, 1 back-left, 2 front-left, 3 back-right;
+# KM = +-kappa = K_M / K_F (> 0 = CCW). The drone's own CA_ROTORn_PX/PY are
+# +-0.085 / +-0.0625 m (STARLING2_DYNAMICS.md item 4a); SITL uses the measured
+# airframe, which is what Pegasus flies. The drone's CA_ROTORn_KM is +-0.05
+# (PX4's default allocation ratio, logged, STARLING2_DYNAMICS.md S7c); SITL uses
+# the model's kappa so PX4 allocates yaw for the physics Pegasus simulates.
+PX4_SITL_PARAMS = {
+    "THR_MDL_FAC": 0.9, "MPC_THR_HOVER": 0.14, "MPC_THR_MAX": 0.6, "MPC_THR_MIN": 0.04,
+    "MPC_USE_HTE": 1,
+    "CA_ROTOR_COUNT": 4,
+    "CA_ROTOR0_PX": 0.095, "CA_ROTOR0_PY": 0.13, "CA_ROTOR0_KM": 0.0129,
+    "CA_ROTOR1_PX": -0.095, "CA_ROTOR1_PY": -0.13, "CA_ROTOR1_KM": 0.0129,
+    "CA_ROTOR2_PX": 0.095, "CA_ROTOR2_PY": -0.13, "CA_ROTOR2_KM": -0.0129,
+    "CA_ROTOR3_PX": -0.095, "CA_ROTOR3_PY": 0.13, "CA_ROTOR3_KM": -0.0129,
+    "COM_LOW_BAT_ACT": 0, "MC_AIRMODE": 1,   # sim only: no battery model; attitude authority at low thrust
+}
 
 
 class LaggedQuadraticThrustCurve(QuadraticThrustCurve):
-    """QuadraticThrustCurve whose rotor speeds follow the commanded speeds with a
-    first-order lag, w_dot = (w_ref - w) / tau (exact discretization per update).
-    Pegasus' rotors are otherwise instantaneous."""
+    """
+    QuadraticThrustCurve whose rotor speeds follow the commanded speed through
+    a first-order lag, dw/dt = (w_ref - w) / TAU_MOTOR (exact discretization
+    for the physics step dt). Thrust and yaw moment then come from the lagged
+    speed through the parent's update. With tau = 0 it is the parent.
+    (As in spawn_starling2max.py on the vehicle/starling2max-sim branch.)
+    """
 
     def __init__(self, config={}, tau=TAU_MOTOR):
         super().__init__(config=config)
-        self._tau = tau
-        self._w_ref = None
-        self._w_lag = None
+        self._tau = float(tau)
+        n = config.get("num_rotors", 4)
+        self._lag_ref = [0.0] * n
+        self._lag_w = [0.0] * n
 
     def set_input_reference(self, input_reference):
-        self._w_ref = [float(w) for w in input_reference]
+        self._lag_ref = [float(w) for w in input_reference]
 
     def update(self, state, dt):
-        if self._w_ref is not None:
-            if self._w_lag is None:
-                self._w_lag = list(self._w_ref)
-            a = 1.0 - math.exp(-dt / self._tau) if dt > 0 else 1.0
-            self._w_lag = [w + a * (r - w) for w, r in zip(self._w_lag, self._w_ref)]
-            super().set_input_reference(self._w_lag)
+        if self._tau > 0.0 and dt > 0.0:
+            a = 1.0 - math.exp(-dt / self._tau)
+            self._lag_w = [w + a * (r - w) for w, r in zip(self._lag_w, self._lag_ref)]
+        else:
+            self._lag_w = list(self._lag_ref)
+        super().set_input_reference(self._lag_w)
         return super().update(state, dt)
 
 
@@ -286,10 +358,10 @@ async def main():
         "connection_baseport": 4560,
         "enable_lockstep":     False,         # Must be False for manual PX4 launch
         # PX4 output u in [0, 1] -> rotor speed, like the VOXL ESC:
-        # w = (u + offset) * scaling + zero_position_armed = 209.4 + 1047.2 u rad/s
+        # w = (u + offset) * scaling + zero_position_armed = 209.44 + 1047.20 u rad/s
         "input_offset":        [0.0] * 4,
-        "input_scaling":       [(ESC_RPM_MAX - ESC_RPM_MIN) * RPM_TO_RAD] * 4,
-        "zero_position_armed": [ESC_RPM_MIN * RPM_TO_RAD] * 4,
+        "input_scaling":       [INPUT_SCALING] * 4,
+        "zero_position_armed": [ZERO_POSITION_ARMED] * 4,
     })
 
     config = MultirotorConfig()
@@ -301,7 +373,7 @@ async def main():
         "rot_dir":                    ROT_DIR,
         "min_rotor_velocity":         [W_MIN] * 4,
         "max_rotor_velocity":         [W_MAX] * 4,
-    })
+    }, tau=TAU_MOTOR)
     config.drag = LinearDrag(DRAG_COEFF)
     config.backends = [
         PX4MavlinkBackend(px4_config),
@@ -349,15 +421,15 @@ async def main():
         await refresh_camera_info_helper()
 
     hover_w = math.sqrt(MASS * 9.81 / (4.0 * K_F))
-    w0 = ESC_RPM_MIN * RPM_TO_RAD
-    x_h = (hover_w - w0) / (W_MAX - w0)           # PX4 motor output at hover
-    f = PX4_THRUST_PARAMS["THR_MDL_FAC"]
-    u_h = f * x_h ** 2 + (1.0 - f) * x_h          # PX4 normalized hover thrust
+    x_h = (hover_w - ZERO_POSITION_ARMED) / INPUT_SCALING   # PX4 motor output at hover
+    f = PX4_SITL_PARAMS["THR_MDL_FAC"]
+    u_h = f * x_h ** 2 + (1.0 - f) * x_h                    # PX4 normalized hover thrust
     print(f"[init] Starling 2 Max: {MASS} kg, max thrust {4 * K_F * W_MAX ** 2:.2f} N "
-          f"(T/W {4 * K_F * W_MAX ** 2 / (MASS * 9.81):.2f} at {ESC_RPM_MAX:.0f} RPM), "
-          f"hover {hover_w / RPM_TO_RAD:.0f} RPM = motor output {x_h:.3f} = hover thrust {u_h:.3f}")
-    print("[init] In the PX4 SITL shell, set: "
-          + "; ".join(f"param set {k} {v}" for k, v in PX4_THRUST_PARAMS.items()))
+          f"(T/W {4 * K_F * W_MAX ** 2 / (MASS * 9.81):.2f} at 12000 RPM), "
+          f"hover {hover_w * 60 / (2 * math.pi):.0f} RPM = motor output {x_h:.3f} = hover thrust {u_h:.3f}")
+    print("[init] Before takeoff, paste into pxh> (or run px4/starling2max_sitl_params.sh):")
+    for k, v in PX4_SITL_PARAMS.items():
+        print(f"param set {k} {v}")
     print("[init] Done — start PX4 SITL now")
 
 asyncio.ensure_future(main())

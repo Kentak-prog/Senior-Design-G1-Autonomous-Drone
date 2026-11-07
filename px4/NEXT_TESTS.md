@@ -11,8 +11,9 @@ scoring. The test plan is `px4/VIO_MPC_TEST_PLAN.md`.
 | 0–2. Pod prep, Isaac + PX4, dry run | done. A pod restart wipes the Stage 0 installs: redo them |
 | 3. Hover hold, ground truth | **pass** (within 0.19 m, altitude ± 0.01 m) |
 | 4. Course, ground truth, 2/2 | **pass**: all gates, margins 0.47–0.71 m, tracking 0.12 m mean |
-| 4R. Closed lap with in-flight replanning | node ready (`ros2_nodes/replan_node.py`); flown only with the VIO in charge, below |
+| 4R. One closed lap (gate_0 → gate_1 → gate_2 → gate_0) with in-flight replanning | node ready (`ros2_nodes/replan_node.py`, defaults `laps 1`, `close_loop true`); flown only with the VIO in charge, below |
 | **7. Closed lap, VIO in charge, 2/2** | **4 attempts, 4 watchdog aborts.** Best: attempt 3, through gate_1, 13.5 s |
+| **Next: the Starling 2 Max (C29 camera) on the circle course: 3, 4R, 6, 7** | ready, not flown. `px4/VIO_MPC_TEST_PLAN.md`, "The Starling 2 Max (C29)": longest gap with no fix 1.2 s, VIO rehearsal max 0.21–0.40 m. With the Iris: ready, not flown. `px4/VIO_MPC_TEST_PLAN.md`, "The circle course": a gate in view except the last ~2 s before each gate, 0 biased fixes, VIO rehearsal max 0.16–0.33 m |
 
 **The flight stack works.** The bridge, the MPC (on VIO state only), the
 planner (plan starts at engage), PX4 and the watchdog all behaved. **What
@@ -96,7 +97,8 @@ VIO max 0.76–0.98 m). But it lacks Isaac's other effects:
 - **Done when:** the rehearsal's VIO error and velocity error match the bag
   within a factor of 1.5, so VIO changes can be judged offline first.
 
-**Related, not VIO (planner / team):** a path that keeps a gate whole in
+**Related, not VIO (planner / team):** the circle course (`Trajectory/make_circle_course.py`,
+checked with `Trajectory/check_course_camera.py`) does this by layout; fly it next. Otherwise, a path that keeps a gate whole in
 frame through the turn. For example, an aligned approach of 3 m or more to
 each gate, or a planner check that flags stretches over 1 s with no usable
 gate (`Trajectory/gate_path.py`). Faster speeds (3/3, 4/4) are pointless
@@ -152,9 +154,16 @@ gap is in every run.**
 - [ ] **Attitude lead 0.1 s** fixed the hold. Measure PX4's real attitude lag
   with a pitch step test and set `attitude_lead_s` and the rehearsal's
   `--attitude-tau` from it.
-- [ ] **`min_snap.fit_to_limits` can fail to converge from a moving start**
-  (2-lap window extension: a 228 s plan). The replanner now rejects such
-  plans, but the root cause is still there.
+- [x] **`min_snap.fit_to_limits` failing to converge from a moving start**
+  (a 228 s plan; on 2026-11-06 a 7×10¹² s plan and a MemoryError). It now
+  stretches at most 4× per pass and gives up at 20× (`ValueError`, so the
+  replanner keeps the current plan). Test:
+  `Trajectory/test_min_snap_planner.py`. Why the fit diverges from some
+  moving starts is still open.
+- [x] **Gate map duplicated a prior gate more than 1 m off** (Stage 4R
+  prior seeds). It now also matches within the gate's 99.7 % uncertainty
+  (`Trajectory/gate_map.py`, `gate_chi2`). Test:
+  `Trajectory/test_replan_session.py`.
 - [ ] **Minor:** start the bridge's spin thread inside the `try`.
 
 ## 3. Running a flight (what worked on 2026-11-06)
@@ -182,7 +191,15 @@ gap is in every run.**
 
 - [ ] Commit the figures and `vio_summary.txt` of runs 3 and 4. Leave the
   CSVs out (several MB each).
-- [ ] Reconcile the two Starling 2 Max spawns: `workspace/spawn_starling.py`
-  now holds the Max (and `control/test_vehicles.py` fails on `main`),
-  while Tony's `vehicle/starling2max-sim` branch adds
-  `spawn_starling2max.py`.
+- [x] Reconcile the Starling 2 Max spawn and dynamics (2026-11-06).
+  `workspace/spawn_starling.py` (C29 camera) is the spawn. The
+  `starling2max` profile and `px4/starling2max_sitl_params.sh` match it,
+  and `control/test_vehicles.py` checks all three (it passes again).
+  - From Tony's `vehicle/starling2max-sim`, ported: the `THR_MDL_FAC`
+    thrust chain (`control/vehicles.py`, `px4/attitude_bridge.py`), the
+    SITL parameter script, the motor-lag class and tests.
+  - Not ported: his `rl/` thrust maps and `spawn_starling2max.py` (a
+    duplicate spawn, older camera).
+  - Inertia and κ follow `STARLING2_DYNAMICS.md` (CAD; propeller theory,
+    0.0129 m) instead of his scaled estimates.
+  - Tony: merge or close that branch with this in mind.

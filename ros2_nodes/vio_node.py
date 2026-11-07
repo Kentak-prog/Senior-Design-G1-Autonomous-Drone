@@ -80,6 +80,7 @@ def main():
             dp("camera_info_topic", "/iris_0/front_cam/camera_info")
             dp("odom_topic", "/vio/odometry")
             dp("camera_pitch_deg", 15.0)          # MUST match the camera spawn_example.py set up
+            dp("camera_pos", [0.30, 0.0, 0.05])   # camera in body FLU, m: Iris; spawn_starling CAMERA_POS for the Starling
             dp("manifest_camera_pitch_deg", 15.0)  # the mount when the manifest was recorded (2026-10-23: 15)
             dp("imu_rate", 250.0)
             dp("calib_s", 2.0)
@@ -97,7 +98,8 @@ def main():
                 manifest = json.load(f)
             gates = gates_from_manifest(gp("gates_file"))
             hint = spawn_hint(manifest, float(gp("manifest_camera_pitch_deg")))
-            self.mount = camera_mount_usd(float(gp("camera_pitch_deg")))
+            self.mount = camera_mount_usd(float(gp("camera_pitch_deg")),
+                                          tuple(float(v) for v in gp("camera_pos")))
             self.vio = GateVIO(gates, self.mount, imu_rate=float(gp("imu_rate")), calib_s=float(gp("calib_s")),
                                max_range=float(gp("max_range")), initial_guess=hint,
                                delay_compensation=bool(gp("delay_compensation")))

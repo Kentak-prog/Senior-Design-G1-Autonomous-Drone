@@ -22,10 +22,12 @@ is converted as R_ned_frd = A R_enu_flu B (A swaps x/y and flips z, B flips
 body y and z); body rates (p, q, r) FLU -> (p, -q, -r) FRD.
 
 THRUST: SET_ATTITUDE_TARGET takes a normalized thrust 0..1. Default: invert
-Pegasus' PX4 mapping for the active vehicle profile (control/vehicles.py,
-$DRONE_VEHICLE), per rotor omega = 1000 u + 100 rad/s and F = k_f omega^2
-(workspace/STARLING2_DYNAMICS.md, source S9) -- the Iris (1.5 kg) hovers at
-about u = 0.556. A measured hover throttle (PX4's MPC_THR_HOVER / hover thrust
+the active vehicle profile's chain (control/vehicles.py, $DRONE_VEHICLE):
+F = k_f omega^2 per rotor, omega = px4_w_scale u + px4_w_offset of the motor
+output u (Pegasus: 1000 u + 100; VOXL ESC: 1047.2 u + 209.4), and PX4's
+thrust model t = f u^2 + (1 - f) u with f = THR_MDL_FAC (profile
+px4_thr_mdl_fac; 0 for the Iris). The Iris (1.5 kg) hovers at about 0.556,
+the Starling 2 Max at about 0.139 (STARLING2MAX_DYNAMICS.md 4.2). A measured hover throttle (PX4's MPC_THR_HOVER / hover thrust
 estimate) can be given instead and scales linearly; on real hardware, give it.
 """
 
@@ -64,6 +66,7 @@ B_FLU_FROM_FRD = np.diag([1.0, -1.0, -1.0])
 KF = VEHICLE.k_f
 OMEGA_PER_U = VEHICLE.px4_w_scale
 OMEGA_OFFSET = VEHICLE.px4_w_offset
+THR_MDL_FAC = VEHICLE.px4_thr_mdl_fac
 N_ROTORS = 4
 
 # SET_ATTITUDE_TARGET type_mask: 0 = use attitude, body rates and thrust
@@ -115,7 +118,8 @@ def tilt_deg(q_xyzw):
 def thrust_normalized(thrust_n, hover_thrust=None, mass=drone_constraints["mass"]):
     """
     Total thrust (N) -> PX4 normalized thrust 0..1.
-    hover_thrust None: invert Pegasus' mapping for the vehicle (per rotor omega = 1000 u + 100, F = kf omega^2).
+    hover_thrust None: invert the vehicle's chain (F = kf omega^2, omega = OMEGA_PER_U u + OMEGA_OFFSET,
+                       then PX4's thrust model with THR_MDL_FAC).
     hover_thrust U:    linear, U at m*g (PX4's own hover-throttle model).
     """
     thrust_n = max(0.0, float(thrust_n))
@@ -123,7 +127,8 @@ def thrust_normalized(thrust_n, hover_thrust=None, mass=drone_constraints["mass"
         u = float(hover_thrust) * thrust_n / (mass * G)
     else:
         omega = math.sqrt(thrust_n / (N_ROTORS * KF))
-        u = (omega - OMEGA_OFFSET) / OMEGA_PER_U
+        u = min(1.0, max(0.0, (omega - OMEGA_OFFSET) / OMEGA_PER_U))
+        u = THR_MDL_FAC * u * u + (1.0 - THR_MDL_FAC) * u
     return float(min(1.0, max(0.0, u)))
 
 

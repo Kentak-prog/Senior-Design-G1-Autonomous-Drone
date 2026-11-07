@@ -22,7 +22,7 @@ import shutil
 
 _REPO = "/workspace/Senior-Design-G1-Autonomous-Drone"
 _manifest = os.environ.pop(
-    "GATES_MANIFEST", f"{_REPO}/Trajectory/isaac_results/3_gates/course/pod_test_gates.json")
+    "GATES_MANIFEST", f"{_REPO}/Trajectory/isaac_results/3_gates/course/3_gate_course_pod.json")
 
 _sg = {"__name__": "spawn_test_gates_lib"}   # import without running its main()
 exec(open(f"{_REPO}/workspace/spawn_test_gates.py").read(), _sg)

@@ -259,10 +259,20 @@ def fit_to_limits(points, fixed_dir=None, v_max: float = 4.0, a_max: float = 6.0
     T = (np.asarray(segment_times, dtype=float).copy() if segment_times is not None
          else initial_segment_times(points, v_cruise=v_cruise_frac * v_max))
     moving = start_state is not None and any(np.any(np.asarray(v) != 0) for v in start_state.values())
+    # From a moving start the stretch need not converge: the start velocity does not shrink with
+    # the times, so multiplying by the full ratio every pass grew the times geometrically. On
+    # 2026-11-06 (replanning onto a phantom gate) it ran for 10 minutes and reached a 7e12 s plan,
+    # whose 5 ms sampling asked for 10 PiB. So: at most MAX_STEP per pass, a bounded number of
+    # samples, and give up (ValueError, which the replanner treats as "keep the current plan")
+    # once the times are MAX_STRETCH x the starting split.
+    MAX_STEP, MAX_STRETCH, MAX_SAMPLES = 4.0, 20.0, 20000
+    T_start = float(np.sum(T))
     best, best_key = None, None
     for _ in range(10 if moving else 5):
+        if not np.all(np.isfinite(T)) or np.sum(T) > MAX_STRETCH * T_start:
+            break
         traj = MinSnapTrajectory(points, T, fixed_dir, start_state)
-        _, _, vel, acc, _, _ = traj.sample(0.005)
+        _, _, vel, acc, _, _ = traj.sample(max(0.005, traj.duration / MAX_SAMPLES))
         ratio = max(np.max(np.linalg.norm(vel, axis=1)) / v_max,
                     np.sqrt(np.max(np.linalg.norm(acc, axis=1)) / a_max))
         # Prefer within-limits (ratio <= 1), then closest to the limit (fastest)
@@ -271,5 +281,9 @@ def fit_to_limits(points, fixed_dir=None, v_max: float = 4.0, a_max: float = 6.0
             best, best_key = traj, key
         if abs(ratio - 1.0) < (1e-3 if not moving else 0.02):
             break
-        T = T * ratio
+        T = T * min(ratio, MAX_STEP)
+    if best is None or (moving and best_key[0] and best_key[1] > 0.5):
+        raise ValueError(f"fit_to_limits did not converge: best plan is "
+                         f"{'none' if best is None else f'{1 + best_key[1]:.1f}x over the limits'} "
+                         f"after stretching {T_start:.1f} s to {np.sum(T):.1f} s")
     return best

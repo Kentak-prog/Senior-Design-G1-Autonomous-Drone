@@ -123,6 +123,26 @@ def test_moving_start_keeps_the_old_fit():
     print("  in-flight replan (moving start): distance-proportional fit as before  OK")
 
 
+def test_fit_to_limits_gives_up_instead_of_stretching_forever():
+    # A start speed of 3x v_max can never meet the limit. The old loop multiplied every segment
+    # time by the full ratio each pass (3^10 = 59,000x) and sampled the result at 5 ms; on
+    # 2026-11-06 a non-converging in-flight replan ran 10 minutes and died asking for 10 PiB.
+    import time
+    from min_snap import fit_to_limits
+    pts = np.array([[0.0, 0.0, 2.5], [5.0, 0.0, 2.5], [5.0, -5.0, 2.5]])
+    t0 = time.time()
+    try:
+        fit_to_limits(pts, v_max=2.0, a_max=2.0, start_state={1: np.array([6.0, 0.0, 0.0])})
+        raise AssertionError("an impossible fit was accepted")
+    except ValueError as e:
+        assert "did not converge" in str(e), e
+    assert time.time() - t0 < 5.0, time.time() - t0
+    ok = fit_to_limits(pts, v_max=2.0, a_max=2.0, start_state={1: np.array([1.5, 0.0, 0.0])})
+    assert ok.duration < 60.0, ok.duration
+    print(f"  impossible moving-start fit: ValueError in {time.time() - t0:.2f} s; a feasible one still fits "
+          f"({ok.duration:.1f} s)  OK")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:

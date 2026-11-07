@@ -20,12 +20,12 @@ REPO = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(REPO, "control")]
 
 from replan_session import ReplanSession, perturbed_prior          # noqa: E402
-from gate_path import gates_from_manifest, gate_crossings          # noqa: E402
+from gate_path import Gate, gates_from_manifest, gate_crossings    # noqa: E402
 from mpc_core import MpcCore, TrajectoryBuffer                      # noqa: E402
 from px4_attitude_plant import Px4AttitudePlant, _rot              # noqa: E402
 from drone_constraints import drone_constraints                    # noqa: E402
 
-MANIFEST = os.path.join(HERE, "isaac_results", "3_gates", "course", "pod_test_gates.json")
+MANIFEST = os.path.join(HERE, "isaac_results", "3_gates", "course", "3_gate_course_pod.json")
 GATES = gates_from_manifest(MANIFEST)
 START, START_YAW = np.array([-0.05, -0.04, 2.55]), math.radians(-7.2)
 M = drone_constraints["mass"]
@@ -125,6 +125,36 @@ def test_prior_and_detection_conversion():
     after = np.linalg.norm(snap["gate_1"] - g.center)
     assert after < 0.5 * before, (before, after)
     print(f"  prior off by {np.round(off, 2)} m; 6 sightings pull gate_1 from {before:.2f} to {after:.2f} m  OK")
+
+
+def test_prior_gate_more_than_1m_off_is_corrected_not_duplicated():
+    # prior_sigma 0.5 m is PER AXIS, so a prior gate is often > 1 m off in 3-D (circle course,
+    # seed 1: gate_1 1.08 m). Distance gating alone (max(1 m, 10 % of range)) then started a new
+    # gate, which the route added as a 4th gate (2026-11-06). The prior's covariance must count.
+    from gate_map import GateMap
+    g = GATES[1]
+    off = np.array([1.0, -0.8, 0.4])                                      # 1.34 m off
+    prior = [Gate(p.name, p.T_world_gate.copy(), side=p.side) for p in GATES]
+    prior[1] = Gate(g.name, np.vstack([np.column_stack([g.T_world_gate[:3, :3], g.center + off]), [0, 0, 0, 1]]),
+                    side=g.side)
+    for chi2, expect_new in ((14.16, False), (None, True)):              # None: the old distance-only gating
+        m = GateMap(START, prior=prior, prior_sigma=0.5, gate_chi2=chi2)
+        for k in range(6):
+            m.update([{"center": g.center, "normal": g.normal, "normal_reliable": True, "center_std": np.nan,
+                       "normal_std": np.nan, "range": 7.0, "side": g.side}], 0.1 * k)
+        names = [mg.name for mg in m.confirmed()]
+        assert (len(names) == 4) == expect_new, (chi2, names)
+        if not expect_new:
+            assert np.linalg.norm(m.gates[1].center - g.center) < 0.2, m.gates[1].center
+    # a gate far from every prior gate is still a new gate
+    m = GateMap(START, prior=prior, prior_sigma=0.5)
+    far = GATES[0].center + np.array([0.0, 6.0, 0.0])
+    for k in range(4):
+        m.update([{"center": far, "normal": GATES[0].normal, "normal_reliable": True, "center_std": np.nan,
+                   "normal_std": np.nan, "range": 7.0, "side": 1.5}], 0.1 * k)
+    assert len(m.confirmed()) == 4, [mg.name for mg in m.confirmed()]
+    print("  prior gate 1.34 m off: sightings correct it (old gating made a 4th gate); a gate 6 m from "
+          "any prior is still new  OK")
 
 
 def test_prepare_holds_clock_and_engage_restamps():

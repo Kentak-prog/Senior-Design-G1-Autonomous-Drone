@@ -2,13 +2,15 @@
 
 Checks that every profile is physically consistent (limits inside what the
 rotors can produce), that the Iris profile still gives the numbers the stack
-used before profiles existed, that the Starling 2 profile matches
-workspace/spawn_starling.py, and that DRONE_VEHICLE selects the profile.
+used before profiles existed, that the Starling 2 Max profile matches
+workspace/spawn_starling.py and px4/starling2max_sitl_params.sh, that PX4's
+thrust model round-trips, and that DRONE_VEHICLE selects the profile.
 """
 
 import ast
 import math
 import os
+import re
 import subprocess
 import sys
 
@@ -92,15 +94,72 @@ def _spawn_constants(path):
     return out
 
 
-def test_starling2_matches_spawn_script():
+def test_starling2max_matches_spawn_script():
+    # workspace/spawn_starling.py is the Starling 2 Max (C29) since 2026-11-05; the
+    # Starling 2 (285 g) profile has no spawn script any more.
     c = _spawn_constants(os.path.join(REPO, "workspace", "spawn_starling.py"))
-    v = get_vehicle("starling2")
-    assert c["MASS"] == v.mass and tuple(c["INERTIA_DIAG"]) == v.inertia_diag
+    v = get_vehicle("starling2max")
+    assert c["MASS"] == v.mass and tuple(c["INERTIA_DIAG"]) == v.inertia_diag, (c["INERTIA_DIAG"], v.inertia_diag)
     assert (c["ARM_X"], c["ARM_Y"]) == (v.rotor_xy[2][0], v.rotor_xy[2][1])
     assert tuple(float(d) for d in c["ROT_DIR"]) == v.rot_dir
-    assert (c["K_F"], c["K_M"], c["W_MIN"], c["W_MAX"]) == (v.k_f, v.k_m, v.w_min, v.w_max)
-    assert tuple(c["DRAG_COEFF"]) == v.drag_coeff
-    print("  starling2 profile == workspace/spawn_starling.py constants  OK")
+    assert (c["K_F"], c["K_M"], c["W_MAX"]) == (v.k_f, v.k_m, v.w_max)
+    assert c["W_MIN"] == 0.0            # motors stop when disarmed; armed idle is ZERO_POSITION_ARMED
+    assert (c["INPUT_SCALING"], c["ZERO_POSITION_ARMED"]) == (v.px4_w_scale, v.px4_w_offset)
+    assert c["ZERO_POSITION_ARMED"] == v.w_min
+    assert tuple(c["DRAG_COEFF"]) == v.drag_coeff and c["TAU_MOTOR"] == v.tau_motor
+    # PX4 SITL: the spawn's printed set and the shell script agree with the profile
+    kappa = round(v.k_m / v.k_f, 4)
+    sp = c["PX4_SITL_PARAMS"]
+    assert sp["THR_MDL_FAC"] == v.px4_thr_mdl_fac
+    assert sp["MPC_THR_HOVER"] == round(v.hover_thrust_setpoint(), 2)
+    for i, (x, y) in enumerate(v.rotor_xy):                  # profile FLU -> PX4 FRD: PY = -y
+        km = kappa if v.rot_dir[i] < 0 else -kappa            # rot_dir -1 = CCW = KM > 0
+        assert (sp[f"CA_ROTOR{i}_PX"], sp[f"CA_ROTOR{i}_PY"], sp[f"CA_ROTOR{i}_KM"]) == (x, -y, km), i
+    sh = open(os.path.join(REPO, "px4", "starling2max_sitl_params.sh")).read()
+    lines = dict(re.findall(r"^\$P set (\S+) (\S+)", sh, flags=re.M))
+    assert {k: float(x) for k, x in lines.items()} == {k: float(x) for k, x in sp.items()}, (lines, sp)
+    print(f"  starling2max profile == workspace/spawn_starling.py == px4/starling2max_sitl_params.sh "
+          f"(kappa {kappa} m)  OK")
+
+
+def test_thrust_model():
+    """PX4 THR_MDL_FAC chain: setpoint <-> motor output <-> newtons (from vehicle/starling2max-sim)."""
+    from vehicles import thr_mdl_motor_output, thr_mdl_setpoint
+    for f in (0.0, 0.3, 0.9, 1.0):
+        for t in (0.0, 0.14, 0.5, 1.0):
+            assert abs(thr_mdl_setpoint(thr_mdl_motor_output(t, f), f) - t) < 1e-12, (f, t)
+    for name in VEHICLES:
+        v = get_vehicle(name)
+        T = v.mass * 9.81
+        assert abs(v.setpoint_to_thrust(v.hover_thrust_setpoint()) - T) < 1e-9, name
+        assert abs(v.setpoint_to_thrust(v.thrust_to_setpoint(0.7 * T)) - 0.7 * T) < 1e-9, name
+    iris = get_vehicle("iris")
+    assert iris.px4_thr_mdl_fac == 0.0 and iris.hover_thrust_setpoint() == iris.hover_motor_output()
+    m = get_vehicle("starling2max")
+    assert abs(m.hover_thrust_setpoint() - 0.139) < 1e-3                       # MPC_THR_HOVER
+    assert abs(m.setpoint_to_thrust(0.6) - 17.82) < 0.02                        # MPC_THR_MAX 0.6
+    print(f"  thrust model: Max hover setpoint {m.hover_thrust_setpoint():.3f}, "
+          f"MPC_THR_MAX 0.6 = {m.setpoint_to_thrust(0.6):.2f} N; Iris unchanged  OK")
+
+
+def _lag_step_response(tau, dt, n):
+    """The spawn script's discretization, w += (1 - exp(-dt/tau)) (w_ref - w)."""
+    a = 1.0 - math.exp(-dt / tau)
+    w, out = 0.0, []
+    for _ in range(n):
+        w += a * (1.0 - w)
+        out.append(w)
+    return out
+
+
+def test_spawn_motor_lag_discretization():
+    src = open(os.path.join(REPO, "workspace", "spawn_starling.py")).read()
+    assert "a = 1.0 - math.exp(-dt / self._tau)" in src
+    dt = 1.0 / 250.0
+    resp = _lag_step_response(0.035, dt, 250)
+    for k in (5, 9, 25):                # exact at the samples: 1 - exp(-t / tau)
+        assert abs(resp[k - 1] - (1.0 - math.exp(-k * dt / 0.035))) < 1e-12
+    print("  spawn motor lag: exact first-order step response at 250 Hz  OK")
 
 
 def test_unknown_vehicle():
@@ -148,7 +207,9 @@ if __name__ == "__main__":
     print("test_profiles_physically_consistent"); test_profiles_physically_consistent()
     print("test_iris_unchanged");                 test_iris_unchanged()
     print("test_starling2max_matches_hover_flights"); test_starling2max_matches_hover_flights()
-    print("test_starling2_matches_spawn_script"); test_starling2_matches_spawn_script()
+    print("test_starling2max_matches_spawn_script"); test_starling2max_matches_spawn_script()
+    print("test_thrust_model");                   test_thrust_model()
+    print("test_spawn_motor_lag_discretization"); test_spawn_motor_lag_discretization()
     print("test_unknown_vehicle");                test_unknown_vehicle()
     print("test_env_selects_profile");            test_env_selects_profile()
     print("test_quadparams_for_vehicle");         test_quadparams_for_vehicle()

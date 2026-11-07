@@ -224,9 +224,12 @@ VIO, so perfect state should do better. Also compare:
 As Stage 4, but `ros2_nodes/replan_node.py` replaces `min_snap_node`. It starts
 from a gate map **off by about 0.5 m** (the manifest perturbed with a fixed
 seed). The camera's gate poses correct it, and it **replans in flight** when a
-gate it is heading for moves. The route is **one closed lap**: gate_0, gate_1,
-gate_2, then back through gate_0. It still flies on ground truth; the camera
-poses are lifted into the world with the true pose.
+gate it is heading for moves. The route is **one lap, and only one**: gate_0,
+gate_1, gate_2, then back through gate_0 to close it (`laps:=1`,
+`close_loop:=true`, which are also `replan_node`'s defaults). Do not raise
+`laps` for this stage: a second lap only adds flight time and the 2-lap plan
+can fail to converge (`px4/NEXT_TESTS.md` section 2). It still flies on ground
+truth; the camera poses are lifted into the world with the true pose.
 
 Same Isaac and PX4 bring-up. In the `ros2-eval` shells (step 3 of the
 runbook in each, with `DRONE_VEHICLE=iris`):
@@ -269,6 +272,191 @@ python3 px4/analyze_vio_mpc_flight.py $RUN --route gate_0,gate_1,gate_2,gate_0
 **Pass:** `[route] ... OK` (gate_0 twice) and the watchdog never trips. Also
 keep `replan_events.csv` and `gate_map.csv` from `$RUN`: they show each plan,
 its reason, and how far the camera moved each gate.
+
+## The circle course (from 2026-11-06): Stage 4R, then Stage 7
+
+**Why.** On the 2026-10-23 course no gate fits wholly in the 60° × 36°
+camera from +5.5 to +10 s and again on the way back to gate_0, so the color
+detector + PnP gives no fixes for up to 4.7 s and the VIO drifts
+(`px4/NEXT_TESTS.md`). The circle course puts the 3 gates 120° apart on a
+5 m circle. Each gate faces along the flight direction and sits at camera
+height. gate_0 is 5 m straight ahead of the takeoff hover. With
+`yaw_mode next_gate`, the next gate is whole in frame from each pass until
+about 3 m before the next gate.
+
+The last ~2 s before each gate stays blind on ANY layout. Closer than about
+3 m, a 1.7 m gate does not fit in the 36° vertical view.
+
+| Offline, 2/2, level camera | 2026-10-23 course | circle |
+|---|---|---|
+| Hover: gates whole in view | gate_1, gate_2 (gate_0 clipped) | gate_0 |
+| Longest gap with no fix, engage → last pass | 4.7 s (three gaps over 4 s) | 3.5 s from hover, then 2.1–2.5 s before each gate |
+| Biased fixes (≥ 0.3 m off) | 6 | 0 |
+| VIO rehearsal max error, 3 seeds | 0.46–0.87 m | 0.16–0.33 m |
+| Gate frame margins, 3 seeds | 0.44–0.70 m | 0.66–0.75 m |
+| Lap time (closed lap) | 28 s | 28 s exact map, 36 s with 4R's prior |
+
+Sources:
+- the gap and fix rows: `Trajectory/check_course_camera.py`, which renders
+  the camera along a simulated closed lap and runs the real color detector
+  + PnP;
+- the VIO rehearsal rows: `Trajectory/simulate_vio_mpc.py`, an open run
+  gate_0 → gate_2, seeds 0–2.
+
+Course file: `Trajectory/isaac_results/circle_course/circle_course.json`.
+It is written by `Trajectory/make_circle_course.py`:
+
+| Gate | x | y | z | yaw |
+|---|---|---|---|---|
+| gate_0 | 4.911 | −0.667 | 2.6 | −7.2° |
+| gate_1 | 8.267 | −8.650 | 2.6 | −127.2° |
+| gate_2 | −0.325 | −7.565 | 2.6 | +112.8° |
+
+It keeps the old `camera_pose_usd` (same takeoff spot), so `vio_node`'s
+spawn hint still holds.
+
+**Spawn it** in Stage 1 instead of the default course. The spawner copies it
+to `/workspace/test_gates.json`, which every node and
+`analyze_vio_mpc_flight.py` read, so no other command changes:
+```python
+import os; os.environ["GATES_MANIFEST"] = "/workspace/Senior-Design-G1-Autonomous-Drone/Trajectory/isaac_results/circle_course/circle_course.json"; exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_gates_from_manifest.py").read())
+```
+Expect gate_0 at (4.911, −0.667, 2.600) yaw −7.20, gate_1 at (8.267,
+−8.650) yaw −127.20, gate_2 at (−0.325, −7.565) yaw +112.80. In the
+`/iris_0/front_cam` view at the hover, **gate_0 is whole in the frame**, and
+the other two are off to the right.
+
+**Then Stage 4R** exactly as written above, with `prior_seed:=0`. It passed
+offline on this course (seed 0: 4 passes, 0 biased fixes). Add
+`-p yaw_mode:=next_gate` to `replan_node`, so 4R flies the same nose
+direction Stage 7 will.
+
+Other seeds work too since 2026-11-06. Before that fix, the gate map
+matched a sighting to a map gate only within `max(1 m, 10 % of range)`, but
+`prior_sigma 0.5` is per axis, so some seeds put a gate more than 1 m off.
+With seed 1 (gate_1 1.08 m off), the camera's gate_1 became a 4th gate. The
+replanner's min-snap fit then ran away (a 7×10¹² s plan, MemoryError), and
+the lap never closed. Now:
+- `Trajectory/gate_map.py` also matches within the gate's 99.7 %
+  uncertainty;
+- `Trajectory/min_snap.fit_to_limits` gives up (keeping the current plan)
+  instead of stretching forever.
+
+Offline, seeds 0–3 all close the lap with 0 biased fixes. With the prior
+off, the last approach to gate_0 has a longer blind stretch (3–5.7 s
+instead of 2.1 s). That is harmless here, since 4R flies on ground truth.
+
+**Then Stage 7** with the run set of `px4/NEXT_TESTS.md` section 3:
+- `vio_node` + `flight_monitor` first;
+- then `mpc_node` (odometry) and `replan_node` (odometry, `prior_sigma 0`,
+  `use_camera false`, `yaw_mode next_gate`, `laps 1`, `close_loop true`);
+- then the bridge.
+
+Check `python3 Trajectory/check_course_camera.py` first if anything about
+the course changes.
+
+## The Starling 2 Max (C29) on the circle course
+
+The same stages, on our real airframe and its front camera instead of the
+Pegasus Iris.
+
+**Camera.** The C29 front hires camera is the IMX412 (ModalAI M0161) with a
+2.7 mm lens.
+- **Mount**, from the drone's `/etc/modalai/extrinsics.conf` (copy:
+  `workspace/starling2max_c29_extrinsics.conf`): hires_front is **level**,
+  at (0.0711, −0.0003, −0.0070) m in body FLU.
+- **Field of view**: the datasheet row is mislabeled. Read as H × V × D it
+  is 120.4° × 93.5° × 146°, a distorted wide lens. Isaac renders an ideal
+  pinhole, so we use the undistorted image with the lens's central focal
+  length: **fx = fy = 439.8 px at 1024 × 768, 98.7° × 82.3°**.
+- The sensor itself is confirmed by Sony's IMX412-AACK flyer: 4056 × 3040
+  active pixels, 1.55 µm square pixels.
+- 1024 × 768 (the 4:3 full-sensor mode) is assumed. Check the drone's
+  `voxl-camera-server.conf` and its calibration (`/data/modalai/`).
+- The sensor's 16:9 modes crop rows (4K2K 4056 × 2288; 1080p binned from
+  4056 × 2224): same 98.7° across, about 66° vertical. For those, spawn with
+  `os.environ["CAMERA_RESOLUTION"] = "1024x578"`. Offline on the circle
+  course that gives a longest gap of 2.0 s and 82 % of frames with a fix,
+  against 1.2 s and 89 % at 4:3.
+
+These are `spawn_starling.py`'s defaults.
+
+**Offline** (`DRONE_VEHICLE=starling2max`, this camera, 2/2, closed lap,
+`check_course_camera.py` and `simulate_vio_mpc.py`):
+
+| | Iris camera, circle | **C29 camera, circle** | C29 camera, 2026-10-23 course |
+|---|---|---|---|
+| Gates whole in view at the hover | gate_0 | gate_0, gate_1 | all three |
+| Longest gap with no fix, engage → last pass | 3.5 s | **1.2 s** (0.8–1.2 s before each gate) | 2.9 s |
+| Frames with a good fix | 59 % | **89 %** | 65 % |
+| Fixes ≥ 0.3 m off | 0 | 6 (gate_1 at 11–12 m) | 13 |
+| VIO rehearsal max error | 0.16–0.33 m (Iris) | **0.21–0.40 m**, 3 seeds, all gates | 0.47–0.69 m (2 seeds) |
+| Stage 4R, map 0.5 m off, seed 0 | passes | passes, longest gap 1.3 s | |
+
+About those columns:
+- The 82° vertical view keeps a gate whole until about 1 m away, not 3 m.
+- The 6 off fixes are far-range noise: a 1.7 m gate at 12 m is about 60 px
+  wide at 1024 px. The VIO weights them by range² and still passed every
+  seed. Capping `max_range` at 10 m did not help in the rehearsal. If the
+  bag (V1) shows far fixes biased, cap it there, or stream wider.
+
+**What changes in the runbook:**
+
+1. **Every `ros2-eval` shell:** `export DRONE_VEHICLE=starling2max`
+   (instead of `iris`).
+2. **Stage 1, Script Editor:** run `spawn_starling.py` instead of
+   `spawn_example.py`. It sets the C29 camera itself, with no
+   `CAMERA_PITCH_DEG`:
+   ```python
+   exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_starling.py").read())
+   ```
+   Then `sim_clock.py`, then the circle course (`GATES_MANIFEST` line in
+   "The circle course").
+3. **Check the spawn printed:**
+   - `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
+   - `[init] camera ... expected fx=439.8`
+   - `hover 5407 RPM = motor output 0.341 = hover thrust 0.139`, then a
+     block of `param set` lines.
+4. **Before `commander takeoff`, in `pxh>`**, paste the `param set` lines the
+   spawn printed (or run `sh px4/starling2max_sitl_params.sh` in the PX4
+   container; same set). They cover:
+   - PX4's thrust model, as on the drone: `THR_MDL_FAC` 0.9,
+     `MPC_THR_HOVER` 0.14, `MPC_THR_MAX` 0.6, `MPC_THR_MIN` 0.04;
+   - `MPC_USE_HTE` 1;
+   - the Max's rotor geometry and yaw ratio (`CA_ROTOR0..3_PX/PY/KM`);
+     without them SITL allocates torque for the Iris;
+   - two sim-only settings (`COM_LOW_BAT_ACT` 0, `MC_AIRMODE` 1).
+
+   SITL keeps the Iris rate gains. If the hover wobbles, halve
+   `MC_ROLLRATE_P` / `MC_PITCHRATE_P` and their `_D`.
+5. **GO check:** `ros2 topic echo --once /iris_0/front_cam/camera_info`
+   shows `width: 1024`, `height: 768`, and `k[0]` about 439.8. (The ROS
+   names keep `iris_0` on purpose; see `spawn_starling.py`.)
+6. **Camera mount on every node that uses the camera:**
+   - `vio_node`:
+     `-p camera_pitch_deg:=0.0 -p "camera_pos:=[0.0711,-0.0003,-0.0070]"`.
+     Leave `manifest_camera_pitch_deg` at 15: the manifest's camera pose was
+     recorded with the Iris.
+   - `ros_camera_pose_fallback.py` (4R):
+     `--camera-pitch-deg 0 --camera-pos 0.0711 -0.0003 -0.0070`.
+7. **Bridge:** leave out `--hover-thrust`. With
+   `DRONE_VEHICLE=starling2max` its default inverts the Starling's whole
+   thrust chain, PX4's `THR_MDL_FAC` included (`px4/attitude_bridge.py`,
+   since 2026-11-06): about 0.139 at hover, PX4's `MPC_THR_HOVER`. Before
+   that change, the default sent the motor output (0.341) instead, which
+   would have climbed hard. The Iris needed its measured 0.58, so prove the
+   hover first.
+
+**Order** (Stages 0–4 as a copy-paste checklist: `px4/STARLING_QUICK_RUN.md`):
+- **Stage 3, hover hold on ground truth.** A steady altitude error means
+  the hover thrust is off: set `--hover-thrust` from the bridge log, as was
+  done for the Iris.
+- **Stage 4**, ground truth, gate_0 → gate_1 → gate_2 (`min_snap_node`).
+- **Stage 4R**, ground truth, one closed lap.
+- **Stage 6**, hover on the VIO.
+- **Stage 7**, closed lap on the VIO.
+
+No Isaac run of these stages with the Starling is logged yet, so do not skip Stage 3.
 
 ## Stage 5: VIO open-loop on the proven flier
 
@@ -358,7 +546,7 @@ out of git (link them in the doc), as with the 2026-10-23 flight video.
 
 - The watchdog uses the simulator's truth. On hardware, the only checks left
   are the bridge's checks and PX4's own failsafes.
-- No in-flight replanning. `min_snap_node` plans once.
-  `Trajectory/replanner.py` (laps, rolling window) is not wired into ROS yet.
+- `min_snap_node` plans once. In-flight replanning is `ros2_nodes/replan_node.py`
+  (Stage 4R), flown for one closed lap only.
 - One course, one seed per speed, so a pass is evidence, not proof. Repeat
   stage 7 at least three times before stepping up.

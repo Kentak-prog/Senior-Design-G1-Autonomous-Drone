@@ -1,5 +1,5 @@
 """
-Plots for the 3-gate Isaac Sim course (3_gates/course/test_gates.json).
+Plots for the 3-gate Isaac Sim course (3_gates/course/3_gate_course.json).
 
 Re-runs the same pipeline as simulate_min_snap.py (synthetic perception ->
 min-snap plan, seed 0) and draws two separate figures, both oriented like
@@ -30,7 +30,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 HERE = os.path.dirname(os.path.abspath(__file__))           # 3_gates/scripts
 BASE = os.path.dirname(HERE)                                 # 3_gates
-COURSE_MANIFEST = os.path.join(BASE, "course", "test_gates.json")
+COURSE_MANIFEST = os.path.join(BASE, "course", "3_gate_course.json")
 SIM_DIR = os.path.join(BASE, "python_sim")
 TRAJ_DIR = os.path.abspath(os.path.join(BASE, "..", ".."))
 sys.path.insert(0, TRAJ_DIR)

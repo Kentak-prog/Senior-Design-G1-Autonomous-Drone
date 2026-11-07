@@ -16,8 +16,14 @@ measurement of the same thing. Each gate keeps:
     center, per the HANDOFF rule
 
 A gate that drops out of view keeps its last estimate. When it comes back,
-the new detection is matched to it by distance (nearest mapped gate within
-the gating distance, which grows with range) and fused in.
+the new detection is matched to it (nearest mapped gate that passes the gate
+test) and fused in. The gate test passes when the detection is within the
+gating distance (grows with range) OR within the 99.7 % region of the gate's
+own uncertainty plus the measurement's (Mahalanobis, gate_chi2). The second
+part matters for a prior map: prior_sigma 0.5 m PER AXIS puts many gates more
+than the 1 m gating distance off, and before 2026-11-06 such a gate's first
+sighting started a new gate instead of correcting the prior (Stage 4R, circle
+course, prior seed 1: gate_1 1.08 m off became a 4th gate, the lap failed).
 
 Track management: a detection that matches nothing starts a TENTATIVE gate.
 It becomes CONFIRMED after `min_hits` sightings; a tentative gate not seen
@@ -98,6 +104,9 @@ class GateMap:
     gating_dist:     min distance (m) between a detection and a mapped gate
                      for them to be treated as the same gate; the actual gate
                      is max(gating_dist, gating_frac * range)
+    gate_chi2:       also match when the Mahalanobis distance^2 under the gate's
+                     covariance + the measurement's is below this (14.16: 99.7 %
+                     for 3 DOF). None: distance gating only (the old behavior)
     min_hits:        sightings before a gate is confirmed and used for planning
     tentative_timeout: seconds a tentative gate survives without a new sighting
     range_noise_frac: measurement 1-sigma added per meter of range, on top of
@@ -108,8 +117,9 @@ class GateMap:
     def __init__(self, origin, gating_dist: float = 1.0, gating_frac: float = 0.1,
                  range_noise_frac: float = 0.02, noise_floor: float = 0.03,
                  min_hits: int = 3, tentative_timeout: float = 0.5,
-                 prior=None, prior_sigma: float = 0.5):
+                 prior=None, prior_sigma: float = 0.5, gate_chi2=14.16):
         self.origin = np.asarray(origin, dtype=float)
+        self.gate_chi2 = gate_chi2
         self.gating_dist = gating_dist
         self.gating_frac = gating_frac
         self.min_hits = min_hits
@@ -157,7 +167,7 @@ class GateMap:
             gate_r = max(self.gating_dist, self.gating_frac * det['range'])
             cands = [(np.linalg.norm(mg.center - c), mg) for mg in self.gates
                      if mg.gate_id not in used and not mg.dropped]
-            cands = [cm for cm in cands if cm[0] < gate_r]
+            cands = [cm for cm in cands if cm[0] < gate_r or self._within_uncertainty(cm[1], c, R)]
             if not cands:
                 mg = self._add(c, n, det.get('side', DEFAULT_GATE_SIDE), R, w,
                                reliable=det['normal_reliable'], t=t)
@@ -185,6 +195,12 @@ class GateMap:
         if out:
             self.version += 1
         return out
+
+    def _within_uncertainty(self, mg, c, R) -> bool:
+        if self.gate_chi2 is None:
+            return False
+        r = c - mg.center
+        return float(r @ np.linalg.solve(mg.P + R, r)) < self.gate_chi2
 
     def confirmed(self):
         return [mg for mg in self.gates if mg.confirmed(self.min_hits)]
