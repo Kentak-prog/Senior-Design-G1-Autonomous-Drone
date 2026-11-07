@@ -64,7 +64,7 @@ class PublishedPlan:
 class ReplanSession:
     def __init__(self, prior_gates, v_max=2.0, a_max=2.0, laps=1, close_loop=True,
                  start_tol_m=0.5, gate_side=1.5, min_hits=3, prior_sigma=0.5,
-                 max_detection_range_m=None, **replanner_kw):
+                 max_detection_range_m=None, allow_new_gates=True, **replanner_kw):
         """max_detection_range_m: camera gate poses farther than this from the drone are
         ignored (None or <= 0: no limit). With the Starling's wide C29 camera a gate 12 m
         away is ~60 px across, and its PnP pose is off by up to ~1 m and ~100 deg in yaw;
@@ -74,7 +74,7 @@ class ReplanSession:
         self.start_tol, self.gate_side = start_tol_m, gate_side
         self.max_range = max_detection_range_m if max_detection_range_m and max_detection_range_m > 0 else None
         self.n_far_ignored = 0
-        self.map_kw = dict(min_hits=min_hits, prior_sigma=prior_sigma)
+        self.map_kw = dict(min_hits=min_hits, prior_sigma=prior_sigma, allow_new_gates=allow_new_gates)
         self.replanner_kw = replanner_kw
         self.map = None
         self.replanner = None

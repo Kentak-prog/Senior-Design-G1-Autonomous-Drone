@@ -247,7 +247,7 @@ then `commander takeoff`. Gate tops are at 3.45 m, so 5 m clears them. Restart
 As the test plan's Stage 4R, with these replacing `min_snap_node`:
 ```bash
 python3 ros2_nodes/ros_camera_pose_fallback.py --camera-pitch-deg 0 --camera-pos 0.0711 -0.0003 -0.0070
-python3 ros2_nodes/replan_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus -p gates_file:=/workspace/test_gates.json -p prior_sigma:=0.5 -p prior_seed:=0 -p laps:=1 -p close_loop:=true -p yaw_mode:=next_gate -p v_max:=2.0 -p a_max:=2.0 -p max_gate_range_m:=9.0 -p start_topic:=/mpc_offboard_bridge/engaged -p log_dir:=$RUN/s4r
+python3 ros2_nodes/replan_node.py --ros-args -p use_sim_time:=true -p state_source:=pegasus -p gates_file:=/workspace/test_gates.json -p prior_sigma:=0.5 -p prior_seed:=0 -p laps:=1 -p close_loop:=true -p yaw_mode:=next_gate -p v_max:=2.0 -p a_max:=2.0 -p max_gate_range_m:=9.0 -p map_new_gates:=false -p start_topic:=/mpc_offboard_bridge/engaged -p log_dir:=$RUN/s4r
 ```
 Also run `vio_node` (as in Stage 2): the monitor's watchdog aborts with no VIO for 0.5 s,
 even though 4R flies on ground truth.
@@ -256,6 +256,12 @@ even though 4R flies on ground truth.
 ~1 m and ~100° in yaw. Fused in, it turned gate_1 sideways at the hover and every replan
 failed ("trajectory still crosses a gate badly", ~500 s plans), burning CPU until the MPC's
 p95 passed 50 ms (2026-11-07). Beyond 9 m the prior is kept until the gate is nearer.
+
+`map_new_gates:=false`: the course is known (3 gates), so camera sightings only
+correct those gates. Close, clipped views of gate_1 came in 0.7–2.6 m off, often two per
+frame, and became 5 phantom gates; the route flew at them and the bridge aborted at a
+31° tilt (2026-11-07). Also restart `mpc_node` before each attempt: after an aborted
+run it keeps tracking the old plan's end point.
 Run the bridge with `--max-duration 120 --log-dir $RUN/s4r`. Score with
 `analyze_vio_mpc_flight.py $RUN/s4r --route gate_0,gate_1,gate_2,gate_0`.
 

@@ -144,6 +144,32 @@ def test_first_plan_keeps_the_hover_yaw_on_a_sim_clock():
           f"(hover {np.degrees(START_YAW):+.1f})  OK")
 
 
+def test_prior_gates_only_drops_unmatched_sightings_instead_of_adding_gates():
+    # Isaac Stage 4R (2026-11-07): close views of gate_1 came in twice per frame, the second
+    # 0.7-2.6 m off; each became a new gate (map_3..map_7) and the route flew at them.
+    from gate_map import GateMap
+    prior = [Gate(g.name, g.T_world_gate.copy(), side=g.side) for g in GATES]
+    g = GATES[1]
+    good = {"center": g.center, "normal": g.normal, "normal_reliable": True, "center_std": np.nan,
+            "normal_std": np.nan, "range": 3.0, "side": g.side}
+    bad = dict(good, center=g.center + np.array([1.5, 0.3, 0.0]), range=3.2)
+    counts = {}
+    for allow in (True, False):
+        m = GateMap(START, prior=prior, prior_sigma=0.1, allow_new_gates=allow)
+        for k in range(8):
+            m.update([good, bad], 0.1 * k)
+        counts[allow] = ([mg.name for mg in m.confirmed()], m.n_unmatched,
+                         float(np.linalg.norm(m.gates[1].center - g.center)))
+    names_new, _, _ = counts[True]
+    names_prior, unmatched, err = counts[False]
+    assert len(names_new) == 4, names_new                                # the old behavior: a phantom gate
+    assert names_prior == [p.name for p in GATES] and unmatched == 8 and err < 0.05, counts[False]
+    sess = ReplanSession(prior, allow_new_gates=False)
+    assert sess.map_kw["allow_new_gates"] is False
+    print(f"  2 sightings of gate_1 per frame, one 1.5 m off: new gates allowed -> {names_new}; "
+          f"prior gates only -> {names_prior}, {unmatched} dropped, gate_1 within {err:.3f} m  OK")
+
+
 def test_far_detections_are_ignored_with_a_range_limit():
     # Starling C29 in Isaac (2026-11-07): gate_1 seen from 12 m came in up to ~1 m and ~100 deg
     # off; fused, it turned gate_1 sideways and every replan failed. max_detection_range_m drops

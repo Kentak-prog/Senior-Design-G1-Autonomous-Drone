@@ -89,6 +89,8 @@ def main():
             dp("gate_side", DEFAULT_GATE_SIDE)
             dp("max_gate_range_m", 0.0)     # ignore camera gate poses farther than this (0 = no limit);
                                             # 9.0 for the Starling's wide C29 camera (replan_session.py)
+            dp("map_new_gates", True)       # false: the camera only corrects the prior's gates, never
+                                            # adds one (a known course; gate_map.GateMap allow_new_gates)
             dp("log_dir", "")
             gp = lambda n: self.get_parameter(n).value   # noqa: E731
             self.gp = gp
@@ -100,6 +102,7 @@ def main():
                                          start_tol_m=float(gp("start_tol_m")), gate_side=float(gp("gate_side")),
                                          prior_sigma=max(float(gp("prior_sigma")), 0.05),
                                          max_detection_range_m=float(gp("max_gate_range_m")),
+                                         allow_new_gates=bool(gp("map_new_gates")),
                                          yaw_mode=str(gp("yaw_mode")))
             for p, g in zip(prior, true_gates):
                 self.get_logger().info(f"prior {p.name}: {np.round(p.center, 2)} "
@@ -134,7 +137,8 @@ def main():
             self.get_logger().info(f"replanning {gp('laps')} lap(s), close_loop={gp('close_loop')}, "
                                    f"yaw {gp('yaw_mode')}, state {gp('state_source')}, "
                                    f"v/a {gp('v_max')}/{gp('a_max')}, camera gates within "
-                                   f"{gp('max_gate_range_m') if float(gp('max_gate_range_m')) > 0 else 'any'} m; "
+                                   f"{gp('max_gate_range_m') if float(gp('max_gate_range_m')) > 0 else 'any'} m, "
+                                   f"{'new gates allowed' if gp('map_new_gates') else 'prior gates only'}; "
                                    f"waiting for True on {gp('start_topic')}; "
                                    f"log {log_dir}; use_sim_time={self.get_parameter('use_sim_time').value}")
 

@@ -1,0 +1,8 @@
+t,event
+2420.600,"plan #1 (first plan): window 4 of 4 route gate(s) left, lap 1/1"
+2420.600,"plan ready (first plan): 27.17 s through gate_0, gate_1, gate_2, gate_0 from [-0.02  0.02  2.57]"
+2533.256,engaged: plan #1 starts at t=2533.26
+2539.304,"passed gate_0 [route 0, lap 1] (MISSED -- 2 s past its planned time)"
+2545.464,"passed gate_1 [route 1, lap 1] (MISSED -- 2 s past its planned time)"
+2552.312,"passed gate_2 [route 2, lap 1] (MISSED -- 2 s past its planned time)"
+2559.000,"passed gate_0 [route 3, lap 1] (MISSED -- 2 s past its planned time)  -- LAP 1 COMPLETE"

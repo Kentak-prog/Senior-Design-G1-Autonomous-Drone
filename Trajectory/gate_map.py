@@ -112,13 +112,22 @@ class GateMap:
     range_noise_frac: measurement 1-sigma added per meter of range, on top of
                      the PnP bootstrap std (covers the depth bias and drone
                      pose error that the bootstrap does not see)
+    allow_new_gates: False = only correct the gates already in the map (the
+                     prior); a sighting that matches none of them is dropped and
+                     counted in n_unmatched. For a known course: with the
+                     Starling's C29 camera in Isaac (2026-11-07) close, clipped
+                     views of gate_1 came in 0.7-2.6 m off, often two per frame,
+                     and became 5 phantom gates around it; the route then tried
+                     to fly through them and the flight aborted.
     """
 
     def __init__(self, origin, gating_dist: float = 1.0, gating_frac: float = 0.1,
                  range_noise_frac: float = 0.02, noise_floor: float = 0.03,
                  min_hits: int = 3, tentative_timeout: float = 0.5,
-                 prior=None, prior_sigma: float = 0.5, gate_chi2=14.16):
+                 prior=None, prior_sigma: float = 0.5, gate_chi2=14.16, allow_new_gates: bool = True):
         self.origin = np.asarray(origin, dtype=float)
+        self.allow_new_gates = allow_new_gates
+        self.n_unmatched = 0
         self.gate_chi2 = gate_chi2
         self.gating_dist = gating_dist
         self.gating_frac = gating_frac
@@ -169,6 +178,9 @@ class GateMap:
                      if mg.gate_id not in used and not mg.dropped]
             cands = [cm for cm in cands if cm[0] < gate_r or self._within_uncertainty(cm[1], c, R)]
             if not cands:
+                if not self.allow_new_gates:
+                    self.n_unmatched += 1
+                    continue
                 mg = self._add(c, n, det.get('side', DEFAULT_GATE_SIDE), R, w,
                                reliable=det['normal_reliable'], t=t)
             else:

@@ -10,6 +10,8 @@ fixes to the Starling sim found on the way (below). Pod run folder:
 |---|---|
 | `s3/flight_report.png`, `s3/flight_summary.txt` | Stage 3: 15 s hover hold on our MPC (ground truth) |
 | `s4/flight_report.png`, `s4/flight_summary.txt` | Stage 4: the course gate_0 → gate_1 → gate_2 on ground truth, VIO as a preview |
+| (pod only) | `/workspace/vio_runs/s29_1/`: every flight_log / bridge_log CSV, `vio/` (Stages 2–4) and `s4r_vio/` (4R) with `vio_log.csv` and `vio_events.csv`, and the PX4 logs in `/workspace/PX4-Autopilot/log/2026-11-07/` |
+| `s4r2/`, `s4r3/` | Stage 4R attempts 1 and 2 (below): analyzer figure and summary, plus `replan_events.txt` (every plan, pass, failure) and `gate_map.txt` (the map at each plan), the pod's CSVs renamed so git keeps them |
 
 ## Results
 
@@ -71,6 +73,35 @@ within 0.06 m. Watchdog never tripped.
   (Stage 3), median 24 / p95 30 ms (Stage 4). Under the ~48 ms hard limit,
   over the 15 ms GO. `ros2-eval` sat at its 2-CPU cap (MPC + vio_node +
   monitor ≈ 160 %) and was throttled.
+
+## Stage 4R (closed lap, replanning from the camera): not passed yet
+
+Three attempts the same day, each stopped by a different bug, each fixed:
+
+| Attempt | What stopped it | Fix |
+|---|---|---|
+| setup | `ros_camera_pose_fallback.py` never got a pose: it subscribed reliable to Pegasus' best-effort `/drone00/state/pose` | best-effort subscription |
+| setup | gate_1 seen from 12 m came in up to ~1 m and ~100° off; every replan failed and the CPU overload pushed the MPC p95 past 50 ms | `replan_node -p max_gate_range_m:=9.0` |
+| 1 (`s4r2`) | aborted at once: the first plan started at yaw 1210 rad (the pre-plan search yaw counted from t = 0 on a ~2420 s sim clock); the MPC asked for 53° | `replanner.HoldReference` starts its clock at first use |
+| 2 (`s4r3`) | passed gate_0 ("through"), corrected gate_1 to 0.12 m, then clipped close views of gate_1 (0.7–2.6 m off, often two per frame) became 5 phantom gates; the route flew at them; aborted at a 31° tilt | `replan_node -p map_new_gates:=false` (prior gates only) |
+
+Each fix has a regression test in `Trajectory/test_replan_session.py` that
+fails on the old code with the live numbers.
+
+Attempt 2 in numbers (`s4r3/`): gate_0 passed at t = 3.89 s, offset
+(−0.02, +0.05) m, frame margin 0.70 m, 1.98 m/s; the bridge ran 42.8 s wall
+before the abort. Its `gate_map.txt` shows gate_1 corrected from 0.57 m to
+0.12–0.13 m off and the phantom gates map_3–map_7 0.66–2.57 m from it. The
+VIO preview held ~0.1 m through gate_0, then lost track in the swerving
+around gate_1 (yaw error up to 28°) and dead-reckoned. The summaries'
+whole-log numbers (tracking error ~9–12 m, solve p95 79–100 ms) are
+dominated by the minutes after each abort, when `mpc_node` kept chasing the
+stale plan with the bridge off; read them with that in mind. Video of attempt 2:
+`isaac_stage4r_starling_c29_abort.webm` (user's Downloads, not in git).
+After an aborted run, restart `mpc_node`: it keeps tracking the old plan's
+end point (9 m error, 47° setpoint tilt at hover). The camera's close-range
+gate poses are noisy with the C29 lens; the detector may need work before
+Stages 6–7 fly on the VIO.
 
 ## Pod notes from the day
 
