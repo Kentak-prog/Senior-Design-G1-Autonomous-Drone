@@ -138,6 +138,18 @@ def test_thrust_model():
     m = get_vehicle("starling2max")
     assert abs(m.hover_thrust_setpoint() - 0.139) < 1e-3                       # MPC_THR_HOVER
     assert abs(m.setpoint_to_thrust(0.6) - 17.82) < 0.02                        # MPC_THR_MAX 0.6
+    # The RL / PID Isaac path (QuadParams -> rl/isaac/frames.ThrustMap) must use the same chain:
+    # without it the Max's hover command would be the motor output 0.341, not the setpoint 0.139.
+    sys.path.insert(0, os.path.join(REPO, "rl"))
+    sys.path.insert(0, os.path.join(REPO, "rl", "isaac"))
+    from drone_params import QuadParams
+    from frames import ThrustMap
+    p = QuadParams.for_vehicle("starling2max")
+    assert abs(p.px4_setpoint_to_thrust(p.thrust_to_px4_setpoint(5.0)) - 5.0) < 1e-9
+    assert abs(p.hover_thrust_setpoint() - m.hover_thrust_setpoint()) < 1e-12
+    tm = ThrustMap("model", p)
+    assert abs(tm.to_px4(p.hover_thrust()) - m.hover_thrust_setpoint()) < 1e-9 and abs(tm.u_hover - 0.139) < 1e-3
+    assert abs(tm.from_px4(0.6) - 17.82) < 0.02
     print(f"  thrust model: Max hover setpoint {m.hover_thrust_setpoint():.3f}, "
           f"MPC_THR_MAX 0.6 = {m.setpoint_to_thrust(0.6):.2f} N; Iris unchanged  OK")
 

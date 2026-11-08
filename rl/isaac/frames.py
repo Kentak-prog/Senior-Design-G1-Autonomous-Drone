@@ -170,13 +170,15 @@ def yaw_ned_to_enu(yaw_ned):
 class ThrustMap:
     """Collective thrust [N] <-> PX4 normalised thrust u in [0, 1].
 
-    ASSUMPTION both modes rest on: PX4 THR_MDL_FAC = 0 (so normalised thrust
-    is passed to the motors as-is, u_motor = u) and Pegasus turns a motor
-    output u into rotor speed w = 1000 u + 100 with thrust 4 k_f w^2. If either
-    is false the mapping is wrong; the hover calibration measures `scale`.
+    u is PX4's normalised thrust SETPOINT. ASSUMPTION both modes rest on: PX4's
+    THR_MDL_FAC equals QuadParams.px4_thr_mdl_fac (0 for the Iris, so u goes to
+    the motors as-is; 0.9 inferred for the Starling 2 Max), and the motor output
+    drives the rotor at w = px4_w_scale u_motor + px4_w_offset with thrust
+    4 k_f w^2. If either is false the mapping is wrong; the hover calibration
+    measures `scale`.
 
-    mode "model": thrust(u) = scale * QuadParams.px4_output_to_thrust(u). The
-        exact quadratic model; hover is u ~ 0.556 for the default Iris.
+    mode "model": thrust(u) = scale * QuadParams.px4_setpoint_to_thrust(u). The
+        exact model; hover is u ~ 0.556 for the default Iris, 0.139 for the Max.
     mode "linear": thrust(u) = scale * m g * u / u_hover, i.e. thrust
         proportional to u, calibrated so that u_hover carries the weight. Use
         it when a measured hover throttle is all you trust.
@@ -192,7 +194,7 @@ class ThrustMap:
             raise ValueError("scale must be positive")
         self.mode = mode
         self.p = params if params is not None else QuadParams()
-        self.u_hover = float(u_hover) if u_hover is not None else self.p.hover_motor_output()
+        self.u_hover = float(u_hover) if u_hover is not None else self.p.hover_thrust_setpoint()
         if not 0.0 < self.u_hover <= 1.0:
             raise ValueError("u_hover must be in (0, 1]")
         self.scale = float(scale)
@@ -200,14 +202,14 @@ class ThrustMap:
     def to_px4(self, T_newton):
         T = float(T_newton) / self.scale
         if self.mode == "model":
-            return self.p.thrust_to_px4_output(T)          # already clipped to [0, 1]
+            return self.p.thrust_to_px4_setpoint(T)        # already clipped to [0, 1]
         u = self.u_hover * T / self.p.hover_thrust()
         return min(max(u, 0.0), 1.0)
 
     def from_px4(self, u):
         u = min(max(float(u), 0.0), 1.0)
         if self.mode == "model":
-            return self.scale * self.p.px4_output_to_thrust(u)
+            return self.scale * self.p.px4_setpoint_to_thrust(u)
         return self.scale * self.p.hover_thrust() * u / self.u_hover
 
     def __repr__(self):

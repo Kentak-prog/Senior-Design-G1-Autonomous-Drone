@@ -156,7 +156,9 @@ def test_hover_hold_through_px4_attitude_loop():
         e, tilt = _hold_through_px4(0.10, tau)
         assert e[149] < 0.06 and e[-1] < 0.01 and tilt < 5.0, (tau, e[149], e[-1], tilt)
         e1, _ = _hold_through_px4(0.02, tau)
-        assert e1[-1] > 0.3, (tau, e1[-1])
+        # One-step lead never settles: Iris 0.70 / 1.20 m left at 10 s; the lighter Starling 2 Max
+        # oscillates and is 0.10 / 0.62 m off (2026-11-07). Both are >50x the 0.1 s lead's error.
+        assert e1[-1] > 0.05 and e1[-1] > 50.0 * e[-1], (tau, e1[-1], e[-1])
         print(f"  PX4 lag {tau:.2f} s, 0.3 m off: lead 0.1 s -> {e[149]:.3f} m at 3 s, {e[-1]:.3f} m at 10 s "
               f"(tilt <= {tilt:.1f} deg); one-step lead -> {e1[-1]:.2f} m at 10 s  OK")
 

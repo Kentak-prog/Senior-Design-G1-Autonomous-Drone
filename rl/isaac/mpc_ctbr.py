@@ -307,11 +307,20 @@ class MpcCtbrController(MpcController):
                 return True
         return False
 
-    def update_course(self, course, pos, vel=None):
+    def update_course(self, course, pos, vel=None, gate_idx=None):
         """Re-plan if the remaining gates moved (see module docstring). pos/vel
         ENU (3,). Returns True if it re-planned (async: if a plan was started;
         it is swapped in by the next act()). While an async plan is running,
-        further updates are ignored; the next one after it compares against it."""
+        further updates are ignored; the next one after it compares against it.
+
+        gate_idx: the caller's current gate index. Pass it: the runner advances
+        its index when a gate is passed and calls update_course BEFORE the
+        act() that would tell us, so on that tick self._gate_idx is one behind
+        and the new plan would start just past the gate and fly back through
+        it (a min-snap swoop that put the Starling 2 Max into the ground,
+        test_midflight_replan_straight3, 2026-11-07)."""
+        if gate_idx is not None:
+            self._gate_idx = max(self._gate_idx, int(gate_idx))
         if self._replan_thread is not None and self._replan_thread.is_alive():
             return False
         if not self.needs_replan(course):

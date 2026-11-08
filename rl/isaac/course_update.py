@@ -2,7 +2,7 @@
 Push a new Course into a running controller WITHOUT resetting it (the runner's
 vision mode does this whenever the gate map changes).
 
-    update_course(controller, course, pos=None, vel=None) -> str   # how it was done
+    update_course(controller, course, pos=None, vel=None, gate_idx=None) -> str   # how it was done
 
 Uniform hook: a controller with its own `update_course(course, pos, vel)` method
 (the MPC) is called through it. Otherwise small adapters here mutate the
@@ -56,11 +56,15 @@ def update_rl(controller, course):
     controller.pool = CoursePool([course], controller.device, controller.dtype)
 
 
-def update_course(controller, course, pos=None, vel=None):
-    """Returns "method" (controller.update_course), "pid" or "rl"."""
+def update_course(controller, course, pos=None, vel=None, gate_idx=None):
+    """Returns "method" (controller.update_course), "pid" or "rl". gate_idx (the
+    caller's current gate) is passed on to a controller's own method when given."""
     own = getattr(controller, "update_course", None)
     if callable(own):
-        own(course, pos, vel)
+        if gate_idx is None:
+            own(course, pos, vel)
+        else:
+            own(course, pos, vel, gate_idx=gate_idx)
         return "method"
     if hasattr(controller, "centers") or type(controller).__name__ == "PidController":
         update_pid(controller, course)

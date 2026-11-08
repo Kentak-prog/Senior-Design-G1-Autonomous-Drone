@@ -167,7 +167,7 @@ def _fly_with_vision_update(true_course, plan_course, update_at_gate, max_time=4
     for k in range(int(max_time / dt)):
         if replan and gi >= update_at_gate:
             ctl.update_course(true_course, sim.pos[0].numpy().astype(float),
-                              sim.vel[0].numpy().astype(float))
+                              sim.vel[0].numpy().astype(float), gate_idx=gi)
         T, w = ctl.act(sim.pos, sim.vel, sim.quat, torch.tensor([gi]), dt, omega=sim.omega)
         pp = sim.pos.clone()
         sim.step_ctbr(T, w)

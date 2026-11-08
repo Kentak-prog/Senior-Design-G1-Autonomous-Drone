@@ -375,7 +375,7 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
             f"({n_gates} gates)")
         controller.reset(1)
         if gs is not None:        # after reset: a controller's own update_course may need its reset state
-            update_course(controller, gs.current_course(), s.pos, s.vel)
+            update_course(controller, gs.current_course(), s.pos, s.vel, gate_idx=gate_idx)
         pacer = Pacer(vehicle, dt, s)
         t_race0 = s.t_sim
         p_prev = None
@@ -412,7 +412,7 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
             if gs is not None:
                 vision_tick(s, gate_idx)
                 if gs.changed():
-                    update_course(controller, gs.current_course(), s.pos, s.vel)
+                    update_course(controller, gs.current_course(), s.pos, s.vel, gate_idx=gate_idx)
             pos_t, vel_t, quat_t, om_t = _to_tensors(s)
             t0 = time.perf_counter()
             thrust, rates = controller.act(pos_t, vel_t, quat_t,
