@@ -1,0 +1,86 @@
+voxl-version output, captured 2026-11-09
+
+system-image: 1.8.04-M0054-14.1a-perf
+kernel:       #1 SMP PREEMPT Mon Mar 24 22:31:58 UTC 2025 4.19.125
+hw platform:  M0054
+mach.var:     1.0.1
+SKU:          MRB-D0012-4-V2-C29-T7-M28-X0
+voxl-suite:   1.5.1
+Repo:  http://voxl-packages.modalai.com/ ./dists/qrb5165/sdk-1.5/binary-arm64/
+Last Updated: 2026-11-03 21:19:43
+
+Packages:
+libfc-sensor                1.0.7
+libmodal-cv                 0.5.18
+libmodal-exposure           0.1.4
+libmodal-journal            0.2.6
+libmodal-json               0.4.7
+libmodal-pipe               2.13.2
+libqrb5165-io               0.5.0
+libvoxl-cci-direct          0.3.3
+libvoxl-cutils              0.1.5
+modalai-slpi                1.2.0
+mv-voxl                     0.1-r0
+qrb5165-bind                0.1-r0
+qrb5165-dfs-server          0.2.0
+qrb5165-imu-server          1.1.3
+qrb5165-mini-tof-server     0.2.2
+qrb5165-rangefinder-server  0.1.5
+qrb5165-slpi-test-sig       01-r0
+qrb5165-system-tweaks       0.3.6
+qrb5165-tflite              2.8.0-2
+voxl-bind-spektrum          0.1.1
+voxl-camera-calibration     0.6.0
+voxl-camera-server          2.2.4
+voxl-ceres-solver           2:1.14.0-10
+voxl-configurator           1.0.3
+voxl-cpu-monitor            0.6.0
+voxl-docker-support         1.3.1
+voxl-elrs                   0.4.7
+voxl-esc                    1.5.4
+voxl-feature-tracker        0.5.2
+voxl-flow-server            0.3.6
+voxl-gphoto2-server         0.0.10
+voxl-joystick-server        0.0.6
+voxl-jpeg-turbo             2.1.3-7
+voxl-lepton-server          1.3.3
+voxl-lepton-tracker         0.0.4
+voxl-libgphoto2             0.0.4
+voxl-libuvc                 1.0.7
+voxl-logger                 0.5.3
+voxl-mapper                 0.2.3
+voxl-mavcam-manager         0.6.0
+voxl-mavlink                0.1.5
+voxl-mavlink-server         1.4.9
+voxl-microdds-agent         3.0.0-0
+voxl-modem                  1.1.8
+voxl-mongoose               7.7.0-2
+voxl-mpa-to-ros             0.3.9
+voxl-mpa-to-ros2            0.0.7
+voxl-mpa-tools              1.4.0
+voxl-nlopt                  2.5.0-5
+voxl-open-vins              0.4.19
+voxl-open-vins-server       0.3.12
+voxl-opencv                 4.5.5-3
+voxl-osd                    0.1.8
+voxl-portal                 0.7.11
+voxl-px4                    1.14.0-2.0.105
+voxl-px4-params             0.7.6
+voxl-qvio-server            1.2.0
+voxl-remote-id              0.0.9
+voxl-reset-slpi             0.0.1
+voxl-ros2-foxy              0.0.1
+voxl-state-estimator        0.0.5
+voxl-streamer               0.7.5
+voxl-suite                  1.5.1
+voxl-tag-detector           0.0.5
+voxl-tflite-server          0.4.1
+voxl-utils                  1.4.8
+voxl-uvc-server             0.1.7
+voxl-vision-hub             1.8.23
+voxl-voxblox                1.1.5
+voxl-vtx                    1.4.7
+voxl-wavemux                0.0.1
+voxl2-io                    0.0.3
+voxl2-system-image          1.8.04-r0
+voxl2-wlan                  1.0-r0

@@ -68,8 +68,14 @@ STARLING_USD = None
 # an ideal pinhole, so this is the UNDISTORTED image with the lens's central
 # focal length: fx = 2.7 mm / 1.55 um = 1742 px at full width = 439.8 px at
 # 1024 wide, HFOV 2*atan(512/439.8) = 98.7 deg (VFOV 82.3 deg at 4:3).
-# 1024x768 (the sensor's 4:3 full-resolution mode) is ASSUMED: the mode in the
-# drone's voxl-camera-server.conf is not checked yet. The sensor's 16:9 modes
+# 1024x768 (the sensor's 4:3 full-resolution mode) matches the drone's
+# voxl-camera-server.conf (flight_logs/2026-11-09_drone_measurements/): hires_front
+# streams small_video 1024x768 and large_video 4056x3040, both 4:3, but has
+# en_preview false, so onboard vision needs its preview stream enabled (or the
+# h264 decoded). The same file's exif_focal_length is 3.1 mm (17 mm in 35 mm
+# terms), which would give HFOV 90.8 deg; it is a config value, not a
+# measurement, and differs from M0161's 2.7 mm. A calibration of this camera
+# decides between them (none is on the drone yet). The sensor's 16:9 modes
 # CROP rows (4K2K 4056x2288, 1080p binned from 4056x2224), so they keep the
 # 98.7 deg HFOV and see only ~66 deg vertically: for those set
 # CAMERA_RESOLUTION="1024x578" (Isaac derives the vertical FOV from the aspect).
