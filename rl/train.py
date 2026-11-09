@@ -42,6 +42,7 @@ from stable_baselines3.common.vec_env import VecNormalize
 from course import Course, TRACKS_DIR
 from drone_params import QuadParams
 from fly_course import run_controller
+from quad_sim import DynRand
 from race_env import RaceEnvConfig, RaceVecEnv
 from rl_policy import RlPolicyController
 
@@ -114,6 +115,9 @@ def main():
     ap.add_argument("--train-on-fixed", action="store_true",
                     help="add the fixed tracks to the training pool (then eval is not held-out)")
     ap.add_argument("--threads", type=int, default=0, help="torch threads (0 = default)")
+    ap.add_argument("--dyn-rand", action="store_true",
+                    help="randomise the plant per episode (quad_sim.DynRand defaults: mass, "
+                         "thrust, inertia, drag, k_m, motor lag, rate-loop gain)")
     args = ap.parse_args()
 
     if args.threads > 0:
@@ -123,7 +127,8 @@ def main():
     params = QuadParams()
     cfg = RaceEnvConfig(n_courses=args.n_courses, course_seed=args.course_seed,
                         include_fixed_tracks=args.train_on_fixed,
-                        course_yaw_jitter_deg=args.yaw_jitter, w_crash=args.w_crash)
+                        course_yaw_jitter_deg=args.yaw_jitter, w_crash=args.w_crash,
+                        dyn_rand=DynRand() if args.dyn_rand else None)
     batch_size = max(1, args.n_envs * args.n_steps // 4)
     ppo_kwargs = dict(n_steps=args.n_steps, batch_size=batch_size, n_epochs=args.n_epochs,
                       learning_rate=args.lr, gamma=args.gamma, gae_lambda=args.gae_lambda,

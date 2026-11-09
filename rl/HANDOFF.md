@@ -33,7 +33,7 @@ and a PID baseline speaking the same command interface as the future policy
 |---|---|---|
 | `drone_params.py` | done | `QuadParams`: single source of truth for the airframe |
 | `rotations.py` | done | batched quaternion / rotation-matrix / Euler helpers |
-| `quad_sim.py` | done | rigid body + mixer + CTBR rate loop + optional motor lag |
+| `quad_sim.py` | done | rigid body + mixer + CTBR rate loop + optional motor lag; per-env plant randomisation (`DynRand`, `randomize`) |
 | `course.py` | done | `Gate`, `Course`, `check_gate`, `random_course`, fixed tracks |
 | `tracks/*.json` | done | `straight3`, `oval6`, `slalom5`; regenerate with `python3 course.py --write-tracks` |
 | `pid_controller.py` | done | cascaded PID, pre/center/post waypoints per gate |
@@ -200,6 +200,57 @@ completion rate next to the same course flown with ground-truth gates.
 
 The z-down issue is already fixed in `control/` (z-up now). Mass is passed via
 `m=params.mass`; inertia via the new optional `inertia=` keyword.
+
+## Starling 2 Max policy with dynamics randomisation (2026-11-08)
+
+Best Max policy: `rl/runs/best_max/` (gitignored, copy it by hand like `runs/best`).
+It is checkpoint 245M of `max_v2`. Fly it with `DRONE_VEHICLE=starling2max`.
+
+**Training** (`DRONE_VEHICLE=starling2max`, both stages with `--dyn-rand --yaw-jitter 60
+--n-courses 512 --lr 1e-4 --w-crash 25`, 512 envs, about 64k fps on the M2 Pro):
+- `max_v1`: 60M steps from the Iris `runs/best` (135M steps), 19 min.
+- `max_v2`: 60M more steps from `max_v1`, 26 min.
+
+**Why randomise.** The Iris policy failed in Isaac (1/18, 2026-10-24) because PX4's rate
+loop rises in about 60 ms against QuadSim's 24 ms. `quad_sim.DynRand` now samples a plant
+per env at every reset:
+
+| Parameter | Range |
+|---|---|
+| mass | ×0.95–1.10 |
+| k_f | ×0.9–1.1 |
+| inertia (per axis) | ×0.7–1.4 |
+| drag (per axis) | ×0.5–1.5 |
+| k_m | ×0.6–1.6 |
+| motor lag | 20–50 ms |
+| rate-loop Kp (per axis) | ×0.4–1.0 |
+
+- On the Max this spans 63 % rise times of 26–106 ms in roll/pitch and 48–172 ms in yaw.
+  That covers PX4's 58–64 ms and 110–120 ms as measured on the Iris.
+- Only the plant varies. The mixer, the thrust-to-rotor map and the rate loop's
+  `I_nominal * Kp` stay nominal, as PX4's do.
+
+**Results.** QuadSim, Max profile, completion over noisy starts (0.3 m), median lap:
+
+| Controller | Plant | straight3 | oval6 | slalom5 |
+|---|---|---|---|---|
+| PID | nominal | 100 % 8.30 s | 100 % 18.82 s | 100 % 18.98 s |
+| PID | random | 100 % 8.32 s | 100 % 18.85 s | 100 % 19.01 s |
+| RL Iris `best` | nominal | 91 % 3.14 s | 0 % | 0 % |
+| RL Iris `best` | random | 72 % 3.22 s | 47 % 7.76 s | 0 % |
+| RL `best_max` | nominal | 100 % 3.30 s | 100 % 7.52 s | 100 % 7.18 s |
+| RL `best_max` | random (32 starts) | 100 % 3.20 s | 100 % 7.45 s | 72 % 7.22 s |
+| RL `best_max` | random (128 starts, seed 7) | 100 % | 98 % | 72 % |
+
+- This is the first policy to fly slalom5.
+- Every slalom5 failure on the random plant is a gate clip, never a loss of control.
+- For reference, the Iris `best` on the Iris with the random plant scores 75 / 47 / 3 %.
+  So randomisation exposes exactly the sensitivity that broke it in Isaac.
+
+**Not done yet:**
+- The Max's own PX4 rate response is unmeasured. Run `rl/isaac/calibrate.py rates` on the
+  Isaac Max, then recentre `DynRand.rate_kp` / `tau_motor` if it falls outside the ranges.
+- `best_max` has not been flown in Isaac. That is the real test of the rate-loop fix.
 
 ## Training results so far (2026-10-15, Iris params, no noise)
 

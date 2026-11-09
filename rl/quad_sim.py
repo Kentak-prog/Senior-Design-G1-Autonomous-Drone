@@ -44,6 +44,15 @@ RATE CONTROLLER (CTBR inner loop)
     kicks on setpoint steps. Gyroscopic coupling and rotor inertia torques are
     not cancelled (the integrator absorbs them), as in PX4.
 
+DOMAIN RANDOMISATION (randomize / DynRand)
+    The plant can differ per env from the nominal QuadParams: mass, thrust
+    coefficient, inertia, drag, yaw-moment coefficient, motor lag and the
+    rate-loop gain. Only the PLANT changes; the controller side (rate-loop
+    torque I_nominal * Kp * e, mixer A built from nominal k_m / k_f, thrust ->
+    rotor speed with nominal k_f) keeps the nominal numbers, as PX4 does not
+    know the true airframe. With no randomisation every env is nominal and the
+    simulation is the same as before.
+
 DYNAMICS
     Forces: sum rotor thrust along body +z, rotated to world, plus linear drag
     (-coeff * v_body, body frame) and gravity. Torques: sum r_i x f_i + yaw
@@ -53,6 +62,7 @@ DYNAMICS
 """
 
 import math
+from dataclasses import dataclass
 from typing import Optional
 
 import torch
@@ -73,13 +83,33 @@ def build_allocation(params: QuadParams, device="cpu", dtype=torch.float32) -> t
     ], dim=0)
 
 
+@dataclass
+class DynRand:
+    """Per-env plant ranges, sampled uniformly at each reset. Scales multiply the
+    nominal value; tau_motor is absolute [s]. None leaves that parameter nominal.
+    Defaults (2026-11-07) bracket the Starling 2 Max's estimates and PX4's
+    slower rate loop. On the Max, the corners of rate_kp x tau_motor x inertia
+    give 63 % rise times of 26-106 ms roll/pitch (median 52) and 48-172 ms yaw
+    (median 93), overshoot up to 40 %; PX4 on the Iris measured 58-64 ms and
+    110-120 ms with 40 % yaw overshoot (rl/isaac/RESULTS_2026-10-24.md). The
+    Max's own PX4 response has not been measured yet (rl/isaac/calibrate.py rates)."""
+    mass: Optional[tuple] = (0.95, 1.10)
+    thrust: Optional[tuple] = (0.90, 1.10)       # k_f
+    inertia: Optional[tuple] = (0.70, 1.40)      # per axis
+    drag: Optional[tuple] = (0.50, 1.50)         # per axis
+    k_m: Optional[tuple] = (0.60, 1.60)
+    tau_motor: Optional[tuple] = (0.020, 0.050)  # s
+    rate_kp: Optional[tuple] = (0.40, 1.00)      # per axis
+
+
 class RateController:
     """Batched body-rate PID producing a body torque [N m]. See module docstring."""
 
     def __init__(self, params: QuadParams, n_envs: int, device="cpu", dtype=torch.float32):
         self.params = params
         self.inertia = torch.tensor(params.inertia_diag, dtype=dtype, device=device)
-        self.kp = torch.tensor(params.rate_kp, dtype=dtype, device=device)
+        self.kp_nominal = torch.tensor(params.rate_kp, dtype=dtype, device=device)
+        self.kp = self.kp_nominal.expand(n_envs, 3).clone()     # per env (DynRand.rate_kp)
         self.ki = torch.tensor(params.rate_ki, dtype=dtype, device=device)
         self.kd = torch.tensor(params.rate_kd, dtype=dtype, device=device)
         self.integral = torch.zeros(n_envs, 3, dtype=dtype, device=device)
@@ -132,6 +162,56 @@ class QuadSim:
         self.rotor_w = torch.full((n_envs, 4), p.hover_rotor_speed(), **kw)
         self.rate_ctrl = RateController(p, n_envs, device, dtype)
 
+        # per-env TRUE plant (see DOMAIN RANDOMISATION); nominal until randomize()
+        self.mass_true = torch.full((n_envs, 1), p.mass, **kw)
+        self.inertia_true = self.inertia.expand(n_envs, 3).clone()
+        self.kf_true = torch.full((n_envs, 1), p.k_f, **kw)
+        self.km_true = torch.full((n_envs, 1), p.k_m, **kw)
+        self.drag_true = self.drag.expand(n_envs, 3).clone()
+        self.tau_true = torch.full((n_envs, 1), p.tau_motor, **kw)
+
+    # ------------------------------------------------------------------
+    def nominal_dynamics(self, env_ids=None):
+        """Put the plant of `env_ids` (default all) back to the nominal QuadParams."""
+        ids = slice(None) if env_ids is None else torch.as_tensor(env_ids, device=self.device).reshape(-1)
+        p = self.p
+        self.mass_true[ids] = p.mass
+        self.inertia_true[ids] = self.inertia
+        self.kf_true[ids] = p.k_f
+        self.km_true[ids] = p.k_m
+        self.drag_true[ids] = self.drag
+        self.tau_true[ids] = p.tau_motor
+        self.rate_ctrl.kp[ids] = self.rate_ctrl.kp_nominal
+
+    def randomize(self, env_ids, rand: "DynRand", generator: Optional[torch.Generator] = None):
+        """Sample a new plant for `env_ids` from `rand` (see DynRand)."""
+        ids = torch.as_tensor(env_ids, device=self.device).reshape(-1)
+        k = ids.numel()
+        self.nominal_dynamics(ids)
+        if k == 0:
+            return
+        kw = dict(dtype=self.dtype, device=self.device)
+
+        def u(rng, n):
+            lo, hi = rng
+            return lo + (hi - lo) * torch.rand(k, n, generator=generator, **kw)
+
+        p = self.p
+        if rand.mass is not None:
+            self.mass_true[ids] = p.mass * u(rand.mass, 1)
+        if rand.thrust is not None:
+            self.kf_true[ids] = p.k_f * u(rand.thrust, 1)
+        if rand.inertia is not None:
+            self.inertia_true[ids] = self.inertia * u(rand.inertia, 3)
+        if rand.drag is not None:
+            self.drag_true[ids] = self.drag * u(rand.drag, 3)
+        if rand.k_m is not None:
+            self.km_true[ids] = p.k_m * u(rand.k_m, 1)
+        if rand.tau_motor is not None:
+            self.tau_true[ids] = u(rand.tau_motor, 1)
+        if rand.rate_kp is not None:
+            self.rate_ctrl.kp[ids] = self.rate_ctrl.kp_nominal * u(rand.rate_kp, 3)
+
     # ------------------------------------------------------------------
     def reset(self, env_ids=None, pos=None, vel=None, quat=None, omega=None,
               rotor_w=None):
@@ -173,32 +253,30 @@ class QuadSim:
         p = self.p
         dt = p.physics_dt if dt is None else dt
         w_ref = w_ref.clamp(p.w_min, p.w_max)
-        if p.tau_motor > 0.0:
-            alpha = 1.0 - math.exp(-dt / p.tau_motor)
-            self.rotor_w = self.rotor_w + alpha * (w_ref - self.rotor_w)
-        else:
-            self.rotor_w = w_ref.clone()
+        tau = self.tau_true
+        alpha = torch.where(tau > 0.0, 1.0 - torch.exp(-dt / tau.clamp_min(1e-9)),
+                            torch.ones_like(tau))                  # (N,1); 1 = no lag
+        self.rotor_w = self.rotor_w + alpha * (w_ref - self.rotor_w)
 
         w2 = self.rotor_w ** 2
-        f = p.k_f * w2                                             # (N,4) rotor thrusts
+        f = self.kf_true * w2                                      # (N,4) rotor thrusts
         R = quat_to_rotmat(self.quat)                              # (N,3,3)
 
         # forces
         thrust_body = torch.zeros_like(self.pos)
         thrust_body[:, 2] = f.sum(-1)
         v_body = torch.einsum("nji,nj->ni", R, self.vel)           # R^T v
-        drag_body = -self.drag * v_body
-        force_world = torch.einsum("nij,nj->ni", R, thrust_body + drag_body) \
-            + p.mass * self.g_world
-        acc = force_world / p.mass
+        drag_body = -self.drag_true * v_body
+        acc = torch.einsum("nij,nj->ni", R, thrust_body + drag_body) / self.mass_true \
+            + self.g_world
 
         # torques: r_i x f_i (f along +z) + yaw reaction moments - gyroscopic
         tx = (self.rotor_pos[:, 1] * f).sum(-1)
         ty = -(self.rotor_pos[:, 0] * f).sum(-1)
-        tz = (p.k_m * w2 * self.rot_dir).sum(-1)
+        tz = (self.km_true * w2 * self.rot_dir).sum(-1)
         torque = torch.stack([tx, ty, tz], dim=-1)
-        gyro = torch.cross(self.omega, self.inertia * self.omega, dim=-1)
-        domega = (torque - gyro) / self.inertia
+        gyro = torch.cross(self.omega, self.inertia_true * self.omega, dim=-1)
+        domega = (torque - gyro) / self.inertia_true
 
         # semi-implicit Euler
         self.vel = self.vel + acc * dt

@@ -96,6 +96,9 @@ class RaceEnvConfig:
     spawn_vel_std: float = 0.3             # m/s, extra Gaussian per axis
     spawn_rate_std: float = 0.2            # rad/s, Gaussian per axis
 
+    # --- dynamics randomisation (quad_sim.DynRand); None = nominal plant ---
+    dyn_rand: Optional[object] = None
+
     # --- observation ---
     obs_noise_std: float = 0.01   # Gaussian noise on the scaled obs (env only;
     # the deployed controller adds none). 0 disables it.
@@ -283,6 +286,8 @@ class RaceEnv:
         omega = cfg.spawn_rate_std * self._randn(k, 3)
 
         self.sim.reset(ids, pos=pos, vel=vel, quat=quat, omega=omega)
+        if cfg.dyn_rand is not None:
+            self.sim.randomize(ids, cfg.dyn_rand, self.gen)
         self.ep_len[ids] = 0
         self.ep_return[ids] = 0.0
         self.prev_action[ids] = 0.0

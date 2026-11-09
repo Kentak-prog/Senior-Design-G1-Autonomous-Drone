@@ -221,6 +221,49 @@ def test_motor_lag():
     print(f"  motor lag tau=50 ms -> 63% at {t63 * 1000:.0f} ms  OK")
 
 
+def test_dynamics_randomization():
+    """DynRand changes only the plant, per env, reproducibly; nominal is unchanged."""
+    from quad_sim import DynRand
+    n = 64
+    hover = torch.full((n,), P.hover_thrust())
+    zero = torch.zeros(n, 3)
+
+    def fly(sim, steps=50):
+        sim.reset(pos=torch.tensor([[0.0, 0.0, 5.0]]).expand(n, 3))
+        for _ in range(steps):
+            sim.step_ctbr(hover, zero)
+        return sim.pos[:, 2].clone()
+
+    nominal = QuadSim(n, P)
+    z_nom = fly(nominal)
+    assert torch.allclose(z_nom, z_nom[0].expand(n)) and abs(float(z_nom[0]) - 5.0) < 1e-3   # hovers
+    sim = QuadSim(n, P)
+    g = torch.Generator().manual_seed(0)
+    sim.randomize(torch.arange(n), DynRand(), g)
+    # the controller side stays nominal: same mixer, same commanded thrust -> rotor speed map
+    assert torch.equal(sim.A_inv, nominal.A_inv)
+    assert torch.equal(sim.rate_ctrl.kp_nominal, nominal.rate_ctrl.kp_nominal)
+    r = DynRand()
+    for name, t, nom, rng in (("mass", sim.mass_true, P.mass, r.mass), ("k_f", sim.kf_true, P.k_f, r.thrust),
+                              ("k_m", sim.km_true, P.k_m, r.k_m)):
+        ratio = t / nom
+        assert float(ratio.min()) >= rng[0] - 1e-6 and float(ratio.max()) <= rng[1] + 1e-6, name
+        assert float(ratio.std()) > 0.02, name                         # really per env
+    assert float(sim.tau_true.min()) >= r.tau_motor[0] - 1e-9 and float(sim.tau_true.max()) <= r.tau_motor[1] + 1e-9
+    # a plant with more thrust per unit mass climbs at the nominal hover command, less sinks
+    z = fly(sim)
+    tw = (sim.kf_true / sim.mass_true).reshape(-1) / (P.k_f / P.mass)
+    assert float(z[tw > 1.05].mean()) > 5.0 > float(z[tw < 0.95].mean())
+    # reproducible from the generator, and nominal_dynamics restores the nominal plant
+    sim2 = QuadSim(n, P)
+    sim2.randomize(torch.arange(n), DynRand(), torch.Generator().manual_seed(0))
+    assert torch.equal(sim2.kf_true, sim.kf_true) and torch.equal(sim2.rate_ctrl.kp, sim.rate_ctrl.kp)
+    sim.nominal_dynamics()
+    assert torch.allclose(fly(sim), z_nom)
+    print(f"  64 random plants: thrust/weight x{float(tw.min()):.2f}-{float(tw.max()):.2f} -> "
+          f"z after 1 s {float(z.min()):.2f}-{float(z.max()):.2f} m at nominal hover; nominal restored  OK")
+
+
 if __name__ == "__main__":
     print("test_hover");                       test_hover()
     print("test_free_fall");                   test_free_fall()
@@ -234,4 +277,5 @@ if __name__ == "__main__":
     print("test_batching_independent");        test_batching_independent()
     print("test_quaternion_unit_norm");        test_quaternion_unit_norm()
     print("test_motor_lag");                   test_motor_lag()
+    print("test_dynamics_randomization");      test_dynamics_randomization()
     print("\nAll tests passed.")

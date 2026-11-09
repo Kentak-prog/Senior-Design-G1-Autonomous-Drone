@@ -37,8 +37,9 @@ GROUND_Z = 0.05
 
 
 def run_controller(course, controller, params=None, max_time=60.0, n_envs=1,
-                   seed=0, start_noise=0.0, dtype=torch.float32, device="cpu"):
-    """Returns (log, summary). log arrays are numpy: t (T+1,), pos/vel (T+1,N,3),
+                   seed=0, start_noise=0.0, dtype=torch.float32, device="cpu", dyn_rand=None):
+    """dyn_rand: a quad_sim.DynRand to fly each env on its own random plant
+    (seeded by `seed`); None = the nominal plant. Returns (log, summary). log arrays are numpy: t (T+1,), pos/vel (T+1,N,3),
     gates_passed (N,), crashed (N,), crash_kind list, completed (N,),
     lap_time (N,) (nan if not completed). summary is for env 0 plus aggregates."""
     params = params if params is not None else QuadParams()
@@ -51,6 +52,9 @@ def run_controller(course, controller, params=None, max_time=60.0, n_envs=1,
     zeros = torch.zeros(n_envs, dtype=dtype, device=device)
     q0 = quat_from_euler_zyx(zeros, zeros, zeros + yaw)
     sim.reset(pos=pos0, quat=q0)
+    if dyn_rand is not None:
+        sim.randomize(torch.arange(n_envs, device=device), dyn_rand,
+                      torch.Generator(device=device).manual_seed(int(seed)))
     controller.reset(n_envs, device, dtype)
 
     dt = params.control_dt
