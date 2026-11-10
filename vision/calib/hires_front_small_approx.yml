@@ -1,0 +1,21 @@
+%YAML:1.0
+---
+# APPROXIMATE, not a calibration. hires_front small video 1024x768 (IMX412,
+# full 4056x3040 scaled 0.2525, no crop assumed). fx = 3.1 mm / 1.55 um * 0.2525
+# from voxl-camera-server.conf exif_focal_length 3.1 mm (17 mm 35mm-eq).
+# Ideal pinhole, zero distortion: the lens is visibly barrel-distorted, so
+# corners away from the image centre will bias range. Replace with a
+# checkerboard calibration.
+M: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 504.9, 0., 512., 0., 504.9, 384., 0., 0., 1. ]
+D: !!opencv-matrix
+   rows: 5
+   cols: 1
+   dt: d
+   data: [ 0., 0., 0., 0., 0. ]
+width: 1024
+height: 768
+distortion_model: plumb_bob

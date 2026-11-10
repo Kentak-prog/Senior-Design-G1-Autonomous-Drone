@@ -9,3 +9,8 @@ rl/runs/
 # keep them out of git. The pod keeps the originals under /workspace/vio_runs and
 # /workspace/px4_runs; figures and summaries in the same folders stay tracked.
 Trajectory/isaac_results/**/*.csv
+
+# Real-camera gate runs: raw frames (hundreds of MB) and overlay videos stay local;
+# detections.csv, README and handlabel/ are tracked.
+vision/live_runs/**/raw_jpg/
+vision/live_runs/**/*.mp4

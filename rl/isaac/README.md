@@ -161,6 +161,9 @@ decides passing; passing needs it below about 0.45 m):
 | RL | oval6 | 7.46 s | **fails at gate 4 (3/6) on all 3 seeds** | hits a gate |
 | MPC (`mpc_ctbr`) | straight3 / oval6 | see mpc_ctbr | 9.42 s / 24.82 s (seed 0) | hits a gate |
 
+**Live Isaac, slalom3 (2026-10-30, Iris, vision seed 0):** PID 3/3 (7.18 s lap), MPC 1/3, RL 1/3 (timeout). MPC
+flown on truth gates reached 2/3. Plots, CSVs and front-camera videos are in [`results_slalom3/`](results_slalom3/README.md).
+
 RL on oval6 fails even with noise-free detections and with a prior that is only 0.1 m wrong (a controller flown on a
 0.1 m-perturbed gate map misses a TRUE gate in 4 of 5 seeds): the policy's oval6 lap has an edge margin of 0.31 m against
 the 0.30 m the pass test needs. This is the policy's margin, not the vision path.

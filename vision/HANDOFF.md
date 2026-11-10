@@ -70,6 +70,9 @@ quaternion. Summary, but read the originals — they explain *why*:
 | `test_gate_layout.py` | passing (fixed 2026-10-01) | the narrow-FOV test now uses `NESTED_GATE_SPECS`; `test_approach_layout_level_and_fits_pitched_camera` covers `APPROACH_GATE_SPECS`. Needs no ROS/omni/pxr; the one file that imports across the `vision/`/`workspace/` boundary |
 | `gate_error_eval/` | **run live 2026-10-01** (hover bag, 1 m and 3 m approach flights) | error-vs-ground-truth graphs, hover or moving: `fly_gate_approach.py` (pymavlink offboard straight-line flight) → `ros2 bag record` → `eval_gate_bag.py` (bag → `gate_errors.csv`, pose interpolated to each image stamp) → `plot_gate_errors.py` (4 report PNGs + summary table, runs on a Mac). `error_records.py` holds the shared CSV schema / `PoseBuffer` / summary. See "Gate-error graphs" below. `example_output/` is **synthetic** data |
 | `workspace/spawn_test_gates.py` | run live (2026-10-01: 5 gates kept, 0 dropped at 1280x720 / 60 deg). `check_layout`'s clearance is still too loose: it once passed a layout whose gate bars were 1-2 px apart | reads the camera's live pose/FOV off the USD stage and places magenta test gates. Default `GATE_SPECS` is a **staggered** layout (ranges 6-14 m, scattered az/el) sized for a wide camera; the old on-axis nested chain is kept as `NESTED_GATE_SPECS` (at a wide FOV its frames touch and the mask merges them: detector found 0/5). Writes `/workspace/test_gates.json` (shared volume). **Run it only after the drone is hovering** |
+| `live_gate_test.py` | **run on the real Starling 2026-11-09** (`live_runs/real_gate_01/`) | real-camera test: VOXL Portal MJPEG (`adb forward tcp:8080 tcp:80`) → detector (`tye` = Tye's NumPy CNN from `../gate_cnn`, `cnn` = Ultralytics, `color`) → PnP → `overlay.mp4` + `detections.csv` + every raw frame in `raw_jpg/` (raw frames and videos are git-ignored). Tye's CNN accepted 0/2429 real frames (white PVC, not purple); hand-labelled PnP gave consistent ~1.75 m ranges, not yet checked against a tape measure. See the run README |
+| `calib/hires_front_small_approx.yml` | **approximate, not a calibration** | EXIF-focal-length pinhole for `hires_front_small` 1024x768, zero distortion. The drone has no hires intrinsics; replace with a checkerboard calibration |
+| `test_live_gate_test.py` | passing | calib loading, resolution rescale, fisheye round-trip, quad fit, hand-labelled real-frame range |
 | `workspace/spawn_example.py` | run live | spawns Iris + PX4/ROS 2 backends + camera at `RESOLUTION=(1280,720)`, `HFOV_DEG=60`; after configuring the camera it calls `refresh_camera_info_helper()` (see "RESOLVED (2026-10-01)"). **Run it ONCE per Isaac Sim process** — see deployment notes |
 
 Run the test files exactly like this before and after any change in this
@@ -81,8 +84,9 @@ python3 test_ros_camera.py
 python3 test_color_gate_detector.py
 python3 test_eval_isaac_gates.py
 python3 test_gate_layout.py
+python3 test_live_gate_test.py
 ```
-All five print `All tests passed.` (plus the three in `gate_error_eval/`). None needs ROS, Isaac Sim, or
+All six print `All tests passed.` (plus the three in `gate_error_eval/`). None needs ROS, Isaac Sim, or
 omni/pxr installed — they only need `numpy` and `cv2` (opencv-python).
 `eval_isaac_gates.py` is different: it needs ROS 2 sourced and a live
 simulator, and is not runnable in this offline environment.
@@ -429,6 +433,13 @@ is spawned as before.
 9. **`workspace/spawn_example.py` placement.** It's currently the only
    file outside the `control/`/`vision/` layout the rest of the repo has
    settled into. Not urgent, but worth a decision.
+
+10. **Real gate: calibrate the hires camera, then fine-tune the detector.** These two block real-gate PnP
+   (2026-11-09, `live_runs/real_gate_01/`). (a) Do a checkerboard calibration of `hires_front_small` (fisheye model;
+   `live_gate_test.py --calib` already reads voxl-calibrate-camera yaml) and tape-measure the gate range on the
+   next run. (b) Fine-tune Tye's CNN on labelled white-PVC frames: `raw_jpg/` holds 2429 frames and
+   `handlabel/label_pnp.py` shows the corner-snapping approach. Use `--no-color-checks` until
+   `good_detection()` stops assuming purple.
 
 ## Recent history (for context on *why* things look the way they do)
 
