@@ -1,0 +1,146 @@
+{
+  "clean": {
+    "cnn": {
+      "corner_px": 1.1843330280678368,
+      "pos_err_median_pct": 0.9978564085333673,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.2740141376924177,
+      "pos_err_median_pct": 0.7262219027521879,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 1.4457719542178882,
+      "pos_err_median_pct": 0.7198924978253394,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    }
+  },
+  "sensor noise": {
+    "cnn": {
+      "corner_px": 1.1933543613452136,
+      "pos_err_median_pct": 0.9695744558030237,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.2415905468376824,
+      "pos_err_median_pct": 0.6956252748810017,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 1.4249207450800567,
+      "pos_err_median_pct": 0.670778009294411,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    }
+  },
+  "motion blur": {
+    "cnn": {
+      "corner_px": 1.3872393836022396,
+      "pos_err_median_pct": 1.4258850569789387,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.5773908966257337,
+      "pos_err_median_pct": 1.5000058709399022,
+      "success_pct": 99.66666666666667,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 2.795428416816318,
+      "pos_err_median_pct": 4.46427511185909,
+      "success_pct": 97.66666666666667,
+      "no_detection_pct": 0.0
+    }
+  },
+  "low light": {
+    "cnn": {
+      "corner_px": 1.3965893571867523,
+      "pos_err_median_pct": 1.4473422466401624,
+      "success_pct": 99.66666666666667,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.3702024144609775,
+      "pos_err_median_pct": 1.2978655487749202,
+      "success_pct": 99.66666666666667,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 1.388600684741762,
+      "pos_err_median_pct": 1.1378285213462875,
+      "success_pct": 99.66666666666667,
+      "no_detection_pct": 0.0
+    }
+  },
+  "clutter": {
+    "cnn": {
+      "corner_px": 1.1905209368530614,
+      "pos_err_median_pct": 0.9142557125065325,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.3058334551697897,
+      "pos_err_median_pct": 0.7863595253487415,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 1.5152260660544234,
+      "pos_err_median_pct": 0.7145118634363243,
+      "success_pct": 100.0,
+      "no_detection_pct": 0.0
+    }
+  },
+  "gates behind": {
+    "cnn": {
+      "corner_px": 4.627177055531962,
+      "pos_err_median_pct": 2.5884856678341572,
+      "success_pct": 87.0,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 4.562020266703193,
+      "pos_err_median_pct": 2.426866151310537,
+      "success_pct": 86.66666666666667,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 14.481494074094044,
+      "pos_err_median_pct": 20.742549784603796,
+      "success_pct": 27.333333333333332,
+      "no_detection_pct": 0.0
+    }
+  },
+  "Isaac floor": {
+    "cnn": {
+      "corner_px": 1.6125792347688428,
+      "pos_err_median_pct": 1.152580357393612,
+      "success_pct": 99.33333333333333,
+      "no_detection_pct": 0.0
+    },
+    "cnn+refine": {
+      "corner_px": 1.610308096377266,
+      "pos_err_median_pct": 0.7987961375793776,
+      "success_pct": 99.33333333333333,
+      "no_detection_pct": 0.0
+    },
+    "colour": {
+      "corner_px": 3.65752877351286,
+      "pos_err_median_pct": 0.8062838505850074,
+      "success_pct": 86.33333333333333,
+      "no_detection_pct": 0.0
+    }
+  },
+  "_timing_ms_per_frame": {
+    "cnn": 5.495291096823556,
+    "colour": 0.2045072828020368
+  }
+}
