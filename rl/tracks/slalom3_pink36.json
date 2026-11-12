@@ -1,0 +1,39 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "slalom3_pink36",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 5.164381976199195,
+      "y": 0.5665765229507649,
+      "z": 3.3667021638134256,
+      "yaw_deg": 7.9091318729107645,
+      "side": 0.8636,
+      "bar": 0.0254
+    },
+    {
+      "name": "gate_1",
+      "x": 8.601811302985835,
+      "y": -3.2453122090077366,
+      "z": 3.6555868185513933,
+      "yaw_deg": -22.090868127089237,
+      "side": 0.8636,
+      "bar": 0.0254
+    },
+    {
+      "name": "gate_2",
+      "x": 13.045481546186625,
+      "y": -2.0746533823818125,
+      "z": 3.7681380861577014,
+      "yaw_deg": -7.0908681270892355,
+      "side": 0.8636,
+      "bar": 0.0254
+    }
+  ],
+  "gate_color": [
+    1.0,
+    0.141,
+    0.456
+  ],
+  "gate_note": "36 in (0.914 m) outer, 1 in (0.0254 m) pipe: opening 0.864 m, pink"
+}

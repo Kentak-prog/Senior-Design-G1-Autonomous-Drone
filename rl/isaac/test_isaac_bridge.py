@@ -582,6 +582,43 @@ def test_runner_finish_holds_then_loiters():
     print("  completion: 1 s position hold, then loiter  OK")
 
 
+def test_braking_setpoints():
+    dt = 0.02
+    v0 = np.array([2.4, 0.0, -0.2])
+    sps = runner.braking_setpoints([10.0, 0.0, 2.5], v0, dt, decel=1.5, hold_s=1.0)
+    speed = np.linalg.norm(v0)
+    n_brake = int(math.ceil(speed / 1.5 / dt))
+    assert len(sps) == n_brake + 50
+    stop = np.array([10.0, 0.0, 2.5]) + v0 * speed / (2 * 1.5)        # v^2 / 2a along v
+    assert np.allclose(sps[-1], stop) and np.allclose(sps[n_brake - 1], stop)
+    steps = np.linalg.norm(np.diff(np.vstack([[10.0, 0.0, 2.5], sps]), axis=0), axis=1)
+    assert steps.max() <= speed * dt + 1e-9 and np.all(np.diff(steps[:n_brake]) <= 1e-9)  # slows down
+    assert len(runner.braking_setpoints([0, 0, 2], [0, 0, 0], dt, hold_s=1.0)) == 50  # at rest: plain hold
+    print("  braking hold: constant-decel path to v^2/2a, never a position step  OK")
+
+
+def test_pink36_tracks():
+    import spawn_track as st
+    for name in ("straight3", "oval6", "slalom3", "slalom5"):
+        with open(os.path.join(TRACKS_DIR, f"{name}_pink36.json")) as f:
+            d = json.load(f)
+        with open(os.path.join(TRACKS_DIR, f"{name}.json")) as f:
+            base = json.load(f)
+        for s, b in zip(st.track_gate_specs(d), base["gates"]):
+            assert abs(s["side"] + 2 * s["bar"] - 0.9144) < 1e-3 and s["bar"] == 0.0254   # 36 in outer, 1 in pipe
+            assert (s["x"], s["y"], s["z"], s["yaw_deg"]) == (b["x"], b["y"], b["z"], b["yaw_deg"])
+        assert st.gate_color(d, (1, 0, 1)) == (1.0, 0.141, 0.456)
+        assert Course.from_dict(d).gates[0].side == d["gates"][0]["side"]
+    assert st.gate_color({}, (1.0, 0.0, 1.0)) == (1.0, 0.0, 1.0)
+    for bad in ([1, 0], [2, 0, 0]):
+        try:
+            st.gate_color({"gate_color": bad}, (1, 0, 1))
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    print("  pink 36 in tracks: same layouts, 0.864 m opening, 1 in bars, pink  OK")
+
+
 def test_log_csv_roundtrip():
     c = _track("straight3")
     log, s = run_in_vehicle(SimVehicle(P), c, PidController(P, c), P, max_time=1.0,
@@ -681,7 +718,7 @@ if __name__ == "__main__":
               "test_sim_vehicle_basics", "test_offline_pid_straight3",
               "test_offline_pid_other_tracks_and_origin_offset", "test_offline_rl",
               "test_wrong_conversions_are_caught", "test_thrust_map_mismatch_visible",
-              "test_runner_aborts", "test_auto_geofence", "test_runner_finish_holds_then_loiters",
+              "test_runner_aborts", "test_auto_geofence", "test_runner_finish_holds_then_loiters", "test_braking_setpoints", "test_pink36_tracks",
               "test_log_csv_roundtrip", "test_calibration_math", "test_calibration_offline",
               "test_spawn_track"]:
         print(n)

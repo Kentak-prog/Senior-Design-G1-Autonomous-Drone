@@ -248,9 +248,10 @@ per env at every reset:
   So randomisation exposes exactly the sensitivity that broke it in Isaac.
 
 **Not done yet:**
-- The Max's own PX4 rate response is unmeasured. Run `rl/isaac/calibrate.py rates` on the
-  Isaac Max, then recentre `DynRand.rate_kp` / `tau_motor` if it falls outside the ranges.
-- `best_max` has not been flown in Isaac. That is the real test of the rate-loop fix.
+- ~~The Max's own PX4 rate response is unmeasured.~~ Measured 2026-11-12: roll/pitch/yaw 63 % rise
+  77 / 67 / 156 ms, inside the `DynRand` ranges (`rl/isaac/RESULTS_2026-11-12_max_pink.md`).
+- `best_max` has not been flown in Isaac. The team's lab gates are 36 in pink (0.864 m opening), on
+  which `best_max` fails even offline: retrain on `rl/tracks/*_pink36.json` first.
 
 ## Training results so far (2026-10-15, Iris params, no noise)
 

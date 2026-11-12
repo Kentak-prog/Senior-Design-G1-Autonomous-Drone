@@ -161,6 +161,10 @@ decides passing; passing needs it below about 0.45 m):
 | RL | oval6 | 7.46 s | **fails at gate 4 (3/6) on all 3 seeds** | hits a gate |
 | MPC (`mpc_ctbr`) | straight3 / oval6 | see mpc_ctbr | 9.42 s / 24.82 s (seed 0) | hits a gate |
 
+**Live Isaac, Starling 2 Max on pink 36 in gates (2026-11-12):** PID 11/12, MPC 2/12, RL not flown (needs a
+retrain for the 0.864 m opening). Calibration, findings and the post-lap braking fix:
+[`RESULTS_2026-11-12_max_pink.md`](RESULTS_2026-11-12_max_pink.md). Driving Isaac without the GUI: [`kit_tools/`](kit_tools/README.md).
+
 **Live Isaac, slalom3 (2026-10-30, Iris, vision seed 0):** PID 3/3 (7.18 s lap), MPC 1/3, RL 1/3 (timeout). MPC
 flown on truth gates reached 2/3. Plots, CSVs and front-camera videos are in [`results_slalom3/`](results_slalom3/README.md).
 

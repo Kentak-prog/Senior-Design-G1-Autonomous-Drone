@@ -18,7 +18,8 @@ PHASES
        previous and the current state with course.check_gate (exactly as
        fly_course.run_controller), safety aborts, then controller.act ->
        vehicle.send_ctbr.
-    After the last gate: hold the current position for hold_s, then AUTO.LOITER.
+    After the last gate: brake along a constant-deceleration path (hold_decel m/s^2)
+       to a stop, hold there for hold_s, then AUTO.LOITER.
     On ANY abort or exception: AUTO.LOITER immediately (try/finally).
 
 ABORT KINDS (summary["crash_kind"]; "" = none)
@@ -210,6 +211,23 @@ def edge_margins(pos, course):
 # --------------------------------------------------------------------------
 # phase A (also used by calibrate.py)
 # --------------------------------------------------------------------------
+def braking_setpoints(pos, vel, dt, *, decel=1.5, hold_s=1.0):
+    """Position setpoints (ENU) that bring a drone at `pos` moving with `vel` to
+    rest at constant deceleration `decel` [m/s^2], then hold the stop point for
+    `hold_s`. One setpoint per control tick `dt`."""
+    pos = np.asarray(pos, dtype=np.float64)
+    vel = np.asarray(vel, dtype=np.float64)
+    speed = float(np.linalg.norm(vel))
+    t_stop = speed / decel if speed > 1e-6 else 0.0
+    out = []
+    for k in range(1, int(math.ceil(t_stop / dt)) + 1):
+        t = min(k * dt, t_stop)
+        out.append(pos + vel * t - 0.5 * decel * t * t * vel / speed)
+    stop = pos + 0.5 * vel * t_stop
+    out += [stop] * int(round(hold_s / dt))
+    return out
+
+
 def goto(vehicle, params, pos, yaw, *, speed=2.0, tol=0.25, vel_tol=0.25, yaw_tol=0.15,
          settle_s=1.0, timeout=60.0, stream_s=1.2, offboard_tries=5, on_state=None):
     """Fly to (pos ENU, yaw ENU) with position setpoints and return the settled
@@ -314,7 +332,8 @@ def _to_tensors(s):
 def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, start_tol=0.25,
                    start_vel_tol=0.25, start_yaw_tol=0.15, settle_s=1.0, start_timeout=60.0,
                    approach_speed=2.0, ground_z=0.15, max_tilt_deg=80.0, max_gate_dist=30.0,
-                   geofence=None, hold_s=1.0, verbose=True, gate_source=None, preroll_s=1.0):
+                   geofence=None, hold_s=1.0, hold_decel=1.5, verbose=True, gate_source=None,
+                   preroll_s=1.0):
     """Returns (log, summary); see the module docstring. `geofence` is
     (min_xyz, max_xyz) in ENU or None. `course` is always the TRUE course
     (scoring); with gate_source (a gate_vision.GateSource) the controller must
@@ -426,11 +445,14 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
             p_prev = s.pos
             s = pacer.advance(s)
 
-        # ---- finished: hold the current position ----
-        say(f"[runner] lap complete in {lap_time:.2f} s; holding position")
-        hold_pos, hold_yaw = s.pos.copy(), float(frames.yaw_of_quat_enu(s.quat))
-        for _ in range(int(round(hold_s / dt))):
-            vehicle.send_position(hold_pos, hold_yaw)
+        # ---- finished: brake to a stop, then hold ----
+        # The setpoint follows a constant-deceleration stopping path instead of
+        # jumping to the current position: a position step at race speed made PX4
+        # brake so hard that the Isaac Starling 2 Max flipped (2026-11-12, 2 of 3 runs).
+        say(f"[runner] lap complete in {lap_time:.2f} s; braking to a hold")
+        hold_yaw = float(frames.yaw_of_quat_enu(s.quat))
+        for sp in braking_setpoints(s.pos, s.vel, dt, decel=hold_decel, hold_s=hold_s):
+            vehicle.send_position(sp, hold_yaw)
             s = pacer.advance(s)
             log.add(2, s, gate_idx)
     except Abort as a:

@@ -13,8 +13,12 @@ SPAWN_TRACK is a path to a track json, or a bare name resolved to
 Script Editor variable was not visible to main() on 2026-10-01. Unset = FATAL
 (no silent default track).
 
-WHAT IS REUSED, NOT COPIED: the gate geometry (four bars, GATE_SIDE x
-GATE_SIDE opening, BAR_THICKNESS), the magenta material and the fallback light
+GATE SIZE AND COLOUR come from the track: each gate's "side" (opening) and "bar"
+(default 1.5 / 0.10 m) and an optional top-level "gate_color" (linear RGB, default
+magenta). The *_pink36 tracks are the 36 in pink lab gates.
+
+WHAT IS REUSED, NOT COPIED: the gate geometry (four bars, side x side opening,
+bar thick), the magenta material and the fallback light
 are spawn_test_gates's own `_build_gate`, `_make_material`, `_ensure_light`,
 imported with importlib from this file's directory (falling back to
 /workspace/scripts). Importing it under another name means its
@@ -100,6 +104,18 @@ def track_gate_specs(course_dict):
     return specs
 
 
+def gate_color(course_dict, default):
+    """Optional track key "gate_color": linear RGB triple in [0, 1] (e.g. the pink
+    lab gates); absent = spawn_test_gates' magenta."""
+    c = course_dict.get("gate_color")
+    if c is None:
+        return tuple(default)
+    c = tuple(float(v) for v in c)
+    if len(c) != 3 or not all(0.0 <= v <= 1.0 for v in c):
+        raise ValueError(f"gate_color must be 3 values in [0, 1], got {c}")
+    return c
+
+
 def build_manifest(course_dict, specs, yaw_convention):
     """Same schema spawn_test_gates writes (yaw_convention, gates[name, x, y, z,
     yaw_deg, side]) plus course_name; no camera_pose_usd (a track has none)."""
@@ -125,29 +141,26 @@ def main():
     with open(path) as f:
         course_dict = json.load(f)
     specs = track_gate_specs(course_dict)
-    for s in specs:
-        # the shared builder uses the module constants, not the spec's side/bar
-        if abs(s["side"] - sgt.GATE_SIDE) > 1e-9 or abs(s["bar"] - sgt.BAR_THICKNESS) > 1e-9:
-            msg = (f"[spawn_track] FATAL: {s['name']} has side/bar {s['side']}/{s['bar']} but "
-                   f"spawn_test_gates builds {sgt.GATE_SIDE}/{sgt.BAR_THICKNESS}")
-            print(msg)
-            raise RuntimeError(msg)
+    color = gate_color(course_dict, sgt.GATE_COLOR)
 
     import omni.usd
     from pxr import UsdGeom
 
     stage = omni.usd.get_context().get_stage()
-    old_root = sgt.ROOT_PATH
-    sgt.ROOT_PATH = TRACK_ROOT          # the shared helpers build paths from this global
+    # The shared helpers read these module globals (prim paths, bar sizes, colour), so point
+    # them at this track's values per gate and restore them afterwards.
+    saved = (sgt.ROOT_PATH, sgt.GATE_SIDE, sgt.BAR_THICKNESS, sgt.GATE_COLOR)
+    sgt.ROOT_PATH, sgt.GATE_COLOR = TRACK_ROOT, color
     try:
         sgt._clear_root(stage)
         UsdGeom.Xform.Define(stage, TRACK_ROOT)
         material = sgt._make_material(stage)
         for s in specs:
+            sgt.GATE_SIDE, sgt.BAR_THICKNESS = s["side"], s["bar"]
             sgt._build_gate(stage, s, material)
         sgt._ensure_light(stage)
     finally:
-        sgt.ROOT_PATH = old_root
+        sgt.ROOT_PATH, sgt.GATE_SIDE, sgt.BAR_THICKNESS, sgt.GATE_COLOR = saved
 
     manifest = build_manifest(course_dict, specs,
                               course_dict.get("yaw_convention", ""))
