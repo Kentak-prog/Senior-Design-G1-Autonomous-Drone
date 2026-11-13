@@ -163,7 +163,7 @@ class _IpoptSolver:
 class RateAwareMpc(MpcController):
     command = "ctbr"
 
-    def __init__(self, params, course, v_max=4.0, a_max=6.0, *, N=20, dt_mpc=0.05,
+    def __init__(self, params, course, v_max=4.0, a_max=6.0, *, N=50, dt_mpc=0.05,
                  tau_w=TAU_W_ISAAC, tau_T=None, delay_s=0.0, weights=None, backend="ipopt"):
         super().__init__(params, course, v_max=v_max, a_max=a_max, horizon=N)
         self.Nh, self.dtm = N, dt_mpc
