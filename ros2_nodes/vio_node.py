@@ -89,6 +89,12 @@ def main():
             dp("max_range", 15.0)
             dp("delay_compensation", True)
             dp("publish_every", 2)                # publish odometry every N IMU samples (250 Hz / 2)
+            # gate color, OpenCV HSV (H 0-179). Default = color_gate_detector's magenta (spawn_test_gates).
+            # Tony's pink 36 in gates (gate_color 1.0 0.141 0.456) render lighter at range: use
+            # gate_hsv_lo:=[135,60,40] gate_hsv_hi:=[179,255,255] (checked live 2026-11-13: both the near
+            # dark-magenta and the far light-pink oval6 gates; the circle course's magenta gates too).
+            dp("gate_hsv_lo", [135, 80, 60])
+            dp("gate_hsv_hi", [170, 255, 255])
             dp("ground_truth_topic", "/drone00/state/pose")   # logging only; "" disables
             dp("log_dir", "")
             gp = lambda n: self.get_parameter(n).value   # noqa: E731
@@ -97,6 +103,13 @@ def main():
             with open(gp("gates_file")) as f:
                 manifest = json.load(f)
             gates = gates_from_manifest(gp("gates_file"))
+            # PnP needs the real opening size (gate_pose assumes 1.5 m): the manifest's "side" of the
+            # first gate, e.g. 0.8636 m for Tony's pink 36 in tracks (rl/tracks/*_pink36.json).
+            sides = {round(float(g.get("side", 1.5)), 4) for g in
+                     (manifest["gates"] if isinstance(manifest, dict) else manifest)}
+            if len(sides) != 1:
+                raise ValueError(f"gates of different sizes {sorted(sides)}: one gate_side per course")
+            self.gate_side = sides.pop()
             hint = spawn_hint(manifest, float(gp("manifest_camera_pitch_deg")))
             self.mount = camera_mount_usd(float(gp("camera_pitch_deg")),
                                           tuple(float(v) for v in gp("camera_pos")))
@@ -183,8 +196,10 @@ def main():
             t0 = time.perf_counter()
             rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
             dets = []
-            for corners in detect_gates_color(rgb):
-                det = estimate_gate_pose(corners, self.intr, corner_sigma_px=float(self.gp("corner_sigma_px")),
+            for corners in detect_gates_color(rgb, tuple(int(v) for v in self.gp("gate_hsv_lo")),
+                                              tuple(int(v) for v in self.gp("gate_hsv_hi"))):
+                det = estimate_gate_pose(corners, self.intr, gate_side=self.gate_side,
+                                         corner_sigma_px=float(self.gp("corner_sigma_px")),
                                          bootstrap_n=int(self.gp("bootstrap_n")))
                 if det is not None:
                     dets.append(det)

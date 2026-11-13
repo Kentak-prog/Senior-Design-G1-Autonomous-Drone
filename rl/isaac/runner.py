@@ -52,6 +52,16 @@ VISION MODE (gate_source=..., CLI --gates vision): the controller is built from
     controller.reset (phase A's detections). Extra log columns n_det and map_err (3-D error of the
     current target gate vs truth, logging only) and summary["vision"].
 
+VIO MODE (vio=..., CLI --state vio, 2026-11-13): the CONTROLLER flies on the VIO
+    (ros2_nodes/vio_node.py's /vio/odometry via vio_state.RosVioState): position, velocity
+    and attitude from the VIO, body rates from PX4 (the IMU gyro). Its gate index advances on
+    the VIO path. Everything else stays on PX4's estimate (sim GPS, ~truth): phase A, the
+    pre-roll hold, scoring, margins and the safety checks. Before the race the runner holds
+    the start until the VIO is fresh and within vio_start_err of PX4 (up to vio_wait_s);
+    during it, abort kind "vio" when the odometry is older than vio_max_age (wall s) or the
+    VIO is more than vio_max_err from PX4's estimate for vio_err_ticks ticks in a row. Extra
+    log columns vio_px/py/pz, vio_err, vio_age_ms; summary["vio"].
+
 CLI: python runner.py --track ../tracks/oval6.json --controller pid [--sim] ...
      python runner.py --track ../tracks/oval6.json --controller pid --gates vision [--sim --sim-vision]
 """
@@ -146,12 +156,17 @@ class Pacer:
 
 
 class _Log:
-    """extras=True (vision mode) adds the n_det and map_err columns."""
+    """extras=True (vision mode) adds the n_det and map_err columns; vio=True the
+    vio_px, vio_py, vio_pz, vio_err, vio_age_ms columns."""
 
-    def __init__(self, extras=False):
+    VIO_NAMES = ("vio_px", "vio_py", "vio_pz", "vio_err", "vio_age_ms")
+
+    def __init__(self, extras=False, vio=False):
         self.rows = []
         self.extra_rows = [] if extras else None
         self.extra = (0, np.nan)      # (n_det, map_err) stamped on the next rows
+        self.vio_rows = [] if vio else None
+        self.vio_extra = (np.nan,) * 5
         self.t_wall0 = time.perf_counter()
 
     def add(self, phase, s, gate_idx, thrust=np.nan, rates=(np.nan,) * 3, u=np.nan, ctrl_ms=np.nan):
@@ -160,6 +175,8 @@ class _Log:
                           np.asarray(rates, dtype=np.float64), u, gate_idx, ctrl_ms))
         if self.extra_rows is not None:
             self.extra_rows.append(self.extra)
+        if self.vio_rows is not None:
+            self.vio_rows.append(self.vio_extra)
 
     def arrays(self):
         if not self.rows:
@@ -170,6 +187,10 @@ class _Log:
         if self.extra_rows is not None:
             ex = np.array(self.extra_rows, dtype=np.float64).reshape(-1, 2)
             out["n_det"], out["map_err"] = ex[:, 0], ex[:, 1]
+        if self.vio_rows is not None:
+            vx = np.array(self.vio_rows, dtype=np.float64).reshape(-1, 5)
+            for i, k in enumerate(self.VIO_NAMES):
+                out[k] = vx[:, i]
         return out
 
 
@@ -183,6 +204,9 @@ def write_log_csv(path, log):
     if "n_det" in log:
         names += ["n_det", "map_err"]
         cols += [log["n_det"], log["map_err"]]
+    if "vio_err" in log:
+        names += list(_Log.VIO_NAMES)
+        cols += [log[k] for k in _Log.VIO_NAMES]
     data = np.column_stack(cols) if len(log["t_sim"]) else np.zeros((0, len(names)))
     np.savetxt(path, data, delimiter=",", header=",".join(names), comments="", fmt="%.9g")
 
@@ -333,7 +357,8 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
                    start_vel_tol=0.25, start_yaw_tol=0.15, settle_s=1.0, start_timeout=60.0,
                    approach_speed=2.0, ground_z=0.15, max_tilt_deg=80.0, max_gate_dist=30.0,
                    geofence=None, hold_s=1.0, hold_decel=1.5, verbose=True, gate_source=None,
-                   preroll_s=1.0):
+                   preroll_s=1.0, vio=None, vio_max_err=1.0, vio_max_age=0.5, vio_start_err=0.3,
+                   vio_wait_s=20.0, vio_err_ticks=10):
     """Returns (log, summary); see the module docstring. `geofence` is
     (min_xyz, max_xyz) in ENU or None. `course` is always the TRUE course
     (scoring); with gate_source (a gate_vision.GateSource) the controller must
@@ -345,8 +370,25 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
     n_gates = len(course)
     safety = Safety(ground_z, max_tilt_deg, max_gate_dist, geofence)
     gs = gate_source
-    log = _Log(extras=gs is not None)
+    log = _Log(extras=gs is not None, vio=vio is not None)
     say = print if verbose else (lambda *a, **k: None)
+
+    def vio_stamp(s):
+        """VIO mode: the newest VIO sample and its error vs PX4's estimate; stamps the log."""
+        v = vio.latest()
+        if v is None:
+            log.vio_extra = (np.nan,) * 5
+            return None, float("nan")
+        err = float(np.linalg.norm(v.pos - s.pos))
+        log.vio_extra = (*v.pos, err, 1e3 * v.age())
+        return v, err
+
+    def vio_controller_state(s):
+        """The state the controller sees in VIO mode; Abort("vio") if the VIO is stale."""
+        v, err = vio_stamp(s)
+        if v is None or v.age() > vio_max_age:
+            raise Abort("vio", "no VIO odometry" if v is None else f"VIO odometry {v.age():.2f} s old")
+        return VehicleState(s.t_sim, v.pos.copy(), v.vel.copy(), v.quat.copy(), s.omega.copy()), err
 
     def vision_tick(s, gate_idx):
         """Vision mode: update the map from the newest detections, stamp the log."""
@@ -367,6 +409,8 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
         def on_a(s):
             if gs is not None:
                 vision_tick(s, 0)
+            if vio is not None:
+                vio_stamp(s)
             log.add(0, s, 0)
             safety.check(s)
 
@@ -388,6 +432,20 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
                  timeout=start_timeout, on_state=on_a)
         if preroll_s > 0:       # hand PX4 over to rate control before the race (see ctbr_preroll)
             s = ctbr_preroll(vehicle, params, s, start_pos, start_yaw, preroll_s, on_state=on_a)
+        if vio is not None:      # hold the start until the VIO agrees with PX4 for 1 s
+            t_w0, good_since = s.t_sim, None
+            while True:
+                v, err = vio_stamp(s)
+                ok = v is not None and v.age() <= vio_max_age and err < vio_start_err
+                good_since = (good_since if good_since is not None else s.t_sim) if ok else None
+                if good_since is not None and s.t_sim - good_since >= 1.0:
+                    say(f"[runner] VIO ready: {err:.2f} m from PX4's estimate")
+                    break
+                if s.t_sim - t_w0 > vio_wait_s:
+                    why = "no odometry" if v is None else f"age {v.age():.2f} s"
+                    raise Abort("vio", f"VIO not within {vio_start_err} m of PX4 after {vio_wait_s:.0f} s "
+                                       f"(last error {err:.2f} m, {why})")
+                s = ctbr_preroll(vehicle, params, s, start_pos, start_yaw, 0.2, on_state=on_a)
 
         # ---- phase B: race ----
         say(f"[runner] at start pose (t_sim {s.t_sim:.2f}); racing {course.name} "
@@ -398,6 +456,7 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
         pacer = Pacer(vehicle, dt, s)
         t_race0 = s.t_sim
         p_prev = None
+        ctl_gate_idx, vio_prev, vio_bad = 0, None, 0
         while True:
             if p_prev is not None:
                 pp = torch.as_tensor(p_prev, dtype=torch.float32).reshape(1, 3)
@@ -432,10 +491,25 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
                 vision_tick(s, gate_idx)
                 if gs.changed():
                     update_course(controller, gs.current_course(), s.pos, s.vel, gate_idx=gate_idx)
-            pos_t, vel_t, quat_t, om_t = _to_tensors(s)
+            sc, cg = s, gate_idx
+            if vio is not None:
+                sc, err = vio_controller_state(s)
+                vio_bad = vio_bad + 1 if err > vio_max_err else 0
+                if vio_bad >= vio_err_ticks:
+                    log.add(1, s, gate_idx)
+                    raise Abort("vio", f"VIO {err:.2f} m from PX4's estimate for {vio_err_ticks} ticks")
+                if vio_prev is not None and ctl_gate_idx < n_gates:   # the controller's own gate count
+                    gb = gate_batch(course, torch.tensor([ctl_gate_idx]))
+                    pv, _ = check_gate(torch.as_tensor(vio_prev, dtype=torch.float32).reshape(1, 3),
+                                       torch.as_tensor(sc.pos, dtype=torch.float32).reshape(1, 3),
+                                       gb, params.collision_radius)
+                    ctl_gate_idx += int(bool(pv[0]))
+                vio_prev = sc.pos
+                cg = min(ctl_gate_idx, n_gates - 1)
+            pos_t, vel_t, quat_t, om_t = _to_tensors(sc)
             t0 = time.perf_counter()
             thrust, rates = controller.act(pos_t, vel_t, quat_t,
-                                           torch.tensor([gate_idx], dtype=torch.long), dt,
+                                           torch.tensor([cg], dtype=torch.long), dt,
                                            omega=om_t)
             ctrl_ms = 1e3 * (time.perf_counter() - t0)
             T = float(thrust.reshape(-1)[0])
@@ -474,6 +548,14 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
     summary = _summarise(arrays, course, params, kind, finished, gate_idx, lap_time)
     if gs is not None:
         summary["vision"] = gs.summary()
+    if vio is not None:
+        race = arrays["phase"] == 1
+        e = arrays["vio_err"][race]
+        e = e[np.isfinite(e)]
+        summary["vio"] = dict(err_mean=float(e.mean()) if e.size else float("nan"),
+                              err_max=float(e.max()) if e.size else float("nan"),
+                              err_p95=float(np.percentile(e, 95)) if e.size else float("nan"),
+                              samples=int(vio.n))
     return arrays, summary
 
 
@@ -520,7 +602,10 @@ def format_vision_summary(s):
 
 
 def format_summary(name, s):
-    return format_summary_line(name, s) + format_vision_summary(s)
+    v = s.get("vio")
+    vio = "" if not v else (f"\n  vio: error vs PX4 estimate mean {v['err_mean']:.2f} m, p95 {v['err_p95']:.2f} m, "
+                            f"max {v['err_max']:.2f} m ({v['samples']} odometry messages)")
+    return format_summary_line(name, s) + format_vision_summary(s) + vio
 
 
 def format_summary_line(name, s):
@@ -599,6 +684,13 @@ def main(argv=None):
                     help="with --sim: SimGateVision (geometric camera model) instead of ROS")
     vg.add_argument("--cam-namespace", default="/iris_0")
     vg.add_argument("--pose-topic", default="/drone00/state/pose")
+    sg = ap.add_argument_group("state source (see the module docstring, VIO MODE)")
+    sg.add_argument("--state", choices=["px4", "vio"], default="px4",
+                    help="px4: the controller flies on PX4's estimate (sim GPS). vio: on /vio/odometry")
+    sg.add_argument("--vio-topic", default="/vio/odometry")
+    sg.add_argument("--vio-max-err", type=float, default=1.0, help="abort when the VIO is this far from PX4 [m]")
+    sg.add_argument("--vio-start-err", type=float, default=0.3, help="start only when within this [m]")
+    sg.add_argument("--vio-wait-s", type=float, default=20.0, help="how long to wait for that [s sim]")
     a = ap.parse_args(argv)
 
     params = QuadParams()
@@ -637,13 +729,25 @@ def main(argv=None):
         return 2
     geofence = auto_geofence(ctl_course) if a.geofence is None else (a.geofence[:3], a.geofence[3:])
     print(f"[runner] geofence ENU {np.round(geofence[0], 1)} .. {np.round(geofence[1], 1)}")
+    vio = None
+    if a.state == "vio":
+        from vio_state import RosVioState
+        vio = RosVioState(a.vio_topic)
+        if vio.wait(10.0) is None:
+            vio.close()
+            print(f"[runner] no VIO odometry on {a.vio_topic}; not flying")
+            return 2
+        print(f"[runner] VIO mode: controller state from {a.vio_topic}")
     vehicle = make_vehicle(a, params)
     try:
         log, summ = run_in_vehicle(vehicle, course, controller, params, max_time=a.max_time, preroll_s=a.preroll_s,
                                    ground_z=a.ground_z, geofence=geofence,
-                                   gate_source=gate_source)
+                                   gate_source=gate_source, vio=vio, vio_max_err=a.vio_max_err,
+                                   vio_start_err=a.vio_start_err, vio_wait_s=a.vio_wait_s)
     finally:
         vehicle.close()
+        if vio is not None:
+            vio.close()
         if gate_source is not None:
             gate_source.vision.close()
     print(format_summary(course.name, summ))

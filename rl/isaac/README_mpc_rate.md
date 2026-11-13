@@ -103,10 +103,16 @@ Don't run git from WSL on this checkout (it reports every file as modified: file
 0.36–0.37 m, tilt ≤ 33°, 1.7–1.8 ms per tick on the pod (old MPC: 2/12, PID: 11/12 with 0.32–0.34 m).
 Details, pod setup and the run command: `RESULTS_2026-11-13_mpc_rate_pink.md`.
 
+### Faster plans, v_max 8 / a_max 10 (2026-11-13): 18 / 18
+
+`--mpc-vmax 8 --mpc-amax 10` on the four pink tracks plus `three_gate_isaac` and `circle3_isaac`: all
+runs complete, laps 22–33 % shorter than at v4/a6 and faster than PID on every pink track, margins
+unchanged, tilt ≤ 52°, rate-command oscillation up to ≈ 14 °/s on the turning tracks.
+`RESULTS_2026-11-13_mpc_rate_v8a10.md`.
+
 ## Not yet tested
 
-Delay jitter, a noisy state estimate (VIO), faster plans (higher `v_max` / `a_max`), and the VOXL 2
-itself.
+Delay jitter, a noisy state estimate (VIO), and the VOXL 2 itself.
 
 ## Tests
 
