@@ -561,7 +561,11 @@ def main(argv=None):
     from fly_course import make_controller
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument("--track", required=True)
-    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc_ctbr"])
+    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc_ctbr", "mpc_rate"])
+    ap.add_argument("--mpc-delay-ms", type=float, default=0.0,
+                    help="mpc_rate: command delay to compensate [ms of SIM time]")
+    ap.add_argument("--mpc-backend", default="acados", choices=["acados", "ipopt"],
+                    help="mpc_rate solver (ipopt is not real time; README_mpc_rate.md)")
     ap.add_argument("--model", default=None, help="run dir with model.zip (for --controller rl)")
     add_vehicle_args(ap)
     ap.add_argument("--geofence", type=float, nargs=6, default=None,
@@ -621,7 +625,8 @@ def main(argv=None):
               f"{a.prior_yaw_std} deg, seed {a.prior_seed}; prior 3-D error per gate "
               f"{np.round(gv._prior_errors(gmap, course), 2)}")
     try:
-        controller = make_controller(a.controller, params, ctl_course, a.model)
+        controller = make_controller(a.controller, params, ctl_course, a.model,
+                                     mpc_delay_s=a.mpc_delay_ms / 1e3, mpc_backend=a.mpc_backend)
     except ValueError as e:
         if gate_source is not None:
             gate_source.vision.close()

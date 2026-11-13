@@ -148,7 +148,8 @@ def plot_log(log, path):
     fig.tight_layout(); fig.savefig(path, dpi=120)
 
 
-def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0):
+def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0,
+                    mpc_delay_s=0.0, mpc_backend="acados"):
     if kind == "pid":
         from pid_controller import PidController
         return PidController(params, course)
@@ -166,13 +167,20 @@ def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0
             sys.path.insert(0, isaac_dir)
         from mpc_ctbr import MpcCtbrController
         return MpcCtbrController(params, course, v_max=mpc_vmax, a_max=mpc_amax)
+    if kind == "mpc_rate":      # CTBR MPC that models PX4's rate loop (isaac/README_mpc_rate.md)
+        isaac_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "isaac")
+        if isaac_dir not in sys.path:
+            sys.path.insert(0, isaac_dir)
+        from mpc_rate import RateAwareMpc
+        return RateAwareMpc(params, course, v_max=mpc_vmax, a_max=mpc_amax, delay_s=mpc_delay_s,
+                            backend=mpc_backend)
     raise ValueError(f"unknown controller {kind!r}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--track", required=True)
-    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc", "mpc_ctbr"])
+    ap.add_argument("--controller", default="pid", choices=["pid", "rl", "mpc", "mpc_ctbr", "mpc_rate"])
     ap.add_argument("--model", default=None,
                     help="run directory with model.zip + vecnormalize.pkl (for --controller rl)")
     ap.add_argument("--mpc-vmax", type=float, default=4.0, help="MPC planner speed limit [m/s]")
