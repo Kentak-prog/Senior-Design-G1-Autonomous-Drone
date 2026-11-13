@@ -86,7 +86,7 @@ class MpcController:
     command = "wrench"
 
     def __init__(self, params: QuadParams, course: Course, v_max: float = 4.0,
-                 a_max: float = 6.0, horizon: int = 20, optimize_times: bool = False):
+                 a_max: float = 6.0, horizon: int = 50, optimize_times: bool = False):
         self.p = params
         self.course = course
         self.v_max, self.a_max, self.N = v_max, a_max, horizon
