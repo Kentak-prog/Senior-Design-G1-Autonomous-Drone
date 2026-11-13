@@ -1,0 +1,31 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "three_gate_isaac",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 5.164381976199195,
+      "y": 0.5665765229507649,
+      "z": 3.3667021638134256,
+      "yaw_deg": 7.9091318729107645,
+      "side": 1.5
+    },
+    {
+      "name": "gate_1",
+      "x": 8.601811302985835,
+      "y": -3.2453122090077366,
+      "z": 3.6555868185513933,
+      "yaw_deg": -22.090868127089237,
+      "side": 1.5
+    },
+    {
+      "name": "gate_2",
+      "x": 13.045481546186625,
+      "y": -2.0746533823818125,
+      "z": 3.7681380861577014,
+      "yaw_deg": -7.0908681270892355,
+      "side": 1.5
+    }
+  ],
+  "gate_note": "Our original 3-gate Isaac course (2026-10-23), from Trajectory/isaac_results/3_gates/course/3_gate_course_pod.json; 1.5 m opening, 0.10 m bars"
+}

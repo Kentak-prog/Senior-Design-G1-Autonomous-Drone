@@ -1,0 +1,31 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "circle3_isaac",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 4.911,
+      "y": -0.667,
+      "z": 2.6,
+      "yaw_deg": -7.2,
+      "side": 1.5
+    },
+    {
+      "name": "gate_1",
+      "x": 8.267,
+      "y": -8.65,
+      "z": 2.6,
+      "yaw_deg": -127.2,
+      "side": 1.5
+    },
+    {
+      "name": "gate_2",
+      "x": -0.325,
+      "y": -7.565,
+      "z": 2.6,
+      "yaw_deg": 112.8,
+      "side": 1.5
+    }
+  ],
+  "gate_note": "Our 3-gate circle course (2026-11-06), from Trajectory/isaac_results/circle_course/circle_course.json; 1.5 m opening, 0.10 m bars"
+}

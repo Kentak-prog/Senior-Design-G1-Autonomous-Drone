@@ -138,12 +138,12 @@ def fly(course, P, controller, delay_s=0.0, kp_scale=(1.0, 1.0, 1.0), max_time=4
                 trace=dict(t=np.array(t_log), tilt=np.array(tilt), rate=rates, sp=sp))
 
 
-def make(kind, P, course, told_s=0.0, backend="ipopt"):
+def make(kind, P, course, told_s=0.0, backend="ipopt", v_max=4.0, a_max=6.0):
     if kind == "ctbr":
         from mpc_ctbr import MpcCtbrController
-        return MpcCtbrController(P, course)
+        return MpcCtbrController(P, course, v_max=v_max, a_max=a_max)
     from mpc_rate import RateAwareMpc
-    return RateAwareMpc(P, course, delay_s=told_s, backend=backend)
+    return RateAwareMpc(P, course, v_max=v_max, a_max=a_max, delay_s=told_s, backend=backend)
 
 
 def row(track, label, r):
@@ -163,6 +163,8 @@ if __name__ == "__main__":
     ap.add_argument("--delays-ms", nargs="*", type=float, default=[0, 20, 40, 60])
     ap.add_argument("--told-ms", type=float, default=None, help="delay the rate MPC is told (default: the true one)")
     ap.add_argument("--loop", choices=["isaac", "nominal"], default="isaac")
+    ap.add_argument("--v-max", type=float, default=4.0, help="plan speed limit [m/s]")
+    ap.add_argument("--a-max", type=float, default=6.0, help="plan acceleration limit [m/s^2]")
     a = ap.parse_args()
     P = QuadParams()
     if a.mode == "calib":
@@ -175,5 +177,5 @@ if __name__ == "__main__":
         c = Course.load(os.path.join(TRACKS_DIR, tr + ".json"))
         for d in a.delays_ms:
             told = (a.told_ms if a.told_ms is not None else d) / 1e3
-            r = fly(c, P, make(a.controller, P, c, told, a.backend), delay_s=d / 1e3, kp_scale=ks)
-            print(row(tr, f"{a.controller} {a.loop} loop {d:.0f} ms (told {1e3 * told:.0f})", r), flush=True)
+            r = fly(c, P, make(a.controller, P, c, told, a.backend, a.v_max, a.a_max), delay_s=d / 1e3, kp_scale=ks)
+            print(row(tr, f"{a.controller} v{a.v_max:g} a{a.a_max:g} {a.loop} {d:.0f} ms (told {1e3 * told:.0f})", r), flush=True)

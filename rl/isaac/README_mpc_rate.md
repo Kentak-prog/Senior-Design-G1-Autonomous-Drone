@@ -97,10 +97,16 @@ The first solver build renders and compiles C code into `~/.cache/acados_rate_mp
 reused afterwards; the first use downloads acados' `t_renderer`. Built and tested with acados `03e5311`.
 Don't run git from WSL on this checkout (it reports every file as modified: file modes and line endings).
 
+## Live in Isaac (2026-11-13): 12 / 12
+
+`runner.py --controller mpc_rate` on the four pink 36 in tracks, 3 runs each: **12/12**, margins
+0.36–0.37 m, tilt ≤ 33°, 1.7–1.8 ms per tick on the pod (old MPC: 2/12, PID: 11/12 with 0.32–0.34 m).
+Details, pod setup and the run command: `RESULTS_2026-11-13_mpc_rate_pink.md`.
+
 ## Not yet tested
 
-Delay jitter, a noisy state estimate (VIO), Isaac (the runner takes it through the same `act()`), and
-the VOXL 2 itself.
+Delay jitter, a noisy state estimate (VIO), faster plans (higher `v_max` / `a_max`), and the VOXL 2
+itself.
 
 ## Tests
 
