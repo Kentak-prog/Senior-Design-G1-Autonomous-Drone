@@ -93,6 +93,10 @@ def main():
             # Tony's pink 36 in gates (gate_color 1.0 0.141 0.456) render lighter at range: use
             # gate_hsv_lo:=[135,60,40] gate_hsv_hi:=[179,255,255] (checked live 2026-11-13: both the near
             # dark-magenta and the far light-pink oval6 gates; the circle course's magenta gates too).
+            # [x, y, z, yaw_deg] ENU: where the drone hovers when the VIO starts, used ONLY to match
+            # the first detections to map gates. Empty: the manifest's camera pose (spawn_test_gates
+            # manifests); rl/tracks/*.json have none, so pass the track's start pose for those.
+            dp("initial_pose", [0.0])
             dp("gate_hsv_lo", [135, 80, 60])
             dp("gate_hsv_hi", [170, 255, 255])
             dp("ground_truth_topic", "/drone00/state/pose")   # logging only; "" disables
@@ -111,6 +115,13 @@ def main():
                 raise ValueError(f"gates of different sizes {sorted(sides)}: one gate_side per course")
             self.gate_side = sides.pop()
             hint = spawn_hint(manifest, float(gp("manifest_camera_pitch_deg")))
+            ip = [float(v) for v in gp("initial_pose")]
+            if len(ip) == 4:
+                hint = (np.array(ip[:3]), math.radians(ip[3]))
+                self.get_logger().info(f"initial pose hint {ip[:3]} yaw {ip[3]:.1f} deg")
+            elif hint is None:
+                self.get_logger().warn("no initial pose hint (manifest has no camera pose, initial_pose "
+                                       "not set): the VIO cannot match its first detections")
             self.mount = camera_mount_usd(float(gp("camera_pitch_deg")),
                                           tuple(float(v) for v in gp("camera_pos")))
             self.vio = GateVIO(gates, self.mount, imu_rate=float(gp("imu_rate")), calib_s=float(gp("calib_s")),

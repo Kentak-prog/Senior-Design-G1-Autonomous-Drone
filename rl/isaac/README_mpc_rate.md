@@ -110,9 +110,17 @@ runs complete, laps 22–33 % shorter than at v4/a6 and faster than PID on every
 unchanged, tilt ≤ 52°, rate-command oscillation up to ≈ 14 °/s on the turning tracks.
 `RESULTS_2026-11-13_mpc_rate_v8a10.md`.
 
+### On the VIO (2026-11-13): 1 / 18
+
+`runner.py --state vio` flies the MPC on `ros2_nodes/vio_node.py`'s odometry (PX4's estimate only scores
+and guards the run). One run completed (3-gate course, 3/4, VIO within 0.31 m); the rest aborted on VIO
+drift or hit gates. The VIO falls behind along track because a ~3° tilt error from its first PnP fix is
+never corrected, and Tony's thin pink gates give it poor fixes. Details and the proposed VIO fixes:
+`RESULTS_2026-11-13_mpc_rate_vio.md`.
+
 ## Not yet tested
 
-Delay jitter, a noisy state estimate (VIO), and the VOXL 2 itself.
+Delay jitter, and the VOXL 2 itself. On the VIO: anything past one lap at 3/4 (see above).
 
 ## Tests
 
