@@ -107,3 +107,113 @@ gates leave the view sooner; every faster run on the magenta courses aborted aft
     --out-dir /workspace/runs_mpc_rate_vio/<name>
   ```
   `initial_pose` is the track's start pose (`Course.start_pose()`, yaw in degrees); fly there first.
+
+## Follow-up 2026-11-14: Swift-style VIO (tilt from gravity, gates correct position + yaw only)
+
+After *Champion-level drone racing* (Kaufmann et al., Nature 2023): Swift's gates correct only the
+translational drift of a VIO whose attitude comes from elsewhere (an Intel T265's own VIO). `control/vio.py`
+got that as an option (SWIFT MODE: `attitude_updates="yaw"`, `tilt_init="accel"`, `init_fixes=5`; old
+behaviour stays the default). Offline it does what it should: `control/test_vio.py` 13/13, including the
+reproduction of 2026-11-13 (a PnP fix 3° off in pitch drifts 3.1 m in 3 s blind; Swift mode 0.00° and
+0.000 m), and `Trajectory/simulate_vio_mpc.py` 24/24 on both magenta courses at 3/4 and 5/7, mean VIO error
+0.04–0.08 m (old 0.05–0.10 m; that rehearsal has no PnP attitude bias, so the old mode passes it too).
+
+**Live on the 3-gate course (fresh Isaac + PX4 after a pod restart): 0/3.**
+
+| Run | Result | VIO error mean / max |
+|---|---|---|
+| 3/4 | gate 1, then VIO abort (1.11 m) | 0.38 / 1.11 m |
+| 5/7 | VIO never settled at the start | – |
+| 8/10 | gate 1, then VIO abort (1.14 m) | 0.48 / 1.14 m |
+
+What happened:
+- **The tilt fix worked.** VIO roll and pitch stayed within 1–2° of PX4's for the whole of runs 1 and 3
+  (2026-11-13: a 3° bias that never went away).
+- **Blind stretches still sink it.** In run 1 the gate fixes stop at 3.7 s, close to gate 2 (out of
+  view), and in 1.7 s of IMU-only flight the error grows 0.4 → 1.1 m. The remaining ~1° tilt error
+  (about 0.7° already at the hover) is enough.
+- **New failure: nothing corrects roll/pitch any more.** In run 2 the gyro bias was calibrated while the
+  drone was still turning after the move to the start (5.1°/s yaw, 0.7°/s pitch taken as "bias"). With
+  gate attitude updates off, the 0.7°/s pitch error integrated without bound: −13° within ~20 s, and the
+  VIO diverged before the race. Swift can trust its inertial attitude because the T265's visual odometry
+  keeps it right; ours has no second source.
+
+Conclusion: removing gate attitude updates is not enough on its own, and it needs (a) gyro calibration
+only when the drone is provably still and (b) some slow, robust tilt correction (heavily down-weighted
+gate attitude, or gravity when the specific force is near 1 g). The bigger gap is the blind stretch: our
+VIO has nothing between gates, where Swift's base VIO tracks features of the room. On the Starling 2 Max
+that role belongs to ModalAI's own VIO on the VOXL 2 (to be confirmed on the drone); in Isaac it needs a
+feature-tracking VIO (e.g. OpenVINS on the front camera) or a camera yaw that keeps gates in view.
+
+Video (main view + drone camera, not in git): `isaac_mpc_rate_vioswift_three_gate_isaac.webm`. Logs on the
+pod: `/workspace/runs_mpc_rate_vio/mpc_rate_vioswift_*`. The live runs used a dev copy of `control/vio.py`
+and `ros2_nodes/vio_node.py` in `/workspace/vio_dev` (VIO params `attitude_updates:=yaw tilt_init:=accel
+init_fixes:=5`).
+
+### Follow-up 2: still-only gyro calibration + slow tilt correction (2026-11-14)
+
+`control/vio.py` options (off by default): `calib_still=True` takes the gyro bias only from a 2 s
+window whose quarter means agree (gyro within 0.15°/s, accel within 0.1 m/s²), with |mean gyro| <
+1.5°/s and |accel| within 0.15 m/s² of g; otherwise the window slides on. `tilt_tau_s=T` moves roll /
+pitch toward each reliable fix's PnP tilt with time constant T, so a residual bias b leaves at most
+about b·T. Tests 15/15 (a 5°/s turn during calibration is waited out, bias error 0.027°/s; a 0.3°/s
+residual pitch bias stays at 0.5° tilt error with T = 2 s, 2.8° without). Live with
+`attitude_updates:=yaw tilt_init:=accel init_fixes:=5 calib_still:=true tilt_tau_s:=5.0`:
+
+| Run | Result | VIO error mean / max |
+|---|---|---|
+| 3/4 | gate 1, then VIO abort (1.10 m) | 0.39 / 1.10 m |
+| 5/7 | gate 1, then hit gate 2 | 0.36 / 0.74 m |
+| 8/10 | **gates 1 and 2**, then hit gate 3 | 0.32 / 0.79 m |
+
+- **The start is fixed.** Every run started with the VIO 0.09–0.11 m from PX4's estimate; the calibration
+  waited out the hover wobble (11–130 windows, up to about a minute in the pod).
+- **Flight is not.** The 3/4 run lost its fixes for 1.5 s from 3.7 s, closing on gate 2, and drifted
+  0.4 → 1.1 m, exactly as before. Mean tilt error is now 0.9° (1.9° at 8/10, with 40–50° tilts).
+- 8/10 passed two gates for the first time on the VIO.
+
+So the remaining failure is the blind stretch itself, not the start or a bad bias. Next: keep the
+next gate in the camera (perception-aware yaw in the MPC reference) and/or a feature-tracking VIO
+between gates.
+
+Also found while running: a VIO from the previous run that is still alive (its 4–5 min timeout)
+keeps publishing on `/vio/odometry`, and a runner listening then mixes two estimates (one run saw a
+247 m error from a stale, drifted VIO). The run script now waits until no `vio_node` is running.
+Video: `isaac_mpc_rate_vioswift2_three_gate_isaac.webm` (Downloads). Logs: `/workspace/runs_mpc_rate_vio/mpc_rate_vioswift2_*`.
+
+### Follow-up 3: keep the next gate in the camera (2026-11-14): 5 / 6
+
+`mpc_rate.py` has `yaw_mode="next_gate"` (runner `--mpc-yaw next_gate`): the reference yaw points the
+nose and front camera at the next gate (`Trajectory/min_snap_planner.look_at_yaw_profile`, already used
+by the ROS stack) instead of along the velocity. The planned path is unchanged. The bench
+(`bench_mpc_delay.py --yaw`) now reports how often SOME gate is whole in the C29 camera (all four opening
+corners inside 98.7° × 82.3°, within 12 m), which is what a VIO fix needs:
+
+| Course, limits | velocity yaw: whole gate in view / longest blind | next_gate yaw |
+|---|---|---|
+| 3-gate, 3/4 | 74 % / 1.28 s (live: 1.5 s without fixes) | 91 % / 0.80 s |
+| 3-gate, 8/10 | 66 % / 0.76 s | 77 % / 0.58 s |
+| circle, 3/4 | 50 % / 3.30 s | 91 % / 0.84 s |
+| circle, 8/10 | 42 % / 2.12 s | 87 % / 0.64 s |
+
+Laps, tilt and margins are identical on the bench (only the yaw changes). Live, with the Swift-mode VIO of
+follow-up 2 (`attitude_updates:=yaw tilt_init:=accel init_fixes:=5 calib_still:=true tilt_tau_s:=5.0`):
+
+| Track | 3/4 | 5/7 | 8/10 |
+|---|---|---|---|
+| three_gate_isaac | **3/3, 8.68 s**, VIO max 0.37 m, margin 0.65 m | **3/3, 6.54 s**, VIO max 0.53 m, margin 0.60 m | **3/3, 5.48 s**, VIO max 0.30 m, margin 0.61 m |
+| circle3_isaac | **3/3, 13.66 s**, VIO max 0.56 m ¹ | gate 1 hit, VIO 0.75 m off ¹ | **3/3, 8.48 s**, VIO max 0.76 m, margin 0.50 m |
+
+¹ with `max_range:=9.0`: on the first two circle tries the VIO started 0.31 m from the truth (fixes of
+the gate 11–12 m away, put through a ~1.5° yaw error), just over the runner's 0.30 m start threshold, so
+the race never started; the cap (as in Stage 4R) fixed the start.
+
+- **First full laps on the VIO at every speed step on the 3-gate course**, the 8/10 lap as fast as on
+  PX4's GPS estimate (5.48 s against 5.50 s), and the first circle laps.
+- The controller is `mpc_rate` with the team's new `N=50` (2.5 s horizon): 3.8 ms mean, ≤ 12 ms per tick
+  on the pod (1.8 ms at `N=20`), inside the 20 ms budget.
+- The circle 5/7 failure: the VIO error grew to 0.75 m before gate 1 (not analysed yet).
+
+Pod: these ran from a dev copy in `/workspace/vio_dev` (the checkout plus this session's `rl/` and
+`control/` changes). Videos: `isaac_mpc_rate_vioyaw_three_gate_isaac.webm`,
+`isaac_mpc_rate_vioyaw_circle3_isaac.webm`. Logs: `/workspace/runs_mpc_rate_vio/mpc_rate_vioyaw_*`.

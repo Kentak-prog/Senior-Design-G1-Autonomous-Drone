@@ -251,6 +251,106 @@ def test_far_position_only_fixes_are_dropped():
     print(f"  position-only fixes: gate_2 at 13 m dropped (estimate moved {moved_far:.3f} m); "
           f"gate_0 at 5 m still used (moved {moved_near:.2f} m toward it)  OK")
 
+
+def _tilted_hover_run(swift, pnp_pitch_err_deg=3.0, blind_s=3.0):
+    """Hover at a slight true tilt. The detections come from a pose whose PITCH is pnp_pitch_err_deg
+    off (a biased PnP normal, as Isaac 2026-11-13). Init, a few fixes, then blind_s with no gates.
+    Returns (vio, true roll/pitch, position drift over the blind stretch)."""
+    true_rp = (0.02, -0.03)
+    R_true = rot_rpy(true_rp[0], true_rp[1], START_YAW)
+    T_true = _T(R_true, START)
+    T_bad = _T(rot_rpy(true_rp[0], true_rp[1] + math.radians(pnp_pitch_err_deg), START_YAW), START)
+    f_body = R_true.T @ np.array([0.0, 0.0, G])                        # specific force at a tilted hover
+    kw = dict(attitude_updates="yaw", tilt_init="accel", init_fixes=3) if swift else {}
+    vio = GateVIO(GATES, MOUNT0, calib_s=0.5, initial_guess=(START, START_YAW), **kw)
+    t = 0.0
+
+    def imu(n):
+        nonlocal t
+        for _ in range(n):
+            t += vio.dt
+            vio.add_imu(t, FRD_FROM_FLU @ f_body, np.zeros(3))
+
+    imu(125)
+    for _ in range(10):
+        vio.add_detections(t, [_det(T_bad, GATES[0])])
+        imu(25)
+    p0 = vio.state[0:3, 0].copy()
+    imu(int(blind_s / vio.dt))
+    return vio, true_rp, float(np.linalg.norm(vio.state[0:3, 0] - p0)), T_true
+
+
+def test_swift_tilt_from_gravity_not_pnp():
+    # Isaac 2026-11-13: the first PnP fix left the pitch ~3 deg off; nothing corrected it and
+    # g sin 3 deg leaked into the velocity. Swift mode takes roll/pitch from the accelerometer.
+    old, rp, drift_old, _ = _tilted_hover_run(swift=False)
+    new, rp, drift_new, _ = _tilted_hover_run(swift=True)
+    err_old = math.degrees(abs(old.state[4, 0] - rp[1]))
+    err_new = math.degrees(abs(new.state[4, 0] - rp[1]))
+    assert err_old > 2.0, err_old                                       # the failure, reproduced
+    assert err_new < 0.2 and math.degrees(abs(new.state[3, 0] - rp[0])) < 0.2, (err_new, new.state[3:6, 0])
+    assert drift_old > 1.0 and drift_new < 0.1, (drift_old, drift_new)
+    print(f"  PnP pitch 3 deg off: old init pitch error {err_old:.1f} deg -> {drift_old:.2f} m drift in 3 s blind; "
+          f"Swift mode {err_new:.2f} deg -> {drift_new:.3f} m  OK")
+
+
+def test_swift_holds_hover_with_fixes():
+    vio = GateVIO(GATES, MOUNT0, calib_s=0.5, initial_guess=(START + [0.3, -0.2, 0.1], START_YAW + 0.05),
+                  attitude_updates="yaw", tilt_init="accel", init_fixes=3)
+    T_wb = _T(rot_rpy(0.0, 0.0, START_YAW), START)
+    t = _hover_imu(vio, 125)
+    for _ in range(20):
+        vio.add_detections(t, [_det(T_wb, g) for g in GATES])
+        t = _hover_imu(vio, 25, t0=t)
+    x = vio.state[:, 0]
+    assert vio.initialized and np.linalg.norm(x[0:3] - START) < 0.01 and abs(x[5] - START_YAW) < 1e-3, x[0:6]
+    assert vio.stats["fixes_full"] > 10 and vio.stats["rejected"] == 0, vio.stats
+    print(f"  Swift mode (position + yaw from gates, tilt from gravity): holds "
+          f"{np.linalg.norm(x[0:3] - START) * 100:.2f} cm from the hover pose  OK")
+
+
+def test_calibration_waits_until_still():
+    # Isaac 2026-11-14: calibrated while still turning after the move to the start (5 deg/s yaw,
+    # 0.7 deg/s pitch taken as bias). calib_still waits for a still window instead.
+    bias = np.radians([0.3, -0.4, 0.5])
+    turn = np.radians([0.0, 0.7, 5.0])
+    for still, expect_bias in [(False, bias + turn), (True, bias)]:
+        vio = GateVIO(GATES, MOUNT0, calib_s=1.0, calib_still=still)
+        rng = np.random.default_rng(0)
+        for k in range(250 + 250 + 400):                 # 1 s turning, 1 s settling to 0, then still
+            w = turn if k < 250 else (turn * (1 - (k - 250) / 250) if k < 500 else np.zeros(3))
+            vio.add_imu((k + 1) * vio.dt, FRD_FROM_FLU @ np.array([0.0, 0.0, G]),
+                        FRD_FROM_FLU @ (bias + w + rng.normal(0, 0.0054, 3)))
+            if vio.calibrated:
+                break
+        assert vio.calibrated, still
+        err = np.degrees(np.abs(vio.gyro_bias - expect_bias)).max()
+        assert err < 0.05 if still else err < 0.1, (still, np.degrees(vio.gyro_bias), err)
+        if still:
+            assert vio.stats["calib_waits"] > 0
+            print(f"  calib_still: waited {vio.stats['calib_waits']} windows through the turn, bias error {err:.3f} deg/s  OK")
+
+
+def test_slow_tilt_correction_bounds_gyro_bias():
+    # Swift mode without gate tilt updates lets a residual gyro bias integrate; tilt_tau_s bounds it.
+    def run(tau):
+        vio = GateVIO(GATES, MOUNT0, calib_s=0.0, initial_guess=(START, START_YAW),
+                      attitude_updates="yaw", tilt_init="accel", tilt_tau_s=tau)
+        T_wb = _T(rot_rpy(0.0, 0.0, START_YAW), START)
+        resid = np.radians([0.0, 0.3, 0.0])              # 0.3 deg/s pitch bias the calibration missed
+        t = 0.0
+        for k in range(int(20.0 / vio.dt)):
+            t += vio.dt
+            vio.add_imu(t, FRD_FROM_FLU @ np.array([0.0, 0.0, G]), FRD_FROM_FLU @ resid)
+            if k % 8 == 0:
+                vio.add_detections(t, [_det(T_wb, GATES[0])])
+        return math.degrees(abs(vio.state[4, 0]))
+    off, on = run(None), run(2.0)
+    assert off > 2.0 and on < 0.8 and on < off / 4, (off, on)      # bounded near bias x tau = 0.6 deg
+    print(f"  0.3 deg/s residual pitch bias for 20 s: tilt error {off:.1f} deg without correction, "
+          f"{on:.2f} deg with tilt_tau_s=2  OK")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:

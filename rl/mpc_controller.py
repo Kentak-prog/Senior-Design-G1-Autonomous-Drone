@@ -106,7 +106,8 @@ class MpcController:
         if self._ref is None:       # planning and the IPOPT problem are env-independent
             gates = [PathGate(g.name, g.T_world_gate(), g.side) for g in self.course.gates]
             start, start_yaw = self.course.start_pose()
-            self.traj, _ = plan_gate_trajectory(gates, np.asarray(start, dtype=float),
+            self.path_gates = gates
+            self.traj, self.wps = plan_gate_trajectory(gates, np.asarray(start, dtype=float),
                                                 v_max=self.v_max, a_max=self.a_max,
                                                 verbose=False,
                                                 optimize_times=self.optimize_times)

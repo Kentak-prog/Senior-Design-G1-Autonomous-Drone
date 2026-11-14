@@ -124,7 +124,8 @@ def run(args):
     mount = camera_mount_usd(args.camera_pitch_deg, tuple(float(v) for v in args.camera_pos.split(",")))
     vio = GateVIO(gates, mount, imu_rate=args.imu_rate,
                   initial_guess=(start + rng.normal(0, args.guess_error, 3), start_yaw),
-                  delay_compensation=not args.no_delay_compensation)
+                  delay_compensation=not args.no_delay_compensation,
+                  attitude_updates=args.attitude_updates, tilt_init=args.tilt_init, init_fixes=args.init_fixes)
     camera = SimCamera(gates, args.corner_noise_px, args.range_bias, args.max_range, rng, mount,
                        resolution=tuple(int(v) for v in args.camera_resolution.lower().split("x")),
                        hfov_deg=args.camera_hfov)
@@ -297,6 +298,11 @@ def main():
     ap.add_argument("--attitude-tau", type=float, default=0.08, help="--plant px4: attitude lag, s")
     ap.add_argument("--attitude-lead-s", type=float, default=0.1, help="MPC attitude setpoint lead, s (mpc_node default)")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--attitude-updates", choices=["full", "yaw", "none"], default="full",
+                    help="what gate fixes update (control/vio.py SWIFT MODE): full = position + roll/pitch/yaw")
+    ap.add_argument("--tilt-init", choices=["pnp", "accel"], default="pnp",
+                    help="roll/pitch at init from the first PnP fix or from gravity (accelerometer)")
+    ap.add_argument("--init-fixes", type=int, default=1, help="median of this many fixes at init")
     ap.add_argument("--out", default=os.path.join(HERE, "sim_output", "vio_mpc_rehearsal.png"))
     ap.add_argument("--no-plot", action="store_true")
     args = ap.parse_args()

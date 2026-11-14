@@ -653,6 +653,8 @@ def main(argv=None):
                     help="mpc_rate solver (ipopt is not real time; README_mpc_rate.md)")
     ap.add_argument("--mpc-vmax", type=float, default=4.0, help="MPC plan speed limit [m/s] (mpc_ctbr, mpc_rate)")
     ap.add_argument("--mpc-amax", type=float, default=6.0, help="MPC plan acceleration limit [m/s^2]")
+    ap.add_argument("--mpc-yaw", default="velocity", choices=["velocity", "next_gate"],
+                    help="mpc_rate yaw: along the velocity, or the nose (camera) on the next gate (VIO)")
     ap.add_argument("--model", default=None, help="run dir with model.zip (for --controller rl)")
     add_vehicle_args(ap)
     ap.add_argument("--geofence", type=float, nargs=6, default=None,
@@ -720,7 +722,7 @@ def main(argv=None):
               f"{np.round(gv._prior_errors(gmap, course), 2)}")
     try:
         controller = make_controller(a.controller, params, ctl_course, a.model,
-                                     mpc_vmax=a.mpc_vmax, mpc_amax=a.mpc_amax,
+                                     mpc_vmax=a.mpc_vmax, mpc_amax=a.mpc_amax, mpc_yaw=a.mpc_yaw,
                                      mpc_delay_s=a.mpc_delay_ms / 1e3, mpc_backend=a.mpc_backend)
     except ValueError as e:
         if gate_source is not None:

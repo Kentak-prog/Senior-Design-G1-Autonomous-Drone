@@ -40,6 +40,13 @@ BACKENDS: "ipopt" (CasADi Opti + IPOPT, works everywhere, the reference;
 generated C, delta-u formulation; 0.8 ms median, <= 1.6 ms p95 on the bench,
 and equal or better on every case; see mpc_rate_acados.py and
 README_mpc_rate.md). Use acados for anything that flies.
+
+YAW (yaw_mode, 2026-11-14): "velocity" (default) faces the direction of travel (TrajectoryReference);
+"next_gate" points the nose, and the front camera, at the next gate not yet reached
+(Trajectory/min_snap_planner.look_at_yaw_profile). On the VIO the gates are the only position fixes,
+and with velocity yaw the next gate leaves the camera ~1.5 s before it is reached
+(RESULTS_2026-11-13_mpc_rate_vio.md). The planned path is the same either way; roll/pitch and rates
+follow the chosen yaw.
 """
 import math
 import os
@@ -164,7 +171,8 @@ class RateAwareMpc(MpcController):
     command = "ctbr"
 
     def __init__(self, params, course, v_max=4.0, a_max=6.0, *, N=50, dt_mpc=0.05,
-                 tau_w=TAU_W_ISAAC, tau_T=None, delay_s=0.0, weights=None, backend="ipopt"):
+                 tau_w=TAU_W_ISAAC, tau_T=None, delay_s=0.0, weights=None, backend="ipopt",
+                 yaw_mode="velocity"):
         super().__init__(params, course, v_max=v_max, a_max=a_max, horizon=N)
         self.Nh, self.dtm = N, dt_mpc
         self.tau_w = np.asarray(tau_w, dtype=float)
@@ -173,6 +181,9 @@ class RateAwareMpc(MpcController):
         self.wts = dict(WEIGHTS)
         self.wts.update(weights or {})
         self.backend = backend
+        if yaw_mode not in ("velocity", "next_gate"):
+            raise ValueError(f"yaw_mode must be velocity or next_gate, got {yaw_mode!r}")
+        self.yaw_mode = yaw_mode
         self.ctrl_dt = params.control_dt
         self.solver = None
         x, u, xdot = model_rhs(params, self.tau_w, self.tau_T)
@@ -194,7 +205,15 @@ class RateAwareMpc(MpcController):
     def reset(self, n_envs, device="cpu", dtype=torch.float32):
         if n_envs != 1:
             raise ValueError("RateAwareMpc flies one env")
+        new_plan = self._ref is None
         super().reset(n_envs, device, dtype)           # plan + _ref (also builds the torque NMPC; unused)
+        if new_plan and self.yaw_mode == "next_gate":
+            from min_snap_planner import look_at_yaw_profile
+            from trajectory_reference import TrajectoryReference
+            start_yaw = self.course.start_pose()[1]
+            self._ref = TrajectoryReference(self.traj, start_yaw, m=self.p.mass,
+                                            yaw_profile=look_at_yaw_profile(self.traj, self.wps, self.path_gates,
+                                                                            start_yaw))
         if self.solver is None:
             self.solver = self._make_solver()
         p = self.p

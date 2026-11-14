@@ -97,6 +97,13 @@ def main():
             # the first detections to map gates. Empty: the manifest's camera pose (spawn_test_gates
             # manifests); rl/tracks/*.json have none, so pass the track's start pose for those.
             dp("initial_pose", [0.0])
+            # control/vio.py SWIFT MODE: gates correct position (+ yaw), roll/pitch come from gravity at
+            # init and the gyro after. Old behaviour: attitude_updates:=full tilt_init:=pnp init_fixes:=1.
+            dp("attitude_updates", "full")
+            dp("tilt_init", "pnp")
+            dp("init_fixes", 1)
+            dp("calib_still", False)       # gyro bias only from a still hover window (control/vio.py)
+            dp("tilt_tau_s", 0.0)          # slow roll/pitch correction from gate fixes, s; 0 = off
             dp("gate_hsv_lo", [135, 80, 60])
             dp("gate_hsv_hi", [170, 255, 255])
             dp("ground_truth_topic", "/drone00/state/pose")   # logging only; "" disables
@@ -126,7 +133,13 @@ def main():
                                           tuple(float(v) for v in gp("camera_pos")))
             self.vio = GateVIO(gates, self.mount, imu_rate=float(gp("imu_rate")), calib_s=float(gp("calib_s")),
                                max_range=float(gp("max_range")), initial_guess=hint,
-                               delay_compensation=bool(gp("delay_compensation")))
+                               delay_compensation=bool(gp("delay_compensation")),
+                               attitude_updates=str(gp("attitude_updates")), tilt_init=str(gp("tilt_init")),
+                               init_fixes=int(gp("init_fixes")), calib_still=bool(gp("calib_still")),
+                               tilt_tau_s=float(gp("tilt_tau_s")) or None)
+            self.get_logger().info(f"attitude updates {gp('attitude_updates')}, tilt init {gp('tilt_init')}, "
+                                   f"init from {gp('init_fixes')} fixes, still calibration {gp('calib_still')}, "
+                                   f"tilt tau {gp('tilt_tau_s')} s, gate side {self.gate_side} m")
             self.lock = threading.Lock()
             self.intr = None
             self.bridge = None
@@ -188,7 +201,8 @@ def main():
                 self.reported_calibration = True
                 self.get_logger().info(f"gyro bias {np.round(calib['gyro_bias_deg_s'], 3)} deg/s; |accel| at hover "
                                        f"{calib['accel_norm']:.3f} m/s^2 (expect ~9.81 -- else the drone was not hovering "
-                                       f"or the IMU frame is not what vio.py assumes)")
+                                       f"or the IMU frame is not what vio.py assumes); waited "
+                                       f"{self.vio.stats['calib_waits']} non-still windows")
             if x is None or self.n_imu % int(self.gp("publish_every")):
                 self._status(x, std, stats)
                 return

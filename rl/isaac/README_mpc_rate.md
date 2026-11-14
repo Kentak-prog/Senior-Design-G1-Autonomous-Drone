@@ -118,6 +118,12 @@ drift or hit gates. The VIO falls behind along track because a ~3° tilt error f
 never corrected, and Tony's thin pink gates give it poor fixes. Details and the proposed VIO fixes:
 `RESULTS_2026-11-13_mpc_rate_vio.md`.
 
+### Next-gate yaw on the VIO (2026-11-14): 5 / 6
+
+`RateAwareMpc(..., yaw_mode="next_gate")` (runner `--mpc-yaw next_gate`) keeps the next gate in the front
+camera. With the Swift-mode VIO it completed all three speed steps on the 3-gate course (the 8/10 lap in
+5.48 s, as on GPS) and 2 of 3 on the circle. `RESULTS_2026-11-13_mpc_rate_vio.md`, follow-up 3.
+
 ## Not yet tested
 
 Delay jitter, and the VOXL 2 itself. On the VIO: anything past one lap at 3/4 (see above).

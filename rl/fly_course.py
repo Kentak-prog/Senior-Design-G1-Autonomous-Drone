@@ -149,7 +149,7 @@ def plot_log(log, path):
 
 
 def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0,
-                    mpc_delay_s=0.0, mpc_backend="acados"):
+                    mpc_delay_s=0.0, mpc_backend="acados", mpc_yaw="velocity"):
     if kind == "pid":
         from pid_controller import PidController
         return PidController(params, course)
@@ -173,7 +173,7 @@ def make_controller(kind, params, course, model=None, mpc_vmax=4.0, mpc_amax=6.0
             sys.path.insert(0, isaac_dir)
         from mpc_rate import RateAwareMpc
         return RateAwareMpc(params, course, v_max=mpc_vmax, a_max=mpc_amax, delay_s=mpc_delay_s,
-                            backend=mpc_backend)
+                            backend=mpc_backend, yaw_mode=mpc_yaw)
     raise ValueError(f"unknown controller {kind!r}")
 
 

@@ -36,6 +36,29 @@ timestamps only place a camera frame among the IMU samples; integration
 always uses the fixed IMU period, because /clock ticks once per rendered
 frame and several IMU samples can share a stamp.
 
+SWIFT MODE (attitude_updates="yaw" or "none", tilt_init="accel"; 2026-11-14). Live in Isaac on
+2026-11-13 (rl/isaac/RESULTS_2026-11-13_mpc_rate_vio.md) the first PnP fix left the pitch ~3 deg off
+and nothing corrected it: g sin 3 deg ~ 0.5 m/s^2 of gravity leaked into the velocity and the
+estimate fell behind in every blind stretch. Champion-level drone racing (Kaufmann et al., Nature
+2023, "Swift") trusts the inertial attitude and lets the gates correct only the TRANSLATION. Here:
+  tilt_init="accel"   roll / pitch at init from the accelerometer (gravity) averaged over the
+                      hover around the init image, not from PnP;
+  init_fixes=N        position and yaw at init are the median of the first N reliable fixes;
+  attitude_updates    "full" (default, as before): fixes update position + roll/pitch/yaw.
+                      "yaw": position (through the ESTIMATED attitude, like a position-only
+                      fix) + yaw from a reliable gate normal; roll/pitch never.
+                      "none": position only.
+The gyro keeps roll / pitch between (bias calibrated at the hover). Live 2026-11-14, Swift mode
+alone went 0/3: a gyro bias taken while the drone was still turning (5 deg/s yaw, 0.7 deg/s pitch)
+integrated without bound once gates no longer touched the tilt. So:
+  calib_still=True    the bias comes only from a calib_s window that is STILL: its quarter means agree
+                      (gyro within calib_rate_agree_deg_s, accel within calib_acc_agree), |mean gyro| <
+                      calib_max_rate_deg_s, |mean accel| within calib_g_tol of g. Otherwise the window
+                      slides on (stats["calib_waits"] counts the rejected windows).
+  tilt_tau_s=T        a slow tilt correction from reliable gate fixes: roll/pitch move toward the PnP
+                      tilt with time constant T (s of fix time), so a residual gyro bias b leaves at
+                      most ~b*T, while a single biased PnP solve barely moves it. None = off.
+
 Frames: world ENU, body FLU, camera USD (Isaac) / OpenCV (vision) as in
 vision/camera.py. State order [x, y, z, roll, pitch, yaw, vx, vy, vz, p, q, r].
 """
@@ -92,7 +115,9 @@ class GateVIO:
                  calib_s=2.0, history_s=1.5, max_range=15.0, min_pos_std=0.05, min_ang_std_deg=1.0,
                  assoc_tol=1.0, chi2_full=22.5, chi2_pos=16.3, initial_guess=None, delay_compensation=True,
                  accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=10.0,
-                 pos_only_max_range=8.0, relock_blind_s=1.0):
+                 pos_only_max_range=8.0, relock_blind_s=1.0, attitude_updates="full", tilt_init="pnp",
+                 init_fixes=1, chi2_pos_yaw=18.5, calib_still=False, calib_rate_agree_deg_s=0.15,
+                 calib_max_rate_deg_s=1.5, calib_acc_agree=0.1, calib_g_tol=0.15, tilt_tau_s=None):
         """
         gates:          map gates (gate_path.Gate, world ENU), e.g. gates_from_manifest(test_gates.json)
         T_body_cam_usd: static camera mount, body FLU -> camera USD (eval_isaac_gates.T_body_cam_usd_from_mount)
@@ -116,6 +141,19 @@ class GateVIO:
                         2026-11-06, attempt 3: a re-lock at engage took the half-clipped gate_0's
                         biased fixes over a healthy estimate (0.09 m off), and the drone missed gate_0.
         """
+        if attitude_updates not in ("full", "yaw", "none"):
+            raise ValueError(f"attitude_updates must be full, yaw or none, got {attitude_updates!r}")
+        if tilt_init not in ("pnp", "accel"):
+            raise ValueError(f"tilt_init must be pnp or accel, got {tilt_init!r}")
+        self.attitude_updates, self.tilt_init = attitude_updates, tilt_init
+        self.init_fixes, self.chi2_pos_yaw = max(1, int(init_fixes)), chi2_pos_yaw
+        self._init_buf = []                             # (t_img, pos, yaw, gate idx) collected before init
+        self.calib_still = bool(calib_still)
+        self.calib_rate_agree = np.radians(calib_rate_agree_deg_s)
+        self.calib_max_rate = np.radians(calib_max_rate_deg_s)
+        self.calib_acc_agree, self.calib_g_tol = calib_acc_agree, calib_g_tol
+        self.tilt_tau = tilt_tau_s
+        self._last_tilt_t = None
         self.gates = list(gates)
         self.T_body_cam_usd = np.asarray(T_body_cam_usd, dtype=float)
         self.T_body_cam_cv = self.T_body_cam_usd.copy()
@@ -143,7 +181,7 @@ class GateVIO:
         n_hist = int(np.ceil(history_s * imu_rate)) + 1
         self.hist = deque(maxlen=n_hist)                # (t, x, P) after each IMU sample
         self.imu_hist = deque(maxlen=n_hist)            # (t, acc_flu, gyro_flu_corrected)
-        self.stats = {"imu": 0, "fixes_full": 0, "fixes_pos": 0, "rejected": 0, "unmatched": 0,
+        self.stats = {"calib_waits": 0, "imu": 0, "fixes_full": 0, "fixes_pos": 0, "rejected": 0, "unmatched": 0,
                       "too_old": 0, "relocks": 0, "pos_only_far": 0, "init_time": None}
         self.events = []                                # (t, kind, gate, innovation norm)
 
@@ -157,8 +195,14 @@ class GateVIO:
             self._calib_gyro.append(gyro)
             self._calib_acc.append(acc)
             if len(self._calib_gyro) >= self.calib_n:
-                self.gyro_bias = np.mean(self._calib_gyro, axis=0)
-                self.calibrated = True
+                if not self.calib_still or self._window_is_still():
+                    self.gyro_bias = np.mean(self._calib_gyro, axis=0)
+                    self.calibrated = True
+                else:                                   # slide the window on by a quarter
+                    self.stats["calib_waits"] += 1
+                    q = max(1, self.calib_n // 4)
+                    del self._calib_gyro[:q]
+                    del self._calib_acc[:q]
             self.t = t
             return
         g = gyro - self.gyro_bias
@@ -249,12 +293,42 @@ class GateVIO:
             if not reliable:
                 return 0
             det, i, Te = reliable[0]                    # nearest reliable gate
-            T = self._body_pose_from(det, i, Te)
             pos_std, ang_std = self._stds(det)
+            tilt = self._accel_tilt(t_img) if self.tilt_init == "accel" else None
+            if tilt is not None:
+                # Swift mode: PnP's yaw and position, put through the gravity tilt
+                Tg = self.gates[i].T_world_gate
+                Tcg = det.T_cam_gate
+                if Tcg[:3, 2] @ Te[:3, 2] < 0:
+                    Tcg = Tcg.copy()
+                    Tcg[:3, 0] *= -1.0
+                    Tcg[:3, 2] *= -1.0
+                # yaw: the camera's heading from the gate normal, with the known tilt
+                R_wc_pnp = Tg[:3, :3] @ Tcg[:3, :3].T
+                yaw_p = rpy_from_rot(R_wc_pnp @ self.T_body_cam_cv[:3, :3].T)[2]
+                R_wb = rot_rpy(tilt[0], tilt[1], yaw_p)
+                R_wc = R_wb @ self.T_body_cam_cv[:3, :3]
+                p_cam = Tg[:3, 3] - R_wc @ Tcg[:3, 3]
+                pos = p_cam - R_wb @ self.T_body_cam_cv[:3, 3]
+                rpy = np.array([tilt[0], tilt[1], yaw_p])
+            else:
+                T = self._body_pose_from(det, i, Te)
+                pos, rpy = T[:3, 3], rpy_from_rot(T[:3, :3])
+            self._init_buf.append((t_img, pos, rpy, i))
+            if len(self._init_buf) < self.init_fixes:
+                return 0
+            ts, ps, rs, _ = zip(*self._init_buf[-self.init_fixes:])
+            self._init_buf = []
+            t_img = ts[-1]
+            pos = np.median(np.array(ps), axis=0)
+            R_ = np.array(rs)
+            rpy = np.array([np.median(R_[:, 0]), np.median(R_[:, 1]),
+                            float(np.angle(np.mean(np.exp(1j * R_[:, 2]))))])
+            att_std = [np.radians(0.5)] * 2 + [ang_std] if tilt is not None else [ang_std] * 3
             self.ekf.x = np.zeros((12, 1))
-            self.ekf.x[0:3, 0] = T[:3, 3]
-            self.ekf.x[3:6, 0] = rpy_from_rot(T[:3, :3])
-            self.ekf.P = np.diag([pos_std ** 2] * 3 + [ang_std ** 2] * 3 + [0.05 ** 2] * 3 + [0.01] * 3)
+            self.ekf.x[0:3, 0] = pos
+            self.ekf.x[3:6, 0] = rpy
+            self.ekf.P = np.diag([pos_std ** 2] * 3 + [a ** 2 for a in att_std] + [0.05 ** 2] * 3 + [0.01] * 3)
             self.initialized = True
             self.stats["init_time"] = t_img
             self.events.append((t_img, "init", self.gates[i].name, 0.0))
@@ -291,7 +365,24 @@ class GateVIO:
             T_cam_world = _inv(self._T_world_body_est() @ self.T_body_cam_cv)
             Te = T_cam_world @ self.gates[i].T_world_gate
             pos_std, ang_std = self._stds(det)
-            if det.normal_is_reliable:
+            if det.normal_is_reliable and self.attitude_updates != "full":
+                # Swift mode: position through the ESTIMATED attitude (+ yaw from the gate normal)
+                x = self.ekf.x[:, 0]
+                R_wb = rot_rpy(*x[3:6])
+                R_wc = R_wb @ self.T_body_cam_cv[:3, :3]
+                p_cam = self.gates[i].center - R_wc @ det.T_cam_gate[:3, 3]
+                zp = p_cam - R_wb @ self.T_body_cam_cv[:3, 3]
+                att_std = max(self.min_ang_std, float(np.sqrt(np.max(np.diag(self.ekf.P)[3:6]))))
+                var_p = pos_std ** 2 + (det.range_m * att_std) ** 2
+                if self.attitude_updates == "yaw":
+                    yaw_m = rpy_from_rot(self._body_pose_from(det, i, Te)[:3, :3])[2]
+                    z = np.concatenate([zp, [yaw_m]])
+                    idx, R = [0, 1, 2, 5], np.array([var_p] * 3 + [ang_std ** 2])
+                    chi2 = self.chi2_pos_yaw
+                else:
+                    z, idx, R, chi2 = zp, [0, 1, 2], np.array([var_p] * 3), self.chi2_pos
+                kind = "full"
+            elif det.normal_is_reliable:
                 T = self._body_pose_from(det, i, Te)
                 z = np.concatenate([T[:3, 3], rpy_from_rot(T[:3, :3])])
                 idx, R = list(range(6)), np.array([pos_std ** 2] * 3 + [ang_std ** 2] * 3)
@@ -333,6 +424,8 @@ class GateVIO:
             self._rejected.clear()
             self._last_fix_t = t_img if self._last_fix_t is None else max(self._last_fix_t, t_img)
             self.ekf.update_measurement(z, idx, R)
+            if kind == "full" and self.attitude_updates != "full" and det.normal_is_reliable:
+                self._nudge_tilt(t_img, det, i, Te)
             self.stats["fixes_full" if kind == "full" else "fixes_pos"] += 1
             self.events.append((t_img, kind, self.gates[i].name, d2))
             applied += 1
@@ -365,12 +458,48 @@ class GateVIO:
         if np.max(np.linalg.norm(pts - pts.mean(axis=0), axis=1)) > self.relock_spread:
             return False
         P = self.ekf.P
-        for k in range(6):
-            P[k, k] += float(y[k]) ** 2                   # position and angles: at least the innovation
+        idx = [0, 1, 2, 3, 4, 5] if len(y) == 6 else ([0, 1, 2, 5] if len(y) == 4 else [0, 1, 2])
+        for r, k in enumerate(idx):
+            P[k, k] += float(y[r]) ** 2                   # position and angles: at least the innovation
         for k in range(6, 9):
             P[k, k] += 0.5 ** 2                           # velocity: unknown after drifting this far
         self._rejected.clear()
         return True
+
+    def _window_is_still(self):
+        """The calibration window shows a hover, not a turn or a settle (see calib_still)."""
+        g, a = np.array(self._calib_gyro), np.array(self._calib_acc)
+        qg = np.array([c.mean(axis=0) for c in np.array_split(g, 4)])
+        qa = np.array([c.mean(axis=0) for c in np.array_split(a, 4)])
+        return (np.ptp(qg, axis=0).max() < self.calib_rate_agree
+                and np.abs(g.mean(axis=0)).max() < self.calib_max_rate
+                and np.ptp(qa, axis=0).max() < self.calib_acc_agree
+                and abs(np.linalg.norm(a.mean(axis=0)) - 9.81) < self.calib_g_tol)
+
+    def _nudge_tilt(self, t_img, det, gate_idx, Te):
+        """Slow tilt correction toward a reliable fix's PnP roll/pitch (tilt_tau_s)."""
+        if self.tilt_tau is None:
+            return
+        dt = 0.0 if self._last_tilt_t is None else min(max(t_img - self._last_tilt_t, 0.0), 0.2)
+        self._last_tilt_t = t_img if self._last_tilt_t is None else max(self._last_tilt_t, t_img)
+        if dt <= 0.0:
+            return
+        rp = rpy_from_rot(self._body_pose_from(det, gate_idx, Te)[:3, :3])[0:2]
+        for k in range(2):
+            self.ekf.x[3 + k, 0] += (dt / self.tilt_tau) * float(np.angle(np.exp(1j * (rp[k] - self.ekf.x[3 + k, 0]))))
+
+    def _accel_tilt(self, t_img, window_s=0.5):
+        """(roll, pitch) from gravity: the mean specific force (body FLU) over the hover before t_img
+        (falls back to the calibration samples). Only valid while hovering, which init assumes."""
+        acc = [a for (t, a, _) in self.imu_hist if t_img - window_s <= t <= t_img]
+        if len(acc) < 10:
+            acc = list(self._calib_acc)
+        if not acc:
+            return None
+        a = np.mean(acc, axis=0)
+        if abs(np.linalg.norm(a) - 9.81) > 0.5:      # not hovering: no tilt from gravity
+            return None
+        return float(np.arctan2(a[1], a[2])), float(np.arctan2(-a[0], np.hypot(a[1], a[2])))
 
     # ------------------------------------------------------------------ output
     @property

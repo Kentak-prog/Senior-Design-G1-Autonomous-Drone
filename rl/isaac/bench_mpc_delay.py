@@ -38,7 +38,21 @@ from rotations import quat_from_euler_zyx                       # noqa: E402
 from fly_course import GROUND_Z                                 # noqa: E402
 
 ISAAC_RISE = (0.077, 0.067, 0.156)          # s, 63 % rise measured live (calibrate.py, 2026-11-12)
-KP_SCALE_ISAAC = (0.3947, 0.5105, 0.3033)   # rate_kp scale giving 80 / 64 / 152 ms in QuadSim
+KP_SCALE_ISAAC = (0.3947, 0.5105, 0.3033)
+HFOV_HALF, VFOV_HALF = 98.7 / 2, 82.3 / 2   # deg, Starling 2 Max C29 front camera (spawn_starling.py), level   # rate_kp scale giving 80 / 64 / 152 ms in QuadSim
+
+
+def _gate_whole_in_view(gate, pos, R_wb, max_range=12.0):
+    """All four opening corners of `gate` inside the level front camera's field of view, within max_range."""
+    T = gate.T_world_gate()
+    h = gate.side / 2
+    for cx, cy in ((h, h), (h, -h), (-h, h), (-h, -h)):
+        d_b = R_wb.T @ (T[:3, :3] @ np.array([cx, cy, 0.0]) + T[:3, 3] - pos)
+        if d_b[0] <= 0.2 or np.linalg.norm(d_b) > max_range:
+            return False
+        if abs(math.degrees(math.atan2(d_b[1], d_b[0]))) > HFOV_HALF or                 abs(math.degrees(math.atan2(d_b[2], d_b[0]))) > VFOV_HALF:
+            return False
+    return True
 
 
 def rise_time(P, kp_scale, axis, step=1.0, T=0.6):
@@ -96,6 +110,7 @@ def fly(course, P, controller, delay_s=0.0, kp_scale=(1.0, 1.0, 1.0), max_time=4
     gate_idx = torch.zeros(1, dtype=torch.long)
     queue, active = [], (torch.tensor([P.mass * P.gravity]), torch.zeros(1, 3))
     tilt, rates, sp, pos, t_log = [], [], [], [sim.pos[0].numpy().copy()], []
+    in_view = []                                 # some gate WHOLE in the C29 camera (what a VIO fix needs)
     crashed, kind, k_phys = False, "", 0
     for k in range(int(round(max_time / dt))):
         thrust, cmd = controller.act(sim.pos, sim.vel, sim.quat, gate_idx, dt, omega=sim.omega)
@@ -110,6 +125,11 @@ def fly(course, P, controller, delay_s=0.0, kp_scale=(1.0, 1.0, 1.0), max_time=4
             k_phys += 1
         q = sim.quat[0].numpy()
         tilt.append(math.degrees(math.acos(max(-1.0, min(1.0, 1.0 - 2.0 * (q[1] ** 2 + q[2] ** 2))))))
+        w_, x_, y_, z_ = (float(v) for v in q)
+        Rm = np.array([[1 - 2 * (y_ * y_ + z_ * z_), 2 * (x_ * y_ - w_ * z_), 2 * (x_ * z_ + w_ * y_)],
+                       [2 * (x_ * y_ + w_ * z_), 1 - 2 * (x_ * x_ + z_ * z_), 2 * (y_ * z_ - w_ * x_)],
+                       [2 * (x_ * z_ - w_ * y_), 2 * (y_ * z_ + w_ * x_), 1 - 2 * (x_ * x_ + y_ * y_)]])
+        in_view.append(any(_gate_whole_in_view(g, sim.pos[0].numpy(), Rm) for g in course.gates))
         rates.append(sim.omega[0].numpy().copy()); sp.append(active[1][0].numpy().copy())
         pos.append(sim.pos[0].numpy().copy()); t_log.append((k + 1) * dt)
         passed, hit = check_gate(p_prev, sim.pos, gate_batch(course, gate_idx, torch.float32), P.collision_radius)
@@ -129,28 +149,35 @@ def fly(course, P, controller, delay_s=0.0, kp_scale=(1.0, 1.0, 1.0), max_time=4
         return float(np.sqrt(np.mean((x - m)[w:-w] ** 2)))
 
     mg = edge_margins(np.array(pos), course)
+    iv = np.array(in_view, dtype=bool)
+    gap, longest = 0, 0
+    for v in iv:
+        gap = 0 if v else gap + 1
+        longest = max(longest, gap)
     ms = 1e3 * np.array(controller.solve_times) if controller.solve_times else np.array([np.nan])
     return dict(gates=int(gate_idx[0]), n=len(course), done=int(gate_idx[0]) >= len(course), crashed=crashed,
                 kind=kind, t=t_log[-1] if t_log else 0.0, max_tilt=max(tilt) if tilt else 0.0,
                 osc_dps=math.degrees(max(hf_rms(sp[:, 0]), hf_rms(sp[:, 1]))),
                 min_margin=float(np.nanmin(mg)) if np.isfinite(mg).any() else float("nan"),
+                view_frac=float(iv.mean()) if iv.size else float("nan"), view_gap_s=longest * dt,
                 solve_ms_median=float(np.median(ms)), solve_ms_p95=float(np.percentile(ms, 95)),
                 trace=dict(t=np.array(t_log), tilt=np.array(tilt), rate=rates, sp=sp))
 
 
-def make(kind, P, course, told_s=0.0, backend="ipopt", v_max=4.0, a_max=6.0):
+def make(kind, P, course, told_s=0.0, backend="ipopt", v_max=4.0, a_max=6.0, yaw="velocity"):
     if kind == "ctbr":
         from mpc_ctbr import MpcCtbrController
         return MpcCtbrController(P, course, v_max=v_max, a_max=a_max)
     from mpc_rate import RateAwareMpc
-    return RateAwareMpc(P, course, v_max=v_max, a_max=a_max, delay_s=told_s, backend=backend)
+    return RateAwareMpc(P, course, v_max=v_max, a_max=a_max, delay_s=told_s, backend=backend, yaw_mode=yaw)
 
 
 def row(track, label, r):
     res = "DONE" if r["done"] else (f"crash {r['kind']}" if r["crashed"] else "timeout")
     return (f"{track:16s} {label:34s} | {r['gates']:>2d}/{r['n']:<2d} {res:11s} {r['t']:6.2f}s "
             f"tilt {r['max_tilt']:5.1f}  osc {r['osc_dps']:5.2f} dps  margin {r['min_margin']:+.3f} m  "
-            f"solve {r['solve_ms_median']:5.1f}/{r['solve_ms_p95']:5.1f} ms")
+            f"solve {r['solve_ms_median']:5.1f}/{r['solve_ms_p95']:5.1f} ms  "
+            f"some gate whole in view {100 * r['view_frac']:3.0f}%, longest none {r['view_gap_s']:.2f} s")
 
 
 if __name__ == "__main__":
@@ -165,6 +192,7 @@ if __name__ == "__main__":
     ap.add_argument("--loop", choices=["isaac", "nominal"], default="isaac")
     ap.add_argument("--v-max", type=float, default=4.0, help="plan speed limit [m/s]")
     ap.add_argument("--a-max", type=float, default=6.0, help="plan acceleration limit [m/s^2]")
+    ap.add_argument("--yaw", choices=["velocity", "next_gate"], default="velocity", help="rate MPC yaw mode")
     a = ap.parse_args()
     P = QuadParams()
     if a.mode == "calib":
@@ -177,5 +205,5 @@ if __name__ == "__main__":
         c = Course.load(os.path.join(TRACKS_DIR, tr + ".json"))
         for d in a.delays_ms:
             told = (a.told_ms if a.told_ms is not None else d) / 1e3
-            r = fly(c, P, make(a.controller, P, c, told, a.backend, a.v_max, a.a_max), delay_s=d / 1e3, kp_scale=ks)
+            r = fly(c, P, make(a.controller, P, c, told, a.backend, a.v_max, a.a_max, a.yaw), delay_s=d / 1e3, kp_scale=ks)
             print(row(tr, f"{a.controller} v{a.v_max:g} a{a.a_max:g} {a.loop} {d:.0f} ms (told {1e3 * told:.0f})", r), flush=True)
