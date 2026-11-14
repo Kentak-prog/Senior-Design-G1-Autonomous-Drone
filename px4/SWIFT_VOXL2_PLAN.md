@@ -77,7 +77,7 @@ hires front camera (IMX412) ─► gate detector ─► IPPE ─► gate fix ─
 |---|---|---|
 | Base VIO | ModalAI's feature-tracking VIO on the tracking camera(s) + IMU: `voxl-open-vins` (OpenVINS) in recent SDKs, `voxl-qvio-server` in older ones. Already forwarded to PX4 by `voxl-vision-hub`. | on the drone; verify which one, its rate and quality |
 | Gate detector | hires front camera (IMX412, the one modelled in Isaac) via `voxl-camera-server`; our color detector first, the gate CNN later (`voxl-tflite-server` can run it on the GPU/NPU) | detector exists (sim); untested on real gates |
-| Pose solve | `vision/gate_pose.py`, or OpenCV `SOLVEPNP_IPPE_SQUARE` (Swift's IPPE) | exists |
+| Pose solve | `vision/gate_pose.py` (SQPnP + refinement on the gate's known size; Swift used IPPE). Keep SQPnP: the file notes OpenCV 4.13's `SOLVEPNP_IPPE_SQUARE` returned bad rotations in its tests | exists |
 | **Drift filter** | **new, ~100 lines**, see below | to write |
 | Controller | `rl/isaac/mpc_rate.py` (acados, plain C → builds for ARM), `--mpc-yaw next_gate` | exists; benchmark on the VOXL |
 | Link to PX4 | `SET_ATTITUDE_TARGET` (thrust + body rates) through `voxl-mavlink-server`, as in Isaac | exists (runner) |
