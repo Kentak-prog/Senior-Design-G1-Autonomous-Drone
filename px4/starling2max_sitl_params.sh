@@ -16,11 +16,12 @@
 # file when we have it.
 #
 # Rate-loop gains (end of this file): SITL's Iris gains act ~3.4x (roll) and
-# ~5.0x (pitch) harder on the Starling, which went into a pitch oscillation at
+# ~5.9x (pitch) harder on the Starling, which went into a pitch oscillation at
 # liftoff with them (2026-11-07). The values below are the Iris gains scaled by
-# those ratios (see PX4_SITL_PARAMS in workspace/spawn_starling.py); the
-# Starling hovered with them. Replace them with the real drone's gains from its
-# parameter file when we have it.
+# those ratios (see PX4_SITL_PARAMS in workspace/spawn_starling.py). The pitch
+# gains were rescaled on 2026-11-14 for the C29 CAD inertia (Iyy 2.055e-3, was
+# 2.465e-3: ratio 5.9, was 5.0). Replace them with the real drone's gains from
+# its parameter file when we have it.
 #
 # MPC_USE_HTE does not exist in the pod's PX4 build (the hover-thrust
 # estimator always runs there), so that one line prints "not found"; harmless.
@@ -67,9 +68,9 @@ $P set MC_AIRMODE 1
 $P set MC_ROLLRATE_P 0.044
 $P set MC_ROLLRATE_I 0.06
 $P set MC_ROLLRATE_D 0.0009
-$P set MC_PITCHRATE_P 0.03
-$P set MC_PITCHRATE_I 0.04
-$P set MC_PITCHRATE_D 0.0006
+$P set MC_PITCHRATE_P 0.025
+$P set MC_PITCHRATE_I 0.034
+$P set MC_PITCHRATE_D 0.0005
 
 $P show THR_MDL_FAC
 $P show MPC_THR_HOVER

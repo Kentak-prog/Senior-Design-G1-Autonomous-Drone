@@ -86,6 +86,10 @@ exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/sim_clock.py")
 import os; os.environ["GATES_MANIFEST"] = "/workspace/Senior-Design-G1-Autonomous-Drone/Trajectory/isaac_results/circle_course/circle_course.json"; exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_gates_from_manifest.py").read())
 ```
 The spawn log must show:
+- `[starling] model: /workspace/Senior-Design-G1-Autonomous-Drone/workspace/assets/starling2max_c29.usd`:
+  the Starling 2 Max C29 model (since 2026-11-14). If it says
+  `Pegasus Iris USD, re-dimensioned`, the USD wasn't found and the Iris mesh
+  is flown with the Starling's numbers, as before.
 - `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
 - four `[starling] rotorN anchor in body frame (...)` lines: rotor0
   (+0.095, −0.130), rotor1 (−0.095, +0.130), rotor2 (+0.095, +0.130),
@@ -93,10 +97,11 @@ The spawn log must show:
   PX4 mixes them, and it will flip on takeoff (what happened on 2026-11-07,
   before the fix in `apply_starling_geometry`).
 - `[starling] rotors moved to x=+-0.095 m, y=+-0.13 m (4 rotor joint anchors updated)`
-- four `[starling] rotorN: 1 prop collider(s) disabled, mass 0.005 kg`. The
-  Iris' 10-inch props overlap at the Starling spacing; with their colliders
-  on, the blades hit each other and the drone spun at −200°/s on the ground
-  as soon as it armed (2026-11-07).
+- four `[starling] rotorN: 0 prop collider(s) disabled, mass 0.005 kg`: the
+  Starling USD's props have no colliders. (With the Iris USD it is
+  `1 prop collider(s) disabled`: the Iris' 10-inch props overlap at the
+  Starling spacing; with their colliders on, the blades hit each other and
+  the drone spun at −200°/s on the ground as soon as it armed, 2026-11-07.)
 - `[starling] body mass 0.5530 kg + rotors 0.0200 kg = 0.573 kg`
 - `[init] ... hover 5407 RPM = motor output 0.341 = hover thrust 0.139`, then
   a block of `param set` lines. Copy them.
@@ -124,6 +129,9 @@ At `pxh>`, once `Ready for takeoff!` appears:
 **GO:**
 - **Hover:** steady at about (0, 0, 2.5), with no growing wobble.
   2026-11-07: 2.51 m within 5 mm, body rates within 0.25°/s.
+  2026-11-14 (C29 USD, new inertia and pitch gains): 2.57 m, within 3 cm
+  over 30 s, body rates within 0.25°/s, thrust 0.138–0.139. It takes off
+  from, and lands on, its own legs: at rest the body is at z = 0.0776 m.
 - **Thrust:** `actuator_motors` all about **0.139**, and `hover_thrust`
   about **0.139**. `actuator_motors` is the thrust command; PX4's thrust
   model (`THR_MDL_FAC` 0.9) turns 0.139 into motor output 0.341, which is
@@ -141,11 +149,12 @@ At `pxh>`, once `Ready for takeoff!` appears:
 
 If it fails:
 - **Oscillates and climbs away:** the rate gains weren't set, so SITL kept
-  the Iris gains. They act 3.4× (roll) and 5× (pitch) harder on the
+  the Iris gains. They act 3.4× (roll) and 5.9× (pitch) harder on the
   Starling: it went into a ±270°/s pitch oscillation and climbed to 86 m
-  (2026-11-07). Check `param show MC_PITCHRATE_P` reads 0.03.
-- **Spins on the ground as soon as it arms:** the prop colliders are on.
-  Check the four `rotorN: 1 prop collider(s) disabled` spawn lines.
+  (2026-11-07). Check `param show MC_PITCHRATE_P` reads 0.025.
+- **Spins on the ground as soon as it arms:** the prop colliders are on
+  (Iris USD only). Check the four `rotorN: 1 prop collider(s) disabled`
+  spawn lines.
 - **Flips at liftoff, roll and pitch mixed up:** the rotors aren't where PX4
   mixes them. Check the four `rotorN anchor in body frame` spawn lines.
 - **Thrust far from 0.139:** the mass or k_f didn't apply. Check the

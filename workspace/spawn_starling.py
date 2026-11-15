@@ -2,11 +2,14 @@
 Spawn a ModalAI Starling 2 Max (C29) in Isaac Sim (Pegasus) with the same
 PX4 / ROS 2 setup as spawn_example.py, and the C29 front camera (see Camera below).
 
-Pegasus ships no Starling model, so this loads the Iris USD and re-dimensions
-it before the first physics step:
-  - rotor0..3 moved to the Starling 2 Max motor spacing (190 mm x 260 mm),
-  - body mass / diagonal inertia set from the ModalAI CAD model
-    (D0012-4-V3-C28-M36, SolidWorks mass properties),
+Pegasus ships no Starling model. This loads our own Starling USD
+(workspace/assets/starling2max_c29.usd, built by workspace/build_starling_usd.py
+from the C29 SolidWorks model) when it is present, and otherwise the Iris USD.
+Either way it sets, before the first physics step:
+  - rotor0..3 at the Starling 2 Max motor spacing (190 mm x 260 mm),
+  - body mass / diagonal inertia from the C29 CAD model (ModalAI's
+    D0012-4-V3-C28-M36 STEP with our drone's front sensor cluster, batteries and
+    props added and per-part masses; SolidWorks mass properties),
   - thrust curve (with a first-order motor lag), yaw-moment coefficient and
     linear drag passed to Pegasus through MultirotorConfig,
   - PX4 output -> rotor speed mapped to the drone's real ESC range
@@ -15,8 +18,8 @@ it before the first physics step:
     mount from the drone's extrinsics.conf (level, on the nose).
 Every number, with its derivation and source, is in STARLING2_DYNAMICS.md.
 Mass is the measured 573 g; k_f and the motor lag are measured from hover logs.
-PROVISIONAL: inertia is the CAD value (whole-assembly override, uniform density)
-until part masses are set in CAD; k_m is estimated (no yaw test yet).
+Inertia is the CAD value with per-part masses (2026-11-15, +-5 % over the mass
+assumptions; STARLING2MAX_DYNAMICS.md 7.2); k_m is estimated (no yaw test yet).
 
 The values must equal the starling2max entry of control/vehicles.py, which the
 controllers and bridges use with DRONE_VEHICLE=starling2max
@@ -27,9 +30,11 @@ below, printed at the end of the spawn as `param set` lines for pxh>; the same
 set is px4/starling2max_sitl_params.sh). Without them SITL keeps the Iris
 airframe's rotor geometry and a linear thrust model.
 
-If a converted Starling USD exists (e.g. from ModalAI's STEP file), set
-STARLING_USD to it. The rotor / mass overrides still run, so the USD only has
-to provide geometry with Pegasus' body + rotor0..3 structure.
+STARLING_USD picks the model: the environment variable STARLING_USD (a path, or
+"iris" to force the re-dimensioned Iris), else the first of STARLING_USD_PATHS
+that exists, else the Iris. The rotor / mass overrides run on whichever is
+loaded, so a USD only has to provide geometry with Pegasus' body + rotor0..3
+structure.
 
 DRONE_PATH and the ROS namespace keep the Iris names on purpose: spawn_test_gates
 (CAMERA_PRIM_PATH), min_snap_node, the vision eval scripts and the docs all
@@ -56,8 +61,18 @@ DRONE_PATH  = "/World/Iris"     # see module docstring before renaming
 NAMESPACE   = "/iris_0"
 CAMERA_NAME = "front_cam"
 
-# None -> re-dimensioned Iris USD; otherwise a path to a Starling USD.
-STARLING_USD = None
+# The Starling 2 Max C29 USD (see the module docstring). None -> re-dimensioned Iris USD.
+STARLING_USD_PATHS = (
+    "/workspace/Senior-Design-G1-Autonomous-Drone/workspace/assets/starling2max_c29.usd",   # repo clone in the pod
+    "/workspace/assets/starling2max_c29/starling2max_c29.usd",                              # built in the pod
+)
+import os as _os
+STARLING_USD = _os.environ.pop("STARLING_USD", None)
+if STARLING_USD is None:
+    STARLING_USD = next((p for p in STARLING_USD_PATHS if _os.path.isfile(p)), None)
+elif STARLING_USD.lower() in ("", "iris", "none"):
+    STARLING_USD = None
+print(f"[starling] model: {STARLING_USD or 'Pegasus Iris USD, re-dimensioned'}")
 
 # Camera: the C29 front hires camera, ModalAI M0161 (IMX412, 4056x3040 active,
 # 1.55 um square pixels = 6.29 x 4.71 mm, 2.7 mm lens; https://docs.modalai.com/M0161/,
@@ -116,7 +131,7 @@ print(f"[starling] camera {RESOLUTION[0]}x{RESOLUTION[1]}, hFOV {HFOV_DEG} deg, 
 
 # ---- Starling 2 Max parameters (STARLING2_DYNAMICS.md, section 2) ----
 MASS         = 0.573                        # kg, measured with both batteries (C29)
-INERTIA_DIAG = (3.456e-3, 2.465e-3, 5.469e-3)  # kg m^2 (Ixx, Iyy, Izz), CAD at 573 g override, PROVISIONAL
+INERTIA_DIAG = (3.333e-3, 2.055e-3, 5.170e-3)  # kg m^2 (Ixx, Iyy, Izz), C29 CAD with per-part masses (+-5 %)
 ARM_X        = 0.095                        # m, half of 190 mm (fore-aft), CAD
 ARM_Y        = 0.130                        # m, half of 260 mm (left-right), CAD
 # Rotor order / spin directions follow the Iris (Pegasus' PX4 motor order):
@@ -162,14 +177,16 @@ PX4_SITL_PARAMS = {
     "CA_ROTOR3_PX": -0.095, "CA_ROTOR3_PY": 0.13, "CA_ROTOR3_KM": -0.0129,
     "COM_LOW_BAT_ACT": 0, "MC_AIRMODE": 1,   # sim only: no battery model; attitude authority at low thrust
     # Rate-loop gains. SITL's Iris gains (P 0.15, I 0.2, D 0.003) act ~3.4x (roll)
-    # and ~5.0x (pitch) harder on the Starling: angular acceleration per unit of
-    # normalized torque, 4 * T_max * arm / I, is 1041 / 1067 rad/s^2 here against
-    # 307 / 215 for the Iris. With them it went into a +-270 deg/s pitch
+    # and ~5.9x (pitch) harder on the Starling: angular acceleration per unit of
+    # normalized torque, 4 * T_max * arm / I, is 1079 / 1280 rad/s^2 here against
+    # 307 / 215 for the Iris. With the Iris gains it went into a +-270 deg/s pitch
     # oscillation at liftoff (2026-11-07). Scaled by those ratios, it hovered at
-    # 2.51 m within 5 mm, body rates within 0.25 deg/s. Replace with the real
+    # 2.51 m within 5 mm, body rates within 0.25 deg/s (with the earlier
+    # Iyy 2.465e-3: pitch ratio 5.0, gains 0.03 / 0.04 / 0.0006; the pitch gains
+    # below are rescaled for Iyy 2.07e-3, 2026-11-14). Replace with the real
     # drone's gains from its parameter file when we have it.
     "MC_ROLLRATE_P": 0.044, "MC_ROLLRATE_I": 0.06, "MC_ROLLRATE_D": 0.0009,
-    "MC_PITCHRATE_P": 0.03, "MC_PITCHRATE_I": 0.04, "MC_PITCHRATE_D": 0.0006,
+    "MC_PITCHRATE_P": 0.025, "MC_PITCHRATE_I": 0.034, "MC_PITCHRATE_D": 0.0005,
 }
 
 
