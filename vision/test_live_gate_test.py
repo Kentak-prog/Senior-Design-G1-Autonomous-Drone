@@ -64,6 +64,29 @@ def test_real_gate_label_range():
     assert g.reprojection_error_px < 2.0
 
 
+def test_hybrid_finds_rolled_opening():
+    """A 45 deg rolled coral frame with a bump on the opening: the hybrid detector returns the
+    opening's 4 corners (not the box), and a box with no frame in it falls back to "bbox"."""
+    from live_gate_test import HybridDetector
+    img = np.full((768, 1024, 3), 40, np.uint8)
+    c, r_out, r_in = np.array([512.0, 384.0]), 200.0, 175.0
+    diamond = lambda r: np.array([c + r * np.array([np.cos(a), np.sin(a)])  # noqa: E731
+                                  for a in np.radians([0, 90, 180, 270])])
+    cv2.fillPoly(img, [diamond(r_out).astype(np.int32)], (80, 110, 230))       # coral (BGR)
+    cv2.fillPoly(img, [diamond(r_in).astype(np.int32)], (40, 40, 40))
+    cv2.circle(img, (512 + 80, 384 - 80), 12, (80, 110, 230), -1)              # "hand" bump on the inner edge
+    gate_box = np.array([[312, 184], [712, 184], [712, 584], [312, 584]], float)
+    empty_box = np.array([[20, 20], [120, 20], [120, 120], [20, 120]], float)
+    fake_cnn = lambda bgr: [(gate_box, 0.9, "bbox"), (empty_box, 0.5, "bbox")]  # noqa: E731
+    out = HybridDetector(fake_cnn, (0, 80, 50), (12, 255, 255))(img)
+    (q, _, src), (_, _, src2) = out
+    assert src == "yolo+color", src
+    want = diamond(r_in)
+    err = max(np.linalg.norm(want - p, axis=1).min() for p in q)
+    assert err < 6.0, (q, err)
+    assert src2 == "bbox", src2
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

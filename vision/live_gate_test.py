@@ -3,11 +3,18 @@ Live real-camera gate test: VOXL Portal MJPEG feed -> gate detector -> PnP ->
 overlay video + per-frame CSV.
 
     adb forward tcp:8080 tcp:80          # VOXL Portal on localhost:8080
-    python3 live_gate_test.py --gate-side 0.914 --no-color-checks \
-        --calib calib/hires_front_small_approx.yml --duration 60 --out-dir live_runs/real_gate_02
+    # pink 36 in lab gate (0.864 m opening), YOLO box + color corners, calibrated hires_front:
+    ~/venvs/yolo/bin/python live_gate_test.py --detector hybrid \
+        --model yolo_gate/weights/pink_det_v1_yolo11n.pt --device mps \
+        --gate-side 0.8636 --calib calib/hires_front_1024x768.yml --duration 300 \
+        --out-dir live_runs/hybrid_live_02 --show
+    # color only (no CNN), same gate:
+    python3 live_gate_test.py --detector color --hsv-lo 0 80 50 --hsv-hi 12 255 255 \
+        --close-px 31 --gate-side 0.8636 --calib calib/hires_front_1024x768.yml \
+        --duration 300 --out-dir live_runs/pink_gate_04 --show
 
-(36 in white PVC lab gate; --no-color-checks because Tye's CNN checks assume
-purple. Ultralytics weights instead: --detector cnn --model best.pt.)
+(Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas.
+Tye's NumPy CNN: --detector tye; --no-color-checks for a non-purple gate.)
 
 Feed: http://localhost:8080/video_raw/<pipe> is multipart MJPEG (boundary
 "--foo"). It is parsed here by JPEG SOI/EOI markers, not by OpenCV's
@@ -21,6 +28,12 @@ Detector (--detector):
          contour -> 4-gon), else the bounding box (axis-aligned: gives range
          and bearing but NO gate orientation; flagged "bbox" in the CSV).
   color  vision/color_gate_detector.py with --hsv-lo/--hsv-hi (default magenta).
+         --close-px bridges gaps in the pink loop (the real gate's taped joints).
+  hybrid CNN box (--model, a bbox model) then the gate OPENING's corners found
+         by color inside that box (rolled / partly occluded gates); falls back
+         to the box ("bbox") when no opening is found. A bbox-only fix uses
+         --bbox-side (outer square) and is dropped ("bbox-rej") above
+         --bbox-max-reproj px: it assumes a facing, unrolled gate.
 
 Intrinsics: --calib takes an OpenCV FileStorage yaml with M (or K /
 camera_matrix) and D (or distortion_coefficients), optional "distortion_model:
@@ -176,18 +189,18 @@ def quad_from_contour(cnt):
 
 
 class CnnDetector:
-    def __init__(self, weights: str, conf: float, imgsz: int):
+    def __init__(self, weights: str, conf: float, imgsz: int, device=None):
         try:
             from ultralytics import YOLO
         except ImportError:
             sys.exit("ultralytics not installed: pip install ultralytics "
                      "(or export the model and add a loader here)")
         self.model = YOLO(weights)
-        self.conf, self.imgsz = conf, imgsz
+        self.conf, self.imgsz, self.device = conf, imgsz, device
         print(f"[cnn] {weights} task={self.model.task} classes={self.model.names}")
 
     def __call__(self, bgr):
-        r = self.model.predict(bgr, conf=self.conf, imgsz=self.imgsz, verbose=False)[0]
+        r = self.model.predict(bgr, conf=self.conf, imgsz=self.imgsz, device=self.device, verbose=False)[0]
         out = []
         n = 0 if r.boxes is None else len(r.boxes)
         for i in range(n):
@@ -248,13 +261,122 @@ class TyeGateCNN:
 
 
 class ColorDetector:
-    def __init__(self, lo, hi, min_area):
+    def __init__(self, lo, hi, min_area, close_px=0):
         from color_gate_detector import detect_gates_color
         self.fn, self.lo, self.hi, self.min_area = detect_gates_color, lo, hi, min_area
+        self.close_px = close_px
 
     def __call__(self, bgr):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        return [(c, 1.0, "color") for c in self.fn(rgb, self.lo, self.hi, self.min_area)]
+        return [(c, 1.0, "color") for c in self.fn(rgb, self.lo, self.hi, self.min_area, close_px=self.close_px)]
+
+
+class HybridDetector:
+    """CNN box first, then the gate OPENING's corners searched only inside it.
+
+    The box finds the gate (robust to lighting / partial occlusion / look-alikes); the
+    opening's corners give PnP the real geometry at any roll (a 45 deg diamond's bbox is
+    ~1.4x the gate). Inside the box: color mask (close kernel scaled with the box, pipe ~
+    1/36 of the gate, so small far gates are not filled in) -> largest hole -> convex hull
+    (hands / joints put bumps on it) -> approxPolyDP with growing epsilon until 4 corners.
+    No usable opening -> the bbox fallback ("bbox"), whose range assumes a facing,
+    unrolled gate; the main loop drops it if its PnP reprojection is poor.
+    """
+
+    def __init__(self, cnn, lo, hi, pad=0.12, min_hole_frac=0.2):
+        from color_gate_detector import gate_mask
+        self.cnn, self.mask_fn, self.lo, self.hi = cnn, gate_mask, lo, hi
+        self.pad, self.min_hole_frac = pad, min_hole_frac
+
+    def _opening(self, rgb, close):
+        m = self.mask_fn(rgb, self.lo, self.hi, close)
+        cnts, hier = cv2.findContours(m, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        if hier is None:
+            return None
+        holes = [c for c, h in zip(cnts, hier[0]) if h[3] != -1]
+        if not holes:
+            return None
+        hole = max(holes, key=cv2.contourArea)
+        hull = cv2.convexHull(hole)
+        peri = cv2.arcLength(hull, True)
+        for eps in (0.02, 0.03, 0.04, 0.06, 0.08, 0.10):
+            q = cv2.approxPolyDP(hull, eps * peri, True)
+            if len(q) == 4:
+                return self._line_corners(hole.reshape(-1, 2).astype(np.float64), q.reshape(4, 2).astype(np.float64))
+            if len(q) < 4:
+                break
+        return None
+
+    @staticmethod
+    def _line_corners(pts, q):
+        """Corners as intersections of lines fitted to the MIDDLE 60 % of each side.
+
+        The close kernel rounds the hole's corners (by ~20 px for a 31 px kernel on a 45 deg
+        roll) and hands put bumps on its sides; a RANSAC line (2 px inliers) refit on its
+        inliers ignores both. Falls back to the polygon corner when a side has too few points.
+        """
+        rng = np.random.default_rng(0)
+        lines = []
+        for i in range(4):
+            a, b = q[i], q[(i + 1) % 4]
+            d = b - a
+            L = np.linalg.norm(d)
+            if L < 1:
+                return q
+            u = d / L
+            rel = pts - a
+            t = rel @ u
+            off = np.abs(rel @ np.array([-u[1], u[0]]))
+            sel = pts[(t > 0.2 * L) & (t < 0.8 * L) & (off < max(4.0, 0.06 * L))]
+            if len(sel) < 5:
+                return q
+            best = None
+            for _ in range(60):
+                i1, i2 = rng.choice(len(sel), 2, replace=False)
+                v = sel[i2] - sel[i1]
+                nv = np.linalg.norm(v)
+                if nv < 1e-6:
+                    continue
+                n = np.array([-v[1], v[0]]) / nv
+                inl = np.abs((sel - sel[i1]) @ n) < 2.0
+                if best is None or inl.sum() > best.sum():
+                    best = inl
+            if best is None or best.sum() < 5:
+                return q
+            vx, vy, x0, y0 = cv2.fitLine(sel[best].astype(np.float32), cv2.DIST_L2, 0, 0.01, 0.01).ravel()
+            lines.append((np.array([x0, y0]), np.array([vx, vy])))
+        out = []
+        for i in range(4):
+            (p1, d1), (p2, d2) = lines[i - 1], lines[i]          # sides meeting at corner i
+            A = np.array([d1, -d2]).T
+            if abs(np.linalg.det(A)) < 1e-6:
+                return q
+            s = np.linalg.solve(A, p2 - p1)
+            out.append(p1 + s[0] * d1)
+        out = np.array(out)
+        return out if np.linalg.norm(out - q, axis=1).max() < 0.25 * np.linalg.norm(q[2] - q[0]) else q
+
+    def __call__(self, bgr):
+        H, W = bgr.shape[:2]
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        out = []
+        for box, score, src in self.cnn(bgr):
+            if src != "bbox":
+                out.append((box, score, src))
+                continue
+            (x0, y0), (x1, y1) = box.min(0), box.max(0)
+            bw, bh = x1 - x0, y1 - y0
+            cx0, cy0 = int(max(x0 - self.pad * bw, 0)), int(max(y0 - self.pad * bh, 0))
+            cx1, cy1 = int(min(x1 + self.pad * bw, W)), int(min(y1 + self.pad * bh, H))
+            q = self._opening(rgb[cy0:cy1, cx0:cx1], int(np.clip(0.08 * max(bw, bh), 5, 31)))
+            if q is not None:
+                q = q + [cx0, cy0]
+                c = q.mean(0)
+                if (cv2.contourArea(q.astype(np.float32)) < self.min_hole_frac * bw * bh
+                        or not (x0 <= c[0] <= x1 and y0 <= c[1] <= y1)):
+                    q = None
+            out.append((q, score, "yolo+color") if q is not None else (box, score, "bbox"))
+        return out
 
 
 # ------------------------------------------------------------------------ overlay
@@ -273,7 +395,7 @@ def draw(img, dets, lens, gate_side, fps, uncalibrated, label):
         g = d["det"]
         if g is None:
             continue
-        rep = lens.to_image(project_gate(g.T_cam_gate, lens.intr, gate_side)).astype(int)
+        rep = lens.to_image(project_gate(g.T_cam_gate, lens.intr, d.get("side", gate_side))).astype(int)
         cv2.polylines(img, [rep.reshape(-1, 1, 2)], True, (0, 255, 0), 1)
         # gate normal from centre, 0.5 m long
         T = g.T_cam_gate
@@ -304,7 +426,7 @@ def draw(img, dets, lens, gate_side, fps, uncalibrated, label):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default="http://localhost:8080/video_raw/hires_front_small_color")
-    ap.add_argument("--detector", choices=["tye", "cnn", "color"], default="tye")
+    ap.add_argument("--detector", choices=["tye", "cnn", "color", "hybrid"], default="tye")
     ap.add_argument("--model", help="Ultralytics weights (.pt) for --detector cnn")
     ap.add_argument("--cnn-dir", default=os.path.join(os.path.dirname(os.path.dirname(_HERE)), "gate_cnn"),
                     help="Tye's gate_cnn folder for --detector tye")
@@ -314,9 +436,17 @@ def main(argv=None):
                     help="skip good_detection's purple-colour checks (non-purple real gate)")
     ap.add_argument("--conf", type=float, default=0.4)
     ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--device", default=None, help="cnn: torch device, e.g. mps / cpu")
+    ap.add_argument("--bbox-max-reproj", type=float, default=15.0,
+                    help="drop a bbox-only fix whose PnP reprojection exceeds this (px)")
+    ap.add_argument("--bbox-side", type=float, default=0.9144,
+                    help="bbox-only CNN: the box is the gate's OUTER square (m); PnP on its corners "
+                         "assumes the gate faces the camera (range ok, tilt not)")
     ap.add_argument("--hsv-lo", type=int, nargs=3, default=None)
     ap.add_argument("--hsv-hi", type=int, nargs=3, default=None)
     ap.add_argument("--min-area", type=float, default=400)
+    ap.add_argument("--close-px", type=int, default=0,
+                    help="color: morphological close (px) to bridge gaps, e.g. tape at the real gate's joints")
     ap.add_argument("--gate-side", type=float, required=True,
                     help="inner opening side length in metres (the 4 corners PnP sees)")
     ap.add_argument("--calib", help="OpenCV yaml intrinsics for this camera")
@@ -360,11 +490,17 @@ def main(argv=None):
     elif a.detector == "cnn":
         if not a.model:
             sys.exit("--detector cnn needs --model <weights>")
-        detector, label = CnnDetector(a.model, a.conf, a.imgsz), f"CNN {os.path.basename(a.model)}"
+        detector, label = CnnDetector(a.model, a.conf, a.imgsz, a.device), f"CNN {os.path.basename(a.model)}"
+    elif a.detector == "hybrid":
+        if not a.model:
+            sys.exit("--detector hybrid needs --model <weights>")
+        detector = HybridDetector(CnnDetector(a.model, a.conf, a.imgsz, a.device),
+                                  tuple(a.hsv_lo or (0, 80, 50)), tuple(a.hsv_hi or (12, 255, 255)))
+        label = f"hybrid {os.path.basename(a.model)}"
     else:
         from color_gate_detector import MAGENTA_HSV_LO, MAGENTA_HSV_HI
         detector = ColorDetector(tuple(a.hsv_lo or MAGENTA_HSV_LO),
-                                 tuple(a.hsv_hi or MAGENTA_HSV_HI), a.min_area)
+                                 tuple(a.hsv_hi or MAGENTA_HSV_HI), a.min_area, a.close_px)
         label = "color"
 
     vid_path = os.path.join(a.out_dir, "overlay.mp4")
@@ -392,9 +528,12 @@ def main(argv=None):
             dets = []
             for corners, score, src in detector(frame):
                 corners_img = order_corners(np.asarray(corners, float).reshape(4, 2))
+                side = a.bbox_side if src == "bbox" else a.gate_side
                 g = None if src.endswith("-rej") else estimate_gate_pose(
-                    lens.to_pinhole(corners_img), lens.intr, gate_side=a.gate_side, assume_ordered=True)
-                dets.append({"corners_img": corners_img, "det": g, "score": score, "src": src})
+                    lens.to_pinhole(corners_img), lens.intr, gate_side=side, assume_ordered=True)
+                if g is not None and src == "bbox" and g.reprojection_error_px > a.bbox_max_reproj:
+                    g, src = None, "bbox-rej"     # box is not a facing square (rolled, partial, look-alike)
+                dets.append({"corners_img": corners_img, "det": g, "score": score, "src": src, "side": side})
                 row = [n, f"{tf:.3f}", len(dets) - 1, src, f"{score:.3f}"]
                 if g is not None:
                     T = g.T_cam_gate
