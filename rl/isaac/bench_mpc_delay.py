@@ -38,8 +38,10 @@ from rotations import quat_from_euler_zyx                       # noqa: E402
 from fly_course import GROUND_Z                                 # noqa: E402
 
 ISAAC_RISE = (0.077, 0.067, 0.156)          # s, 63 % rise measured live (calibrate.py, 2026-11-12)
-KP_SCALE_ISAAC = (0.3947, 0.5105, 0.3033)
-HFOV_HALF, VFOV_HALF = 98.7 / 2, 82.3 / 2   # deg, Starling 2 Max C29 front camera (spawn_starling.py), level   # rate_kp scale giving 80 / 64 / 152 ms in QuadSim
+KP_SCALE_ISAAC = (0.3947, 0.5105, 0.3033)  # rate_kp scale giving 80 / 64 / 152 ms in QuadSim
+# deg, Starling 2 Max C29 front camera, level: calibrated fx 505.6 px at 1024x768 (spawn_starling.py,
+# vision/calib/hires_front_1024x768.yml); was 98.7 x 82.3 from ModalAI's M0161 page before 2026-11-15
+HFOV_HALF, VFOV_HALF = 90.7 / 2, 74.4 / 2
 
 
 def _gate_whole_in_view(gate, pos, R_wb, max_range=12.0):
