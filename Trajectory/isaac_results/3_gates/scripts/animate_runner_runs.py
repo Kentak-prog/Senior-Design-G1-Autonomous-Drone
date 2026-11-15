@@ -8,7 +8,8 @@ runs) the VIO's distance from PX4's estimate, with cursors moving along the time
         --runs <run_dir>:3/4 <run_dir>:5/7 <run_dir>:8/10 --out flight_realtime.gif
 
 <run_dir> holds runner.py's log.csv and summary.json. Time 0 is each run's race start (phase 1). The
-drone path is PX4's estimate (sim GPS, ~truth); the VIO error column exists only for --state vio runs.
+drone path is PX4's estimate (sim GPS, ~truth). The lower panel is the VIO error for --state vio runs and
+the tilt (angle of the thrust axis from vertical) otherwise; --lower picks it explicitly.
 """
 
 import argparse
@@ -41,6 +42,7 @@ def load(run_dir):
     race = L["phase"] == 1
     t0 = L["t_sim"][race][0]
     L["time"] = L["t_sim"] - t0
+    L["tilt"] = np.degrees(np.arccos(np.clip(1 - 2 * (L["qx"] ** 2 + L["qy"] ** 2), -1.0, 1.0)))
     L["yaw"] = np.arctan2(2 * (L["qw"] * L["qz"] + L["qx"] * L["qy"]), 1 - 2 * (L["qy"] ** 2 + L["qz"] ** 2))
     with open(os.path.join(run_dir, "summary.json")) as f:
         L["summary"] = json.load(f)
@@ -52,6 +54,9 @@ def main():
     ap.add_argument("--track", required=True, help="rl/tracks/<track>.json")
     ap.add_argument("--runs", nargs="+", required=True, help="run_dir:label, up to 3")
     ap.add_argument("--title", default=None)
+    ap.add_argument("--subtitle", default=None)
+    ap.add_argument("--lower", choices=["auto", "vio", "tilt"], default="auto",
+                    help="lower panel: VIO error or tilt (auto: VIO error if any run has it)")
     ap.add_argument("--fps", type=float, default=10.0, help="frames per second of sim time (playback is real time)")
     ap.add_argument("--before", type=float, default=1.0, help="seconds shown before the race starts")
     ap.add_argument("--after", type=float, default=2.0, help="seconds shown after the slowest lap ends")
@@ -75,10 +80,15 @@ def main():
                 for r in runs) + args.after
     for r in runs:
         w = (r["time"] >= -args.before) & (r["time"] <= t_end)
-        for k in ("time", "px", "py", "pz", "vx", "vy", "vz", "yaw", "vio_err", "phase"):
+        for k in ("time", "px", "py", "pz", "vx", "vy", "vz", "yaw", "tilt", "vio_err", "phase"):
             r[k] = r[k][w]
         r["speed"] = np.sqrt(r["vx"] ** 2 + r["vy"] ** 2 + r["vz"] ** 2)
         r["vio_err"] = np.where(r["time"] >= 0, r["vio_err"], np.nan)
+    lower = args.lower
+    if lower == "auto":
+        lower = "vio" if any(np.isfinite(r["vio_err"]).any() for r in runs) else "tilt"
+    for r in runs:
+        r["low"] = r["vio_err"] if lower == "vio" else r["tilt"]
 
     plt.rcParams.update({"font.size": 9, "axes.edgecolor": INK2, "axes.labelcolor": INK2, "xtick.color": INK2,
                          "ytick.color": INK2, "text.color": INK, "axes.titlecolor": INK, "axes.titlesize": 10})
@@ -115,7 +125,7 @@ def main():
         v_line, = ax_v.plot([], [], color=r["color"], linewidth=2, label=r["label"])
         ax_v.plot(r["time"], r["speed"], color=r["color"], linewidth=2, alpha=0.15)
         e_line, = ax_e.plot([], [], color=r["color"], linewidth=2)
-        ax_e.plot(r["time"], r["vio_err"], color=r["color"], linewidth=2, alpha=0.15)
+        ax_e.plot(r["time"], r["low"], color=r["color"], linewidth=2, alpha=0.15)
         arts.append((r, path, dot, nose, v_line, e_line))
     ax_map.invert_xaxis()
     ax_map.set_aspect("equal", adjustable="datalim")
@@ -129,12 +139,17 @@ def main():
     ax_v.set_title("Speed", loc="left")
     ax_v.set_ylim(0, max(np.nanmax(r["speed"]) for r in runs) * 1.2)
     ax_v.legend(loc="upper right", fontsize=8, frameon=False, ncol=len(runs))
-    ax_e.set_ylabel("error (m)")
     ax_e.set_xlabel("time since the race started (s, sim time)")
-    ax_e.set_title("VIO error: |VIO position − PX4's estimate|  (abort above 1.0 m)", loc="left")
-    emax = np.nanmax([np.nanmax(r["vio_err"]) for r in runs])
-    ax_e.set_ylim(0, max(1.1, emax * 1.2) if np.isfinite(emax) else 1.1)
-    ax_e.axhline(1.0, color=INK2, linewidth=1, linestyle=":")
+    if lower == "vio":
+        ax_e.set_ylabel("error (m)")
+        ax_e.set_title("VIO error: |VIO position − PX4's estimate|  (abort above 1.0 m)", loc="left")
+        emax = np.nanmax([np.nanmax(r["vio_err"]) for r in runs])
+        ax_e.set_ylim(0, max(1.1, emax * 1.2) if np.isfinite(emax) else 1.1)
+        ax_e.axhline(1.0, color=INK2, linewidth=1, linestyle=":")
+    else:
+        ax_e.set_ylabel("tilt (deg)")
+        ax_e.set_title("Tilt: thrust axis from vertical", loc="left")
+        ax_e.set_ylim(0, max(np.nanmax(r["tilt"]) for r in runs) * 1.2)
     t_lo, t_hi = -args.before, t_end
     for a in (ax_v, ax_e):
         a.set_xlim(t_lo, t_hi)
@@ -142,8 +157,8 @@ def main():
 
     fig.suptitle(args.title or "Isaac Sim: rate-aware MPC on the VIO (no GPS), nose on the next gate",
                  fontsize=11, fontweight="bold", x=0.06, ha="left")
-    fig.text(0.06, 0.905, "Real time (sim). Labels: plan limits v_max / a_max (m/s, m/s²). The controller flew on "
-             "the VIO; the path drawn is PX4's GPS estimate (≈ truth).", fontsize=9, color=INK2)
+    fig.text(0.06, 0.905, args.subtitle or ("Real time (sim). Labels: plan limits v_max / a_max (m/s, m/s²). The "
+             "controller flew on the VIO; the path drawn is PX4's GPS estimate (≈ truth)."), fontsize=9, color=INK2)
 
     frames = np.arange(t_lo, t_hi, 1.0 / args.fps)
 
@@ -157,7 +172,7 @@ def main():
             y = r["yaw"][i]
             nose.set_data([r["py"][i], r["py"][i] + 0.9 * math.sin(y)], [r["px"][i], r["px"][i] + 0.9 * math.cos(y)])
             v_line.set_data(t[:i + 1], r["speed"][:i + 1])
-            e_line.set_data(t[:i + 1], r["vio_err"][:i + 1])
+            e_line.set_data(t[:i + 1], r["low"][:i + 1])
             out += [path, dot, nose, v_line, e_line]
         for c in cursors:
             c.set_xdata([ft, ft])
