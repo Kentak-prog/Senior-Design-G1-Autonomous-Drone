@@ -360,24 +360,30 @@ the course changes.
 The same stages, on our real airframe and its front camera instead of the
 Pegasus Iris.
 
-**Camera.** The C29 front hires camera is the IMX412 (ModalAI M0161) with a
-2.7 mm lens.
+**Camera.** The C29 front hires camera is the IMX412 with a 3.1 mm lens
+(calibrated on our drone 2026-11-13; ModalAI's M0161 page says 2.7 mm, which
+is wrong for this unit).
 - **Mount**, from the drone's `/etc/modalai/extrinsics.conf` (copy:
   `workspace/starling2max_c29_extrinsics.conf`): hires_front is **level**,
   at (0.0711, −0.0003, −0.0070) m in body FLU.
-- **Field of view**: the datasheet row is mislabeled. Read as H × V × D it
-  is 120.4° × 93.5° × 146°, a distorted wide lens. Isaac renders an ideal
-  pinhole, so we use the undistorted image with the lens's central focal
-  length: **fx = fy = 439.8 px at 1024 × 768, 98.7° × 82.3°**.
+- **Field of view**: `vision/calib/hires_front_1024x768.yml` (checkerboard,
+  fisheye model, RMS 0.49 px): fx 505.4, fy 505.8, cx 518.5, cy 390.4 at
+  1024 × 768. The real lens sees about 119° × 88° to its image edges. Isaac
+  renders an ideal pinhole, so the sim uses the undistorted image at the
+  calibrated central focal length: **fx = fy ≈ 505.6 px at 1024 × 768,
+  90.7° × 74.4°**.
 - The sensor itself is confirmed by Sony's IMX412-AACK flyer: 4056 × 3040
   active pixels, 1.55 µm square pixels.
-- 1024 × 768 (the 4:3 full-sensor mode) is assumed. Check the drone's
-  `voxl-camera-server.conf` and its calibration (`/data/modalai/`).
+- 1024 × 768 is the drone's `hires_front` small-video stream
+  (`voxl-camera-server.conf`, copy in `flight_logs/2026-11-09_drone_measurements/`).
+- Offline on the circle course (`Trajectory/check_course_camera.py`, ground-
+  truth lap, 2026-11-13): **87 % of frames with a good fix, longest gap
+  0.93 s**, 1 bad fix. The old 98.7° camera gave 90 % and 0.73 s with the same
+  script, so the narrower calibrated view costs about 0.2 s of gap per gate.
 - The sensor's 16:9 modes crop rows (4K2K 4056 × 2288; 1080p binned from
-  4056 × 2224): same 98.7° across, about 66° vertical. For those, spawn with
-  `os.environ["CAMERA_RESOLUTION"] = "1024x578"`. Offline on the circle
-  course that gives a longest gap of 2.0 s and 82 % of frames with a fix,
-  against 1.2 s and 89 % at 4:3.
+  4056 × 2224): same 90.7° across, about 59.5° vertical. For those, spawn with
+  `os.environ["CAMERA_RESOLUTION"] = "1024x578"` (not re-checked offline at
+  the calibrated FOV).
 
 These are `spawn_starling.py`'s defaults.
 
@@ -413,8 +419,8 @@ About those columns:
    Then `sim_clock.py`, then the circle course (`GATES_MANIFEST` line in
    "The circle course").
 3. **Check the spawn printed:**
-   - `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
-   - `[init] camera ... expected fx=439.8`
+   - `[starling] camera 1024x768, hFOV 90.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
+   - `[init] camera ... expected fx=505.6`
    - `hover 5407 RPM = motor output 0.341 = hover thrust 0.139`, then a
      block of `param set` lines.
 4. **Before `commander takeoff`, in `pxh>`**, paste the `param set` lines the
@@ -430,7 +436,7 @@ About those columns:
    SITL keeps the Iris rate gains. If the hover wobbles, halve
    `MC_ROLLRATE_P` / `MC_PITCHRATE_P` and their `_D`.
 5. **GO check:** `ros2 topic echo --once /iris_0/front_cam/camera_info`
-   shows `width: 1024`, `height: 768`, and `k[0]` about 439.8. (The ROS
+   shows `width: 1024`, `height: 768`, and `k[0]` about 505.6. (The ROS
    names keep `iris_0` on purpose; see `spawn_starling.py`.)
 6. **Camera mount on every node that uses the camera:**
    - `vio_node`:

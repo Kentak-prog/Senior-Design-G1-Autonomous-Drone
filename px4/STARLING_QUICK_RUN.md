@@ -90,7 +90,7 @@ The spawn log must show:
   the Starling 2 Max C29 model (since 2026-11-14). If it says
   `Pegasus Iris USD, re-dimensioned`, the USD wasn't found and the Iris mesh
   is flown with the Starling's numbers, as before.
-- `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
+- `[starling] camera 1024x768, hFOV 90.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
 - four `[starling] rotorN anchor in body frame (...)` lines: rotor0
   (+0.095, −0.130), rotor1 (−0.095, +0.130), rotor2 (+0.095, +0.130),
   rotor3 (−0.095, −0.130). Any other order means the rotors are not where
@@ -143,7 +143,7 @@ At `pxh>`, once `Ready for takeoff!` appears:
   ros2 topic echo --once /iris_0/front_cam/camera_info --field header.stamp
   ```
 - **Camera:** `ros2 topic echo --once /iris_0/front_cam/camera_info` shows
-  `width: 1024`, `height: 768`, and `k[0]` about 439.8.
+  `width: 1024`, `height: 768`, and `k[0]` about 505.6.
 - **View:** in the `/iris_0/front_cam` viewport, gate_0 is whole and
   centered, and gate_1 is whole on the right.
 

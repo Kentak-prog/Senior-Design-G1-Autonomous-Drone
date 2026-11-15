@@ -74,32 +74,32 @@ elif STARLING_USD.lower() in ("", "iris", "none"):
     STARLING_USD = None
 print(f"[starling] model: {STARLING_USD or 'Pegasus Iris USD, re-dimensioned'}")
 
-# Camera: the C29 front hires camera, ModalAI M0161 (IMX412, 4056x3040 active,
-# 1.55 um square pixels = 6.29 x 4.71 mm, 2.7 mm lens; https://docs.modalai.com/M0161/,
-# Sony IMX412-AACK flyer p. 2).
-# Its FOV row reads "DxHxV 120.4 x 93.5 x 146", which is impossible as labeled;
-# as H x V x D it sits between a pinhole (98.7 x 82.2 x 111) and an equidistant
-# fisheye (133 x 100 x 167) of that lens, i.e. barrel distortion. Isaac renders
-# an ideal pinhole, so this is the UNDISTORTED image with the lens's central
-# focal length: fx = 2.7 mm / 1.55 um = 1742 px at full width = 439.8 px at
-# 1024 wide, HFOV 2*atan(512/439.8) = 98.7 deg (VFOV 82.3 deg at 4:3).
+# Camera: the C29 front hires camera (IMX412, 4056x3040 active, 1.55 um square
+# pixels; Sony IMX412-AACK flyer p. 2), CALIBRATED 2026-11-13 on our drone:
+# vision/calib/hires_front_1024x768.yml (checkerboard, 39 frames, RMS 0.49 px,
+# fisheye model): fx 505.4, fy 505.8, cx 518.5, cy 390.4 at 1024x768, i.e. a
+# 3.1 mm lens (matches voxl-camera-server.conf exif_focal_length; ModalAI's
+# M0161 page's 2.7 mm / 439.8 px / 98.7 deg was wrong for this unit).
+# Isaac renders an ideal pinhole with a centered principal point, so this is the
+# UNDISTORTED image at the calibrated central focal length:
+# HFOV 2*atan(512/505.6) = 90.7 deg, VFOV 74.4 deg at 4:3. The real lens is a
+# fisheye that sees ~119 x 88 deg to its image edges; the vision pipeline
+# undistorts detected corners with the calibration, so it matches this pinhole
+# in the centre but the real camera also sees a band beyond it.
 # 1024x768 (the sensor's 4:3 full-resolution mode) matches the drone's
 # voxl-camera-server.conf (flight_logs/2026-11-09_drone_measurements/): hires_front
 # streams small_video 1024x768 and large_video 4056x3040, both 4:3, but has
 # en_preview false, so onboard vision needs its preview stream enabled (or the
-# h264 decoded). The same file's exif_focal_length is 3.1 mm (17 mm in 35 mm
-# terms), which would give HFOV 90.8 deg; it is a config value, not a
-# measurement, and differs from M0161's 2.7 mm. A calibration of this camera
-# decides between them (none is on the drone yet). The sensor's 16:9 modes
-# CROP rows (4K2K 4056x2288, 1080p binned from 4056x2224), so they keep the
-# 98.7 deg HFOV and see only ~66 deg vertically: for those set
-# CAMERA_RESOLUTION="1024x578" (Isaac derives the vertical FOV from the aspect).
+# h264 decoded). The sensor's 16:9 modes CROP rows (4K2K 4056x2288, 1080p
+# binned from 4056x2224), so they keep the 90.7 deg HFOV and see only ~59.5 deg
+# vertically: for those set CAMERA_RESOLUTION="1024x578" (Isaac derives the
+# vertical FOV from the aspect).
 # An extra horizontal resolution only adds pixels; the FOV does not depend on it.
 # The Iris (spawn_example.py) is 1280x720 / 60 deg. spawn_test_gates' camera-
 # relative layout assumes that; spawn courses from a manifest
 # (spawn_gates_from_manifest.py) with this camera.
 RESOLUTION = (1024, 768)
-HFOV_DEG   = 98.7
+HFOV_DEG   = 90.7     # calibrated fx 505.6 px at 1024 wide (was 98.7 from M0161's 2.7 mm)
 # Camera mount in body FLU (m) and up-pitch (deg): the drone's own
 # /etc/modalai/extrinsics.conf (copy: starling2max_c29_extrinsics.conf),
 # hires_front (the front IMX412) chained through imu_apps:

@@ -14,3 +14,13 @@ Trajectory/isaac_results/**/*.csv
 # detections.csv, README and handlabel/ are tracked.
 vision/live_runs/**/raw_jpg/
 vision/live_runs/**/*.mp4
+
+# Camera calibration captures (40 PNGs, ~33 MB) stay local; the solved yml is tracked.
+vision/calib/hires_front_frames/
+
+# YOLO gate model: datasets (symlinks into raw_jpg + labels + previews), Ultralytics
+# training runs and downloaded base weights stay local. The trained model and its
+# training curves are copied to vision/yolo_gate/weights/ and results/ (tracked).
+vision/yolo_gate/datasets/
+vision/yolo_gate/runs/
+vision/yolo_gate/*.pt
