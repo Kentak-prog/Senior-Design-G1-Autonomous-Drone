@@ -86,7 +86,7 @@ exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/sim_clock.py")
 import os; os.environ["GATES_MANIFEST"] = "/workspace/Senior-Design-G1-Autonomous-Drone/Trajectory/isaac_results/circle_course/circle_course.json"; exec(open("/workspace/Senior-Design-G1-Autonomous-Drone/workspace/spawn_gates_from_manifest.py").read())
 ```
 The spawn log must show:
-- `[starling] camera 1024x768, hFOV 98.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
+- `[starling] camera 1024x768, hFOV 90.7 deg, at (0.0711, -0.0003, -0.007) m (body FLU), pitch 0.0 deg up`
 - four `[starling] rotorN anchor in body frame (...)` lines: rotor0
   (+0.095, −0.130), rotor1 (−0.095, +0.130), rotor2 (+0.095, +0.130),
   rotor3 (−0.095, −0.130). Any other order means the rotors are not where
@@ -135,7 +135,7 @@ At `pxh>`, once `Ready for takeoff!` appears:
   ros2 topic echo --once /iris_0/front_cam/camera_info --field header.stamp
   ```
 - **Camera:** `ros2 topic echo --once /iris_0/front_cam/camera_info` shows
-  `width: 1024`, `height: 768`, and `k[0]` about 439.8.
+  `width: 1024`, `height: 768`, and `k[0]` about 505.6.
 - **View:** in the `/iris_0/front_cam` viewport, gate_0 is whole and
   centered, and gate_1 is whole on the right.
 

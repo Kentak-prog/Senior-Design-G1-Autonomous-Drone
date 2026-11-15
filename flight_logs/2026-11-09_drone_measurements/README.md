@@ -26,9 +26,14 @@ Drone SKU `MRB-D0012-4-V2-C29-T7-M28-X0`: airframe V2, C29 sensors. The CAD mode
 `workspace/spawn_starling.py` already models `hires_front`: 1024×768, level, at FLU (0.0711, −0.0003, −0.0070) m,
 which matches this `extrinsics.conf` (also identical to `workspace/starling2max_c29_extrinsics.conf`).
 
-Its field of view is still uncertain: ModalAI's M0161 page gives a 2.7 mm lens (HFOV 98.7°, used in the sim),
-but this camera config's EXIF setting says 3.1 mm (HFOV 90.8°). No `hires_front` calibration was found on the
-drone. To settle it, enable the `hires_front` preview stream and calibrate it with `voxl-camera-calibration`.
+Its field of view is now settled: ModalAI's M0161 page gives a 2.7 mm lens (HFOV 98.7°), but this camera
+config's EXIF setting says 3.1 mm (HFOV 90.8°). No `hires_front` calibration was on the drone, so we calibrated it
+on 2026-11-13 from the 1024×768 `hires_front_small_color` feed: `vision/calib/hires_front_1024x768.yml` (fisheye,
+fx 505.4, fy 505.8, cx 518.5, cy 390.4, RMS 0.49 px), made with `vision/calib/calibrate_hires.py`. That confirms
+3.1 mm, and the sim now uses HFOV 90.7°.
+
+**`camera_intrinsics_1280x800_fisheye.yml` is NOT `hires_front`.** It is one of the AR0144 tracking cameras
+(about 145° wide). Do not pass it to the gate pipeline.
 
 ## Sensor positions in our body frame
 

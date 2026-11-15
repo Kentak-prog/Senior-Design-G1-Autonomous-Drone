@@ -143,7 +143,8 @@ def detect_gates_color_debug(rgb: np.ndarray,
                              hsv_lo: Tuple[int, int, int] = MAGENTA_HSV_LO,
                              hsv_hi: Tuple[int, int, int] = MAGENTA_HSV_HI,
                              min_area_px: float = 64,
-                             refine: bool = True):
+                             refine: bool = True,
+                             close_px: int = 0):
     """
     HxWx3 RGB image -> (corners, mask): corners is a list of 4x2 float64
     arrays, one per detected gate opening, sorted by hole area descending
@@ -152,7 +153,7 @@ def detect_gates_color_debug(rgb: np.ndarray,
     work happens; detect_gates_color() is a thin wrapper that drops mask to
     match the plain detector contract.
     """
-    mask = gate_mask(rgb, hsv_lo, hsv_hi)
+    mask = gate_mask(rgb, hsv_lo, hsv_hi, close_px)
     corners = _find_gate_corners(mask, min_area_px, refine)
     return corners, mask
 
@@ -161,7 +162,8 @@ def detect_gates_color(rgb: np.ndarray,
                        hsv_lo: Tuple[int, int, int] = MAGENTA_HSV_LO,
                        hsv_hi: Tuple[int, int, int] = MAGENTA_HSV_HI,
                        min_area_px: float = 64,
-                       refine: bool = True):
+                       refine: bool = True,
+                       close_px: int = 0):
     """
     HxWx3 RGB image -> list of 4x2 float64 arrays, one per detected gate
     opening, sorted by hole area descending (biggest/closest gate first).
@@ -170,5 +172,5 @@ def detect_gates_color(rgb: np.ndarray,
     ros_camera.GatePoseNode expects as `detector` -- no extra parameters
     beyond the image. Use detect_gates_color_debug() to also get the mask.
     """
-    corners, _mask = detect_gates_color_debug(rgb, hsv_lo, hsv_hi, min_area_px, refine)
+    corners, _mask = detect_gates_color_debug(rgb, hsv_lo, hsv_hi, min_area_px, refine, close_px)
     return corners

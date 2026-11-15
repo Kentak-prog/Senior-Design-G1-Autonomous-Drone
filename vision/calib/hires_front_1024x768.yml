@@ -1,0 +1,21 @@
+%YAML:1.0
+---
+# hires_front (IMX412) small_color stream 1024x768, VOXL Portal MJPEG. 39 frames, 9x6 corners, 25.0 mm squares.
+M: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 5.0539584572581623e+02, 0., 5.1852434138227022e+02, 0.,
+       5.0579099484745620e+02, 3.9042418417473522e+02, 0., 0., 1. ]
+D: !!opencv-matrix
+   rows: 4
+   cols: 1
+   dt: d
+   data: [ -1.7097166902186434e-02, -9.2224945092769656e-03,
+       5.1629441043124771e-03, -5.0549114362429161e-05 ]
+reprojection_error: 4.9082189276072813e-01
+width: 1024
+height: 768
+distortion_model: fisheye
+camera: hires_front
+calibration_time: "2026-11-13 14:18:05"
