@@ -13,7 +13,16 @@ overlay video + per-frame CSV.
         --close-px 31 --gate-side 0.8636 --calib calib/hires_front_1024x768.yml \
         --duration 300 --out-dir live_runs/pink_gate_04 --show
 
-(Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas.
+    # ON THE DRONE, in the docker/voxl2-tflite-gpu container (no Ultralytics): an exported model,
+    # .tflite on the GPU (--delegate gpu) or CPU, or .onnx; the feed is VOXL Portal on localhost:
+    python3 vision/live_gate_test.py --detector hybrid \
+        --model vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite --delegate gpu \
+        --url http://localhost/video_raw/hires_front_small_color --gate-side 0.8636 \
+        --calib vision/calib/hires_front_1024x768.yml --duration 120 --out-dir vision/live_runs/onboard_hybrid_01
+
+(Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas. Only a .pt needs it;
+an .onnx / .tflite runs through yolo_gate/bench_yolo.py's backends, and stops at the first frame if
+the backend gives different output for the same frame twice, as the Mac's GPU did.
 Tye's NumPy CNN: --detector tye; --no-color-checks for a non-purple gate.)
 
 Feed: http://localhost:8080/video_raw/<pipe> is multipart MJPEG (boundary
@@ -189,7 +198,25 @@ def quad_from_contour(cnt):
 
 
 class CnnDetector:
-    def __init__(self, weights: str, conf: float, imgsz: int, device=None):
+    """YOLO gate detector. A .pt runs through Ultralytics; an exported box model (.onnx, or .tflite
+    on the CPU or the VOXL 2's GPU) runs through yolo_gate/bench_yolo.py's backends instead, with
+    only numpy + OpenCV + onnxruntime / libgate_tflite: what the drone's container has."""
+
+    def __init__(self, weights: str, conf: float, imgsz: int, device=None, delegate="cpu", threads=0,
+                 iou=0.5):
+        self.conf, self.iou = conf, iou
+        if weights.endswith((".onnx", ".tflite")):
+            yg = os.path.join(_HERE, "yolo_gate")
+            if yg not in sys.path:
+                sys.path.insert(0, yg)
+            from bench_yolo import make_backend, letterbox, decode
+            self.model = None
+            self.backend = make_backend(weights, threads, delegate)
+            self._letterbox, self._decode = letterbox, decode
+            # imgsz is fixed in the export; NMS iou 0.5 = Ultralytics 8.4's predict default (0.7 is its
+            # val default), so the boxes match the .pt's
+            print(f"[cnn] {weights}: {self.backend.desc} (box model, no Ultralytics; --imgsz ignored)")
+            return
         try:
             from ultralytics import YOLO
         except ImportError:
@@ -200,6 +227,24 @@ class CnnDetector:
         print(f"[cnn] {weights} task={self.model.task} classes={self.model.names}")
 
     def __call__(self, bgr):
+        if self.model is None:
+            H, W = bgr.shape[:2]
+            blob, r, left, top = self._letterbox(bgr, self.backend.size)
+            raw = self.backend(blob)
+            if not getattr(self, "_checked", False):
+                # Same frame twice must give the same output. The Mac's GPU (Apple OpenCL) did not
+                # (2026-11-18) and produced junk boxes; refuse to record a run on such a backend.
+                spread = float(np.abs(self.backend(blob) - raw).max())
+                if spread > 1e-2:
+                    sys.exit(f"[cnn] the model's output changes run to run on this backend (max difference "
+                             f"{spread:.3g}): not trustworthy. Use --delegate cpu, or an .onnx model.")
+                self._checked = True
+            out = []
+            for x1, y1, x2, y2, score, _ in self._decode(raw, r, left, top, self.conf, self.iou):
+                x1, x2 = np.clip([x1, x2], 0, W)            # Ultralytics clips boxes to the image too
+                y1, y2 = np.clip([y1, y2], 0, H)
+                out.append((np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float64), score, "bbox"))
+            return out
         r = self.model.predict(bgr, conf=self.conf, imgsz=self.imgsz, device=self.device, verbose=False)[0]
         out = []
         n = 0 if r.boxes is None else len(r.boxes)
@@ -427,7 +472,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--url", default="http://localhost:8080/video_raw/hires_front_small_color")
     ap.add_argument("--detector", choices=["tye", "cnn", "color", "hybrid"], default="tye")
-    ap.add_argument("--model", help="Ultralytics weights (.pt) for --detector cnn")
+    ap.add_argument("--model", help="--detector cnn/hybrid: Ultralytics weights (.pt), or an exported "
+                    "box model (.onnx / .tflite) run without Ultralytics (the drone's container)")
+    ap.add_argument("--delegate", choices=["cpu", "gpu"], default="cpu",
+                    help=".tflite model: CPU (XNNPACK) or the VOXL 2's GPU (OpenCL, libgate_tflite)")
+    ap.add_argument("--threads", type=int, default=0, help=".onnx/.tflite model: CPU threads; 0 = default")
     ap.add_argument("--cnn-dir", default=os.path.join(os.path.dirname(os.path.dirname(_HERE)), "gate_cnn"),
                     help="Tye's gate_cnn folder for --detector tye")
     ap.add_argument("--cnn-conf", type=float, default=0.45)
@@ -465,7 +514,8 @@ def main(argv=None):
     t_wait = time.time()
     while frame is None:
         if reader.error:
-            sys.exit(f"feed error: {reader.error}  (is `adb forward tcp:8080 tcp:80` up?)")
+            sys.exit(f"feed error: {reader.error}  (laptop over USB: is `adb forward tcp:8080 tcp:80` up? "
+                     f"Wi-Fi: --url http://<drone-ip>/...; on the drone: http://localhost/...)")
         if time.time() - t_wait > 10:
             sys.exit("no frame in 10 s")
         seq, _, frame = reader.latest(seq)
@@ -490,11 +540,12 @@ def main(argv=None):
     elif a.detector == "cnn":
         if not a.model:
             sys.exit("--detector cnn needs --model <weights>")
-        detector, label = CnnDetector(a.model, a.conf, a.imgsz, a.device), f"CNN {os.path.basename(a.model)}"
+        detector, label = CnnDetector(a.model, a.conf, a.imgsz, a.device, a.delegate, a.threads), \
+            f"CNN {os.path.basename(a.model)}"
     elif a.detector == "hybrid":
         if not a.model:
             sys.exit("--detector hybrid needs --model <weights>")
-        detector = HybridDetector(CnnDetector(a.model, a.conf, a.imgsz, a.device),
+        detector = HybridDetector(CnnDetector(a.model, a.conf, a.imgsz, a.device, a.delegate, a.threads),
                                   tuple(a.hsv_lo or (0, 80, 50)), tuple(a.hsv_hi or (12, 255, 255)))
         label = f"hybrid {os.path.basename(a.model)}"
     else:

@@ -246,16 +246,14 @@ python3 live_gate_test.py --detector color --url http://localhost/video_raw/hire
     --calib calib/hires_front_1024x768.yml --duration 120 --out-dir live_runs/onboard_color_01
 ```
 
-**9b. Hybrid** (YOLO box, then color corners). `live_gate_test.py` loads YOLO through Ultralytics,
-which can run the `.onnx` file directly, but it installs PyTorch (large; give it time and disk):
+**9b. Hybrid** (YOLO box, then color corners), with the exported model: no Ultralytics or PyTorch
+needed. The `.onnx` runs in the Step 8 container as is; for the `.tflite` on the GPU, use the
+`docker/voxl2-tflite-gpu` container (its README, step 8):
 ```bash
-pip3 install ultralytics
 python3 live_gate_test.py --detector hybrid --model yolo_gate/weights/pink_det_v1_480x640.onnx \
-    --imgsz 640 --device cpu --conf 0.4 --gate-side 0.8636 --calib calib/hires_front_1024x768.yml \
+    --threads 3 --gate-side 0.8636 --calib calib/hires_front_1024x768.yml \
     --url http://localhost/video_raw/hires_front_small_color --duration 120 --out-dir live_runs/onboard_hybrid_01
 ```
-This is a stopgap to see the hybrid working on the drone. The flight version calls onnxruntime
-directly, without Ultralytics or PyTorch (the gate node, below).
 
 Do the tape-measure test while it runs: gate face-on at 1, 2, 3 and 4 m, then turned about 20° and
 40°, a few seconds each, and note the times.
