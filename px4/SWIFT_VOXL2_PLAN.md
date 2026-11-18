@@ -108,6 +108,10 @@ sane estimate (as in Isaac today, with GPS replaced by VIO).
    (random walk in position and velocity, sized from the bag). Write the drift filter, feed it our gate
    fixes, fly `mpc_rate` on its output on the 3-gate and circle courses at 3/4, 5/7, 8/10. Everything but
    the VOXL itself gets tested here, with the setup we already have.
+   **Started 2026-11-17** (`control/drift_filter.py`, `ros2_nodes/swift_vio_node.py`,
+   `rl/isaac/RESULTS_2026-11-17_swift_vio.md`): at 8/10 the Swift VIO flew 4/4 laps at GPS lap times
+   with up to 0.9 m of emulated drift removed; without the filter the same drift hit the pink gates.
+   Still to do: drift sized from a real bag, the circle course, 3/4 and 5/7.
 3. **On the VOXL 2.** Build acados for ARM and benchmark `mpc_rate` (target: a few ms per 20 ms tick);
    measure the gate detector's frame rate on the hires feed.
 4. **First flights.** Hover hold on the corrected state, then the 3-gate layout at 3/4, stepping up only

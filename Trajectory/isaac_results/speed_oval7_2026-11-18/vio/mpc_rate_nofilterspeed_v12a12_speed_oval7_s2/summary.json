@@ -1,0 +1,87 @@
+{
+  "completed": false,
+  "lap_time": NaN,
+  "gates_passed": 1,
+  "n_gates": 7,
+  "crashed": true,
+  "crash_kind": "gate",
+  "aborted": true,
+  "max_speed": 11.371570781690165,
+  "mean_speed": 7.7258401784895,
+  "completed_frac": 0.0,
+  "min_margin": 0.28339984743398494,
+  "margins": [
+    0.28339984743398494,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "ctrl_ms_mean": 4.1565356840347425,
+  "ctrl_ms_max": 12.297498062252998,
+  "real_time_factor": 0.47412707536622023,
+  "vio": {
+    "err_mean": 0.9814199583072665,
+    "err_max": 1.032716154780828,
+    "err_p95": 1.0311350749035322,
+    "samples": 2266
+  },
+  "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+  "controller": "mpc_rate",
+  "args": {
+    "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+    "controller": "mpc_rate",
+    "mpc_delay_ms": 0.0,
+    "mpc_backend": "acados",
+    "mpc_vmax": 12.0,
+    "mpc_amax": 12.0,
+    "mpc_optimize_times": true,
+    "mpc_yaw": "next_gate",
+    "model": null,
+    "connection": "udpin:0.0.0.0:14540",
+    "origin_offset": [
+      0.0,
+      0.0,
+      0.05
+    ],
+    "thrust_map": "model",
+    "u_hover": null,
+    "thrust_scale": 1.0,
+    "sim": false,
+    "sim_start": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "geofence": null,
+    "max_time": 90.0,
+    "preroll_s": 1.0,
+    "ground_z": 0.15,
+    "out_dir": "/workspace/swift_vio_runs/mpc_rate_nofilterspeed_v12a12_speed_oval7_s2",
+    "gates": "truth",
+    "prior_pos_std": 0.5,
+    "prior_yaw_std": 10.0,
+    "prior_seed": 0,
+    "mount_xyz": [
+      0.3,
+      0.0,
+      0.05
+    ],
+    "mount_rot_xyz_deg": [
+      105.0,
+      0.0,
+      -90.0
+    ],
+    "hfov_override": null,
+    "sim_vision": false,
+    "cam_namespace": "/iris_0",
+    "pose_topic": "/drone00/state/pose",
+    "state": "vio",
+    "vio_topic": "/vio/odometry",
+    "vio_max_err": 2.5,
+    "vio_start_err": 1.5,
+    "vio_wait_s": 20.0
+  }
+}

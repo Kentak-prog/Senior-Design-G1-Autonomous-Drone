@@ -1,0 +1,9 @@
+[runner] geofence ENU [ -6.8 -11.2   0.5] .. [21.   8.6  7.8]
+[runner] VIO mode: controller state from /vio/odometry
+[runner] start phase: from [ 1.15 -0.01  3.36] to [1.2  0.02 3.37] yaw 8 deg (offboard=False)
+[runner] VIO ready: 0.57 m from PX4's estimate
+[runner] at start pose (t_sim 275.19); racing slalom3_pink36 (3 gates)
+[runner] ABORT (gate: collision with gate 0)
+slalom3_pink36: completed=False lap_time=nans gates=0/3 crash_kind=gate max_speed=4.76m/s min_margin=nanm ctrl=4.21/14.3ms rtf=0.49
+  vio: error vs PX4 estimate mean 0.55 m, p95 0.57 m, max 0.57 m (2064 odometry messages)
+wrote /workspace/swift_vio_runs/mpc_rate_nofilter_v8a10_slalom3_pink36_s1/log.csv and summary.json

@@ -172,8 +172,8 @@ class RateAwareMpc(MpcController):
 
     def __init__(self, params, course, v_max=4.0, a_max=6.0, *, N=50, dt_mpc=0.05,
                  tau_w=TAU_W_ISAAC, tau_T=None, delay_s=0.0, weights=None, backend="ipopt",
-                 yaw_mode="velocity"):
-        super().__init__(params, course, v_max=v_max, a_max=a_max, horizon=N)
+                 yaw_mode="velocity", optimize_times=False):
+        super().__init__(params, course, v_max=v_max, a_max=a_max, horizon=N, optimize_times=optimize_times)
         self.Nh, self.dtm = N, dt_mpc
         self.tau_w = np.asarray(tau_w, dtype=float)
         self.tau_T = float(tau_T if tau_T is not None else max(params.tau_motor, 0.01))
@@ -219,6 +219,7 @@ class RateAwareMpc(MpcController):
         p = self.p
         self.T_est = p.mass * p.gravity
         self.u_last = np.array([self.T_est, 0.0, 0.0, 0.0])
+        self._q_prev = None                            # last measured quaternion, for sign continuity (act)
         self.u_active = self.u_last.copy()
         self.pending = []                              # (time it lands, u) of commands sent, not yet active
         self.solver.reset(self.u_last, self.Nh)
@@ -260,6 +261,13 @@ class RateAwareMpc(MpcController):
         self.T_est += a * (self.u_active[0] - self.T_est)
         x = np.concatenate([pos[0].double().cpu().numpy(), vel[0].double().cpu().numpy(),
                             quat[0].double().cpu().numpy(), omega[0].double().cpu().numpy(), [self.T_est]])
+        # q and -q are the same attitude. A state source that keeps w >= 0 flips the quaternion's sign when
+        # the yaw crosses +-180 deg; the solver's warm start (the previous solution) keeps the old sign, so
+        # its single SQP-RTI step started far off and saturated every rate command: a tilt crash on the
+        # back straight of speed_oval7 at 9-12 m/s (2026-11-18). Keep the measured sign continuous.
+        if self._q_prev is not None and np.dot(x[6:10], self._q_prev) < 0:
+            x[6:10] = -x[6:10]
+        self._q_prev = x[6:10].copy()
         x = self._predict(x, t)
         ref = self._ref_horizon(t + self.delay_s)
         if np.dot(ref[6:10, 0], x[6:10]) < 0:           # quaternion sign continuity

@@ -1,0 +1,14 @@
+[runner] geofence ENU [ -8.  -20.    0.5] .. [48.   8.   6.5]
+[plan] optimised plan loaded from /workspace/speed_dev/plan_cache/plan_ab30ff7486b7ea98.json (12.29 s)
+[runner] start phase: from [-1.58 -3.53  2.53] to [2.  0.  2.5] yaw 0 deg (offboard=False)
+[runner] at start pose (t_sim 2784.42); racing speed_oval7 (7 gates)
+[runner] passed gate 1/7 at t = 1.10 s
+[runner] passed gate 2/7 at t = 2.42 s
+[runner] passed gate 3/7 at t = 3.68 s
+[runner] passed gate 4/7 at t = 5.12 s
+[runner] passed gate 5/7 at t = 6.72 s
+[runner] passed gate 6/7 at t = 8.90 s
+[runner] passed gate 7/7 at t = 11.18 s
+[runner] lap complete in 11.18 s; braking to a hold
+speed_oval7: completed=True lap_time=11.18s gates=7/7 crash_kind=- max_speed=11.98m/s min_margin=0.65m ctrl=3.45/11.2ms rtf=0.51
+wrote /workspace/speed_runs/mpc_rate_speed_v12a12_speed_oval7/log.csv and summary.json

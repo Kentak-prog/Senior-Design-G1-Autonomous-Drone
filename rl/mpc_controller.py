@@ -68,6 +68,52 @@ from drone_params import QuadParams                           # noqa: E402
 from rotations import quat_to_rotmat, rotmat_to_euler_zyx     # noqa: E402
 
 
+PLAN_CACHE_DIR = os.environ.get("PLAN_CACHE_DIR", os.path.expanduser("~/.cache/min_snap_plans"))
+
+
+def cached_plan(gates, start, v_max, a_max, optimize_times):
+    """plan_gate_trajectory, cached on disk when optimize_times is on. The segment-time optimisation
+    (min_snap.optimize_segment_times, Powell over every segment's share) took over 10 minutes for the
+    7-gate speed_oval7 (2026-11-18): far too long inside reset(), so it runs once per (gates, start,
+    limits) and the result is reloaded. PLAN_CACHE_DIR picks the folder; the files are a plain JSON
+    recipe (waypoints, segment times, gate directions), so they move between NumPy versions (copy them
+    to the pod to skip planning there). The trajectory is rebuilt from the recipe (one KKT solve)."""
+    if not optimize_times:
+        return plan_gate_trajectory(gates, start, v_max=v_max, a_max=a_max, verbose=False, optimize_times=False)
+    import hashlib
+    import json
+    from min_snap import MinSnapTrajectory
+    key = hashlib.sha1(repr((
+        [(g.name, np.round(g.T_world_gate, 4).tolist(), round(float(g.side), 4)) for g in gates],
+        np.round(start, 4).tolist(), round(float(v_max), 3), round(float(a_max), 3))).encode()).hexdigest()[:16]
+    path = os.path.join(PLAN_CACHE_DIR, f"plan_{key}.json")
+    if os.path.isfile(path):
+        with open(path) as f:
+            r = json.load(f)
+        traj = MinSnapTrajectory(np.array(r["points"]), np.array(r["T"]),
+                                 {int(k): np.array(v) for k, v in r["fixed_dir"].items()})
+        wps = [dict(w, position=np.array(w["position"])) for w in r["wps"]]
+        print(f"[plan] optimised plan loaded from {path} ({traj.duration:.2f} s)")
+        return traj, wps
+    t0 = time.perf_counter()
+    print(f"[plan] optimising segment times (can take minutes); cache {path}")
+    traj, wps = plan_gate_trajectory(gates, start, v_max=v_max, a_max=a_max, verbose=False, optimize_times=True)
+    save_plan(path, traj, wps)
+    print(f"[plan] optimised plan {traj.duration:.2f} s in {time.perf_counter() - t0:.0f} s, saved")
+    return traj, wps
+
+
+def save_plan(path, traj, wps):
+    import json
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rec = dict(points=traj.waypoints.tolist(), T=np.asarray(traj.T).tolist(),
+               fixed_dir={str(k): np.asarray(v).tolist() for k, v in traj.fixed_dir.items()},
+               wps=[dict(w, position=np.asarray(w["position"]).tolist()) for w in wps],
+               duration=float(traj.duration))
+    with open(path, "w") as f:
+        json.dump(rec, f)
+
+
 def unwrap_yaw(yaw, psi_ref):
     """Shift yaw by a multiple of 2 pi onto the branch nearest psi_ref."""
     return yaw + 2.0 * np.pi * np.round((psi_ref - yaw) / (2.0 * np.pi))
@@ -107,10 +153,8 @@ class MpcController:
             gates = [PathGate(g.name, g.T_world_gate(), g.side) for g in self.course.gates]
             start, start_yaw = self.course.start_pose()
             self.path_gates = gates
-            self.traj, self.wps = plan_gate_trajectory(gates, np.asarray(start, dtype=float),
-                                                v_max=self.v_max, a_max=self.a_max,
-                                                verbose=False,
-                                                optimize_times=self.optimize_times)
+            self.traj, self.wps = cached_plan(gates, np.asarray(start, dtype=float), self.v_max, self.a_max,
+                                              self.optimize_times)
             self._ref = TrajectoryReference(self.traj, start_yaw, m=p.mass)
             (self.opti, self.X, self.U, self.X_init, self.U_prev,
              self.X_ref) = create_drone_mpc_optimizer(N=self.N, dt=self.dt, m=p.mass,

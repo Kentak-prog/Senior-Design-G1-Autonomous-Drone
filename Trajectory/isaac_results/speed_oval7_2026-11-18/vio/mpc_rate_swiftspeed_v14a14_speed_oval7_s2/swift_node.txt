@@ -1,0 +1,32 @@
+  from scipy.linalg import expm
+[INFO] [1794982493.320764149] [swift_vio_node]: 7 gates (side 1.5 m) from /workspace/swift_dev/tracks/speed_oval7.json; drift: scale [ 0.38 -1.05 -0.83] %, velocity bias 0.005 m/s (5.0 s), start offset [-0.73  0.54  0.17] m (seed 2); correct=True; log /workspace/swift_vio_runs/mpc_rate_swiftspeed_v14a14_speed_oval7_s2/vio; use_sim_time=True
+[INFO] [1794982493.322756560] [swift_vio_node]: camera 1024x768, fx 505.8
+[INFO] [1794982495.285182513] [swift_vio_node]: base VIO error 0.93 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 52, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982497.303123129] [swift_vio_node]: base VIO error 0.93 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 107, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982499.308533117] [swift_vio_node]: base VIO error 0.93 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 164, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982501.310624594] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 221, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982503.321014847] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 277, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982505.321986864] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 335, rejected 0, unmatched 0, camera 13 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982507.334863685] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 387, rejected 0, unmatched 0, camera 13 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982509.349503480] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 443, rejected 0, unmatched 0, camera 13 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982511.373859712] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 500, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982513.393797170] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 559, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982515.414809544] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 616, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982517.433984537] [swift_vio_node]: base VIO error 0.93 m, corrected 0.06 m (+-[0.1 0.1 0.1]), fixes 634, rejected 0, unmatched 0, camera 11 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982519.442634366] [swift_vio_node]: base VIO error 0.90 m, corrected 0.02 m (+-[0.25 0.25 0.25]), fixes 634, rejected 0, unmatched 0, camera 3 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982521.460413150] [swift_vio_node]: base VIO error 0.87 m, corrected 0.08 m (+-[0.08 0.08 0.08]), fixes 648, rejected 0, unmatched 0, camera 4 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982523.485092255] [swift_vio_node]: base VIO error 0.83 m, corrected 0.15 m (+-[0.08 0.08 0.08]), fixes 658, rejected 0, unmatched 0, camera 7 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982525.501128239] [swift_vio_node]: base VIO error 0.84 m, corrected 0.21 m (+-[0.22 0.22 0.22]), fixes 658, rejected 0, unmatched 0, camera 5 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982527.521168027] [swift_vio_node]: base VIO error 0.88 m, corrected 0.31 m (+-[0.41 0.41 0.41]), fixes 658, rejected 0, unmatched 0, camera 3 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982529.525452360] [swift_vio_node]: base VIO error 0.90 m, corrected 0.15 m (+-[0.08 0.08 0.08]), fixes 666, rejected 0, unmatched 0, camera 6 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982531.550457405] [swift_vio_node]: base VIO error 0.91 m, corrected 0.23 m (+-[0.26 0.26 0.26]), fixes 666, rejected 0, unmatched 0, camera 3 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982533.569827472] [swift_vio_node]: base VIO error 0.94 m, corrected 0.11 m (+-[0.06 0.06 0.06]), fixes 679, rejected 0, unmatched 0, camera 4 ms/frame, arrival lag pose 0 ms image 8 ms
+[INFO] [1794982535.570254094] [swift_vio_node]: base VIO error 0.94 m, corrected 0.11 m (+-[0.21 0.21 0.21]), fixes 679, rejected 0, unmatched 0, camera 7 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982537.580192197] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.06 0.06 0.06]), fixes 687, rejected 0, unmatched 0, camera 3 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982539.589929632] [swift_vio_node]: base VIO error 0.90 m, corrected 0.13 m (+-[0.19 0.19 0.19]), fixes 687, rejected 0, unmatched 0, camera 2 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982541.603771032] [swift_vio_node]: base VIO error 0.89 m, corrected 0.20 m (+-[0.38 0.38 0.38]), fixes 687, rejected 0, unmatched 0, camera 3 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982543.624049199] [swift_vio_node]: base VIO error 0.88 m, corrected 0.29 m (+-[0.6 0.6 0.6]), fixes 687, rejected 0, unmatched 0, camera 2 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982545.625136341] [swift_vio_node]: base VIO error 0.87 m, corrected 0.38 m (+-[0.86 0.86 0.86]), fixes 687, rejected 0, unmatched 0, camera 2 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982547.633622165] [swift_vio_node]: base VIO error 0.85 m, corrected 0.48 m (+-[1.14 1.14 1.14]), fixes 687, rejected 0, unmatched 0, camera 2 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982549.195076919] [swift_vio_node]: logs in /workspace/swift_vio_runs/mpc_rate_swiftspeed_v14a14_speed_oval7_s2/vio
+Failed to publish log message to rosout: publisher's context is invalid, at ./src/rcl/publisher.c:389

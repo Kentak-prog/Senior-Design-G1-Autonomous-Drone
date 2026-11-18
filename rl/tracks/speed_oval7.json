@@ -1,0 +1,63 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "speed_oval7",
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 6.0,
+      "y": 0.0,
+      "z": 2.5,
+      "yaw_deg": 0.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_1",
+      "x": 20.0,
+      "y": 0.0,
+      "z": 2.5,
+      "yaw_deg": 0.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_2",
+      "x": 34.0,
+      "y": 0.0,
+      "z": 2.5,
+      "yaw_deg": 0.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_3",
+      "x": 40.0,
+      "y": -6.0,
+      "z": 2.5,
+      "yaw_deg": -90.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_4",
+      "x": 34.0,
+      "y": -12.0,
+      "z": 2.5,
+      "yaw_deg": 180.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_5",
+      "x": 12.0,
+      "y": -12.0,
+      "z": 2.5,
+      "yaw_deg": 180.0,
+      "side": 1.5
+    },
+    {
+      "name": "gate_6",
+      "x": 0.0,
+      "y": -6.0,
+      "z": 2.5,
+      "yaw_deg": 90.0,
+      "side": 1.5
+    }
+  ],
+  "gate_note": "7-gate stadium for a top-speed attempt (2026-11-18): 28 m and 22 m straights, 6 m-radius turns, 1.5 m gates, all at 2.5 m; about 46 m x 18 m of floor. Seven gates like UZH's Swift track (25 x 25 m hangar), stretched into straights so the Starling can reach 12+ m/s."
+}

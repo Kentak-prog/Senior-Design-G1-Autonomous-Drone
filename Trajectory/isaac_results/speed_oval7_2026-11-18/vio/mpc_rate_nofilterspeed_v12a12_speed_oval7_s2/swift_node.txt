@@ -1,0 +1,19 @@
+  from scipy.linalg import expm
+[INFO] [1794982382.481403262] [swift_vio_node]: 7 gates (side 1.5 m) from /workspace/swift_dev/tracks/speed_oval7.json; drift: scale [ 0.38 -1.05 -0.83] %, velocity bias 0.005 m/s (5.0 s), start offset [-0.73  0.54  0.17] m (seed 2); correct=False; log /workspace/swift_vio_runs/mpc_rate_nofilterspeed_v12a12_speed_oval7_s2/vio; use_sim_time=True
+[INFO] [1794982382.484393048] [swift_vio_node]: camera 1024x768, fx 505.8
+[INFO] [1794982384.445254498] [swift_vio_node]: base VIO error 0.93 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 57, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982386.450825337] [swift_vio_node]: base VIO error 0.93 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 116, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982388.470239483] [swift_vio_node]: base VIO error 0.93 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 175, rejected 0, unmatched 0, camera 11 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982390.470789568] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 235, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982392.492501727] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 294, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982394.503685489] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 352, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982396.509453901] [swift_vio_node]: base VIO error 0.94 m, corrected 0.07 m (+-[0.03 0.03 0.03]), fixes 406, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982398.512424802] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 461, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982400.513313732] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 521, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982402.534784945] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 579, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982404.536125976] [swift_vio_node]: base VIO error 0.94 m, corrected 0.08 m (+-[0.03 0.03 0.03]), fixes 636, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 16 ms
+[INFO] [1794982406.545344284] [swift_vio_node]: base VIO error 0.93 m, corrected 0.07 m (+-[0.07 0.07 0.07]), fixes 671, rejected 0, unmatched 0, camera 12 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982408.564928736] [swift_vio_node]: base VIO error 0.91 m, corrected 0.04 m (+-[0.21 0.21 0.21]), fixes 671, rejected 0, unmatched 0, camera 4 ms/frame, arrival lag pose 0 ms image 0 ms
+[INFO] [1794982410.583533687] [swift_vio_node]: base VIO error 0.88 m, corrected 0.14 m (+-[0.09 0.09 0.09]), fixes 683, rejected 0, unmatched 0, camera 6 ms/frame, arrival lag pose 0 ms image 8 ms
+[INFO] [1794982410.777557020] [swift_vio_node]: logs in /workspace/swift_vio_runs/mpc_rate_nofilterspeed_v12a12_speed_oval7_s2/vio
+Failed to publish log message to rosout: publisher's context is invalid, at ./src/rcl/publisher.c:389

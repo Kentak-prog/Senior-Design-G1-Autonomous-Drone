@@ -1,0 +1,31 @@
+  from scipy.linalg import expm
+[INFO] [1794977148.441305504] [swift_vio_node]: 3 gates (side 0.8636 m) from /workspace/Senior-Design-G1-Autonomous-Drone/rl/tracks/slalom3_pink36.json; drift: scale [ 0.38 -1.05 -0.83] %, velocity bias 0.005 m/s (5.0 s), start offset [-0.73  0.54  0.17] m (seed 2); correct=False; log /workspace/swift_vio_runs/mpc_rate_nofilter_v8a10_slalom3_pink36_s2/vio; use_sim_time=True
+[INFO] [1794977148.444202555] [swift_vio_node]: camera 1024x768, fx 505.8
+[INFO] [1794977150.406730519] [swift_vio_node]: base VIO error 0.93 m, corrected 0.01 m (+-[0.03 0.03 0.03]), fixes 104, rejected 0, unmatched 0, camera 11 ms/frame
+[INFO] [1794977152.424275622] [swift_vio_node]: base VIO error 0.93 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 217, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977154.426330618] [swift_vio_node]: base VIO error 0.93 m, corrected 0.03 m (+-[0.03 0.03 0.03]), fixes 328, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977156.426788345] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 442, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977158.458744693] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 546, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977160.449293915] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 658, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977162.463406046] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 759, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977164.465466541] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 877, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977166.476757248] [swift_vio_node]: base VIO error 0.94 m, corrected 0.04 m (+-[0.03 0.03 0.03]), fixes 997, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977168.479016119] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1111, rejected 0, unmatched 0, camera 11 ms/frame
+[INFO] [1794977170.495130222] [swift_vio_node]: base VIO error 0.94 m, corrected 0.01 m (+-[0.03 0.03 0.03]), fixes 1221, rejected 0, unmatched 0, camera 11 ms/frame
+[INFO] [1794977172.513371951] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1335, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977174.520929023] [swift_vio_node]: base VIO error 0.94 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1443, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977176.532306896] [swift_vio_node]: base VIO error 0.93 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1561, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977178.555866597] [swift_vio_node]: base VIO error 0.93 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1675, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977180.576856958] [swift_vio_node]: base VIO error 0.93 m, corrected 0.01 m (+-[0.03 0.03 0.03]), fixes 1793, rejected 0, unmatched 0, camera 11 ms/frame
+[INFO] [1794977182.585385388] [swift_vio_node]: base VIO error 0.92 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1903, rejected 0, unmatched 0, camera 11 ms/frame
+[INFO] [1794977184.586708945] [swift_vio_node]: base VIO error 0.91 m, corrected 0.03 m (+-[0.03 0.03 0.03]), fixes 2017, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977186.588349576] [swift_vio_node]: base VIO error 0.90 m, corrected 0.09 m (+-[0.03 0.03 0.03]), fixes 2131, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794977188.614408462] [swift_vio_node]: base VIO error 0.88 m, corrected 0.24 m (+-[0.04 0.04 0.04]), fixes 2170, rejected 0, unmatched 0, camera 9 ms/frame
+Traceback (most recent call last):
+  File "/workspace/swift_dev/ros2_nodes/swift_vio_node.py", line 268, in <module>
+    main()
+  File "/workspace/swift_dev/ros2_nodes/swift_vio_node.py", line 262, in main
+    node.close()
+  File "/workspace/swift_dev/ros2_nodes/swift_vio_node.py", line 246, in close
+    self.log_f.close()
+KeyboardInterrupt
