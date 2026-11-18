@@ -59,9 +59,13 @@ class TFLiteModel:
     know the whole graph is on the GPU."""
 
     def __init__(self, path, delegate="gpu", threads=0, fp16=True):
+        # threads <= 0: the CPUs this process may use (a container's --cpuset-cpus), at most 4
         lib = _load()
         err = ctypes.create_string_buffer(512)
         d = {"cpu": 0, "gpu": 1}[delegate]
+        if threads <= 0:   # TFLite's own default is 1 thread: use the cores this process may run on (max 4)
+            cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+            threads = min(4, cores)
         self._h = lib.gt_create(os.fsencode(path), d, int(threads), int(bool(fp16)), err, len(err))
         if not self._h:
             raise RuntimeError(f"gate_tflite: {err.value.decode(errors='replace')}")

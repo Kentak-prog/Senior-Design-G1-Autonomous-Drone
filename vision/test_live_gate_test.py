@@ -87,6 +87,57 @@ def test_hybrid_finds_rolled_opening():
     assert src2 == "bbox", src2
 
 
+class _FakeExportedYolo:
+    """Stands in for an exported .onnx/.tflite box model: input 480x640, output (1, 5, N) with
+    boxes (cx, cy, w, h) in input pixels and one class score. noise > 0 = a backend whose output
+    changes run to run (what the Mac's GPU did)."""
+
+    def __init__(self, anchors, noise=0.0):
+        self.size, self.anchors, self.noise = (480, 640), np.array(anchors, np.float32).T, noise
+        self.rng = np.random.default_rng(0)
+
+    def __call__(self, blob):
+        assert blob.shape == (1, 3, 480, 640), blob.shape
+        out = np.zeros((1, 5, 100), np.float32)
+        out[0, :, : self.anchors.shape[1]] = self.anchors
+        return out + self.noise * self.rng.random(out.shape, dtype=np.float32)
+
+
+def _exported_detector(fake):
+    """A CnnDetector on the exported-model path, without loading a model file."""
+    from live_gate_test import CnnDetector
+    sys.path.insert(0, os.path.join(_HERE, "yolo_gate"))
+    from bench_yolo import letterbox, decode
+    d = CnnDetector.__new__(CnnDetector)
+    d.model, d.backend, d.conf, d.iou = None, fake, 0.4, 0.5
+    d._letterbox, d._decode = letterbox, decode
+    return d
+
+
+def test_exported_model_boxes_in_frame_pixels():
+    """1024x768 frame -> 640x480 input (scale 0.625, no padding): boxes come back in frame pixels,
+    clipped to the frame like Ultralytics', below --conf dropped."""
+    fake = _FakeExportedYolo([[320, 240, 200, 100, 0.9],     # -> x 352..672, y 304..464
+                              [630, 100, 40, 40, 0.8],       # runs off the right edge -> x2 clipped to 1024
+                              [100, 100, 20, 20, 0.2]])      # under conf 0.4
+    out = _exported_detector(fake)(np.zeros((768, 1024, 3), np.uint8))
+    assert len(out) == 2, out
+    boxes = {round(s, 1): q for q, s, src in out}
+    assert all(src == "bbox" for _, _, src in out)
+    assert np.allclose(boxes[0.9], [[352, 304], [672, 304], [672, 464], [352, 464]], atol=1e-3), boxes[0.9]
+    assert np.isclose(boxes[0.8][:, 0].max(), 1024), boxes[0.8]
+
+
+def test_exported_model_refuses_unrepeatable_backend():
+    fake = _FakeExportedYolo([[320, 240, 200, 100, 0.9]], noise=5.0)
+    try:
+        _exported_detector(fake)(np.zeros((768, 1024, 3), np.uint8))
+    except SystemExit as e:
+        assert "run to run" in str(e), e
+    else:
+        raise AssertionError("an unrepeatable backend must stop the run")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

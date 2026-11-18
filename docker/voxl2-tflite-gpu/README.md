@@ -148,6 +148,24 @@ best). Write down the average inference time of both runs.
 - the fps, with the VIO running too. About 10 fps or more is the bar for YOLO on the drone
   (`px4/VOXL2_BRINGUP_WINDOWS.md`, Step 8). Keep whichever of GPU / CPU is faster.
 
+### 8. Live gate vision on the drone (hybrid: YOLO box + color corners)
+VOXL Portal's hires stream, read on the drone itself. `--delegate gpu` if step 7 passed on the GPU,
+else `--delegate cpu` (or the `.onnx`):
+```bash
+./run.sh python3 vision/live_gate_test.py --detector hybrid \
+    --model vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite --delegate gpu \
+    --url http://localhost/video_raw/hires_front_small_color --gate-side 0.8636 \
+    --calib vision/calib/hires_front_1024x768.yml --duration 120 --out-dir vision/live_runs/onboard_hybrid_01
+```
+Do the tape-measure test while it runs (`px4/VOXL2_BRINGUP_WINDOWS.md`, Step 9). If it stops at
+once with `output changes run to run`, the GPU failed the repeatability check: re-run with
+`--delegate cpu`.
+
+**Check (Mac, 2026-11-18, recorded frames served as a fake Portal feed, no Ultralytics installed):**
+the hybrid detector with the `.onnx` and with the float16 `.tflite` on the CPU gave the same
+detections as the `.pt` through Ultralytics on 150/150 frames (corners within 0.13 px); the whole
+script ran at the feed's rate. On the drone: the fps it prints at the end, ranges against the tape.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
