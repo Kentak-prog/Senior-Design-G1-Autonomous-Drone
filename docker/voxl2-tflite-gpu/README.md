@@ -5,8 +5,23 @@ OpenCL from the drone's own GPU driver (ModalAI's
 [OpenCL in Docker](https://docs.modalai.com/voxl-2-opencl-in-docker/) recipe), and TensorFlow Lite
 2.17.1 built from source with its OpenCL GPU delegate, callable from Python.
 
-**Status (2026-11-18):** nothing here has run on the drone yet; everything marked **Check** below is
-still to do there. Tested on a Mac (M-series, TFLite 2.17.1 built with this `CMakeLists.txt`):
+**Status (2026-11-18): working on our Starling 2 Max** (VOXL 2, SDK 1.5.1), image built on a Mac and
+loaded over USB‑C (see "Build on a Mac, install over USB" below). On the drone, in the container
+(`--cpuset-cpus 4-6`, 480x640 float16 model):
+
+| What | Result on the drone |
+|---|---|
+| `opencl_check` | Adreno 650, OpenCL 2.0, 3 compute units; test kernel correct |
+| YOLO on the **GPU**, fp16 | **27 fps** (inference 27.5 ms median), whole graph on the GPU, repeatable |
+| YOLO on the GPU, fp32 | 16.5 fps, repeatable |
+| GPU vs the `.onnx`, 40 real gate frames | box / no-box agree 40/40; corners 0.35 px median, 3.8 px max |
+| YOLO on the **CPU** (TFLite / onnxruntime) | 1.9 fps / 0.7 fps: far too slow; use the GPU |
+
+The CPU numbers are much worse than the Mac's (~30 fps) and not yet explained (other services on the
+drone, cores 4-6 being busy, or CPU frequency); the GPU makes it moot for YOLO. Not run yet: the live
+hybrid test against a tape measure (step 8).
+
+Earlier, on a Mac (M-series, TFLite 2.17.1 built with this `CMakeLists.txt`):
 
 | What | Result on the Mac |
 |---|---|
@@ -28,7 +43,7 @@ Apple's CoreML delegate at link time.
 | In the image | Not in the image |
 |---|---|
 | Ubuntu 22.04 (arm64), Python 3, numpy, OpenCV (headless), onnxruntime | **no repo files**: the build only sees this folder |
-| The drone's Adreno GPU driver (`libOpenCL.so` + the Qualcomm libraries it needs), repacked by `repack_deps.sh` | no models, no calibration |
+| The drone's Adreno GPU driver (`libOpenCL.so` + the Qualcomm libraries it needs), bundled by `repack_deps.sh` | no models, no calibration |
 | `libgate_tflite.so`: TFLite 2.17.1 + GPU delegate + a small C API (`gate_tflite.cpp`) | no TensorFlow, no PyTorch, no Ultralytics |
 | `benchmark_model` (TFLite's benchmark tool, with `--use_gpu`), `opencl_check` | |
 
@@ -39,7 +54,7 @@ For flight, a later image will `COPY` only an explicit list (the vision modules,
 ```
 drone (VOXL 2)                                    container
   /dev/kgsl-3d0, /dev/ion  (GPU device nodes) ──►  passed in by run.sh (not --privileged)
-  qti-adreno + 4 libs  ──repack_deps.sh──► deps/*.deb ──► installed in the image
+  qti-adreno + 4 libs  ──repack_deps.sh──► deps/gpu-driver.tar ──► unpacked in the image
                                                    libgate_tflite.so ──► vision/yolo_gate/tflite_gpu.py (ctypes)
   /data/repo ────────────────────────────────────►  /repo
 ```
@@ -55,7 +70,7 @@ GPU delegate, hence the small C library.
 |---|---|
 | `Dockerfile` | two stages: build TFLite + `libgate_tflite.so`, then a slim runtime image |
 | `CMakeLists.txt`, `gate_tflite.cpp` | the C API: load a `.tflite`, run it on the GPU (OpenCL only) or CPU |
-| `repack_deps.sh` | run on the drone: the GPU driver packages → `deps/*.deb` (git-ignored: Qualcomm binaries) |
+| `repack_deps.sh` | run on the drone: the GPU driver's installed files → `deps/gpu-driver.tar` (git-ignored: Qualcomm binaries) |
 | `run.sh` | start the container with the GPU, host network and shared memory, the repo at `/repo` |
 | `opencl_check.c` | lists the OpenCL devices and runs a test kernel on the GPU |
 | `../../vision/yolo_gate/tflite_gpu.py` | Python side: `TFLiteModel(path, delegate="gpu").run(x)` |
@@ -75,14 +90,15 @@ docker info | grep -i "root dir"      # on /data: the build needs several GB
 **Check:** Docker 17.05 or newer, root dir on `/data`. If it's older, ModalAI's page installs a
 current Docker with the official `get-docker.sh` script.
 
-### 2. Repack the GPU driver
+### 2. Bundle the GPU driver
 ```bash
 cd /data/repo/docker/voxl2-tflite-gpu
 ./repack_deps.sh
 ```
-**Check:** `deps/` has five `.deb` files (`qti-adreno`, `libcutils0`, `libsync`, `qti-libion`,
-`liblog0`) and the script lists `/dev/kgsl-3d0` and `/dev/ion`. Re-run this after every VOXL SDK
-upgrade: the driver in the image has to match the drone's kernel.
+**Check:** `deps/gpu-driver.tar` (~86 MB, ~100 files from `qti-adreno`, `libcutils0`, `libsync`,
+`qti-libion`, `liblog0`), and the script lists `/dev/kgsl-3d0` and `/dev/ion`. Re-run this after
+every VOXL SDK upgrade: the driver in the image has to match the drone's kernel. (ModalAI's recipe
+repacks .debs with `dpkg-repack`; our drone doesn't have it, so the script tars the installed files.)
 
 ### 3. Build the image
 ```bash
@@ -166,11 +182,35 @@ the hybrid detector with the `.onnx` and with the float16 `.tflite` on the CPU g
 detections as the `.pt` through Ultralytics on 150/150 frames (corners within 0.13 px); the whole
 script ran at the feed's rate. On the drone: the fps it prints at the end, ranges against the tape.
 
+## Build on a Mac, install over USB (no internet on the drone)
+
+What we did on 2026-11-18. Apple Silicon is arm64 like the VOXL 2, so the build runs natively.
+Docker on the Mac: `brew install colima docker docker-buildx`, then `colima start --arch aarch64
+--cpu 8 --memory 8` (and `"cliPluginsExtraDirs": ["/opt/homebrew/lib/docker/cli-plugins"]` in
+`~/.docker/config.json`). From the repo root, drone on USB‑C:
+```bash
+A=~/platform-tools/adb
+# 1. the driver, bundled on the drone, to the Mac
+$A shell "mkdir -p /data/repack" && $A push docker/voxl2-tflite-gpu/repack_deps.sh /data/repack/
+$A shell "cd /data/repack && bash repack_deps.sh" && $A pull /data/repack/deps docker/voxl2-tflite-gpu/
+# 2. build (~5 min on an M-series Mac) and copy the image (~300 MB, ~1 min over USB)
+(cd docker/voxl2-tflite-gpu && docker build --platform linux/arm64 --provenance=false -t voxl2-tflite-gpu .)
+docker save voxl2-tflite-gpu | gzip -1 > /tmp/voxl2-tflite-gpu.tar.gz
+$A push /tmp/voxl2-tflite-gpu.tar.gz /data/ && $A shell "gunzip -c /data/voxl2-tflite-gpu.tar.gz | docker load && rm /data/voxl2-tflite-gpu.tar.gz"
+# 3. code (tracked files only; COPYFILE_DISABLE stops macOS adding ._ files) and the models
+COPYFILE_DISABLE=1 git ls-files docker vision | COPYFILE_DISABLE=1 tar -cf /tmp/repo.tar -T -
+$A push /tmp/repo.tar /data/ && $A shell "mkdir -p /data/repo && tar -xf /data/repo.tar -C /data/repo && rm /data/repo.tar"
+$A push vision/yolo_gate/weights/pink_det_v1_480x640.onnx vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite /data/repo/vision/yolo_gate/weights/
+```
+Then steps 4–8 on the drone (`adb shell`, `cd /data/repo/docker/voxl2-tflite-gpu`). Code changes
+later: repeat step 3 only; the image only changes with this folder.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | `repack_deps.sh`: package X is not installed | the name differs on this SDK: `dpkg -l \| grep -i adreno` (and the others), fix `PKGS` |
+| `run.sh` from a script / `adb shell "..."`: "the input device is not a TTY" | old `run.sh`: the current one adds `-it` only with a terminal |
 | `docker build` fails at `FROM ... AS build` | Docker older than 17.05 (step 1) |
 | build killed / `c++: fatal error: Killed` | out of memory: `--build-arg BUILD_JOBS=3` |
 | `opencl_check`: no OpenCL platform | container started without `--device /dev/kgsl-3d0 --device /dev/ion` (use `run.sh`), or deps not installed: rebuild after step 2 |
