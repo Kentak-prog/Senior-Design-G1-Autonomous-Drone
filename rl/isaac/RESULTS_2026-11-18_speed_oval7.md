@@ -82,6 +82,43 @@ GIF: `Trajectory/isaac_results/speed_oval7_2026-11-18/flight_realtime_vio.gif`. 
 Videos (Downloads): `isaac_mpc_rate_swiftvio_v{12a12,14a14}_speed_oval7_s2.webm`,
 `isaac_mpc_rate_nofilter_v12a12_speed_oval7_s2.webm`.
 
+## Three laps (2026-11-19)
+
+**`runner.py --laps N`**: the course is the lap's gates repeated N times, flown as **one** plan (no stop
+between laps). The runner prints and stores each lap's time (`summary["lap_times"]`, `["lap_splits"]`)
+and measures gate margins crossing by crossing, so a repeated gate is scored per lap
+(`edge_margins` now searches the crossings in order).
+
+**Planning N laps** (`mpc_controller.cached_plan(..., laps=N)`, `MpcController.laps`): optimising every
+segment of 21 gates from scratch would take far longer than the ~2 min of one lap, so the one-lap
+optimised plan's segment times seed the route (`_lap_hint`, matched by waypoint names; the lap-to-lap join,
+which one lap does not have, gets its length at the lap's mean speed). Fitted uniformly, one segment (the
+join) set the scale for everything: 14.2–14.4 s laps. `_stretch_locally` stretches only the segments over
+the limits and finishes with a uniform 2–5 % (the last percent does not settle because neighbouring
+segments couple): **37.8 s for 3 laps** instead of 44.5 s, planned in 8 s.
+
+Live in Isaac, 12/12, 1.5 m gates:
+
+| State | Result | Laps | Top speed | Smallest margin per lap | Estimate error vs truth per lap (mean / max) |
+|---|---|---|---|---|---|
+| PX4 estimate (GPS) | **21/21** | 11.88 / 12.56 / 12.18 s (36.62 s) | 11.65 m/s | 0.67 / 0.67 / 0.67 m | n/a |
+| **Swift VIO** (seed 2, 0.87–0.90 m drift) | **21/21** | 11.86 / 12.58 / 12.18 s (36.62 s) | 11.71 m/s | 0.55 / 0.53 / 0.54 m | 0.12 / 0.26, 0.14 / 0.30, 0.13 / 0.26 m |
+
+- **Three laps on the Swift VIO at GPS lap times**, and the estimate error **does not grow** from lap to
+  lap: each lap re-measures the drift at the same gates.
+- Laps are ~0.7–1.4 s slower than one lap alone (11.18 s): the start is from rest only in lap 1, but the
+  join between laps and the uniform 2–5 % cost time. Optimising the 3-lap timing directly would recover
+  some of it (slow, but cached).
+- One control tick of 83 ms (VIO run, mid lap 2) with no visible effect; unexplained, like the single
+  82 ms tick seen on 2026-11-17.
+- Bring-up note: the drone falls ~2.5 m from its spawn height when Play is pressed (before PX4 runs) and
+  once landed **upside down**; PX4 then refuses to arm ("Attitude failure (roll)"). Check the true tilt
+  before starting PX4; respawn if needed.
+
+GIF: `Trajectory/isaac_results/speed_oval7_2026-11-18/laps3/flight_realtime.gif`. Logs: `.../laps3/`.
+Videos (Downloads): `isaac_mpc_rate_v12a12_speed_oval7_3laps.webm`,
+`isaac_mpc_rate_swiftvio_v12a12_speed_oval7_3laps_s2.webm`.
+
 ## Drift first, or speed first?
 
 These runs used PX4's estimate (sim GPS), not the Swift VIO. What speed does to the VIO:

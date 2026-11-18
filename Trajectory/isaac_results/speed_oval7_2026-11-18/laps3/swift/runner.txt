@@ -1,0 +1,35 @@
+[runner] 3 laps: 21 gates
+[runner] geofence ENU [ -8.  -20.    0.5] .. [48.   8.   6.5]
+[runner] VIO mode: controller state from /vio/odometry
+[plan] optimised plan loaded from /workspace/speed_dev/plan_cache/plan_3ab56d6384862bf1.json (37.79 s)
+[runner] start phase: from [2.01 0.07 2.51] to [2.  0.  2.5] yaw 0 deg (offboard=False)
+[runner] VIO ready: 0.09 m from PX4's estimate
+[runner] at start pose (t_sim 93.16); racing speed_oval7_x3 (21 gates)
+[runner] passed gate 1/21 at t = 1.12 s
+[runner] passed gate 2/21 at t = 2.47 s
+[runner] passed gate 3/21 at t = 3.76 s
+[runner] passed gate 4/21 at t = 5.22 s
+[runner] passed gate 5/21 at t = 6.88 s
+[runner] passed gate 6/21 at t = 9.13 s
+[runner] passed gate 7/21 at t = 11.86 s
+[runner] lap 1 in 11.86 s
+[runner] passed gate 8/21 at t = 13.69 s
+[runner] passed gate 9/21 at t = 15.04 s
+[runner] passed gate 10/21 at t = 16.36 s
+[runner] passed gate 11/21 at t = 17.82 s
+[runner] passed gate 12/21 at t = 19.50 s
+[runner] passed gate 13/21 at t = 21.70 s
+[runner] passed gate 14/21 at t = 24.44 s
+[runner] lap 2 in 12.58 s
+[runner] passed gate 15/21 at t = 26.30 s
+[runner] passed gate 16/21 at t = 27.64 s
+[runner] passed gate 17/21 at t = 28.96 s
+[runner] passed gate 18/21 at t = 30.42 s
+[runner] passed gate 19/21 at t = 32.08 s
+[runner] passed gate 20/21 at t = 34.32 s
+[runner] passed gate 21/21 at t = 36.62 s
+[runner] lap 3 in 12.18 s
+[runner] lap complete in 36.62 s; braking to a hold
+speed_oval7_x3: completed=True lap_time=36.62s gates=21/21 crash_kind=- max_speed=11.71m/s min_margin=0.53m ctrl=4.38/83.2ms rtf=0.42
+  vio: error vs PX4 estimate mean 0.12 m, p95 0.22 m, max 0.32 m (11876 odometry messages)
+wrote /workspace/swift_vio_runs/mpc_rate_swiftx3_v12a12_speed_oval7_s2/log.csv and summary.json

@@ -71,7 +71,64 @@ from rotations import quat_to_rotmat, rotmat_to_euler_zyx     # noqa: E402
 PLAN_CACHE_DIR = os.environ.get("PLAN_CACHE_DIR", os.path.expanduser("~/.cache/min_snap_plans"))
 
 
-def cached_plan(gates, start, v_max, a_max, optimize_times):
+def _lap_hint(lap_traj, lap_wps):
+    """segment_times_hint for a multi-lap route from the optimised ONE-lap plan: each segment gets the time
+    of the one-lap segment between the same two waypoints (matched by name); segments the one-lap plan
+    does not have (the join from the last gate into the next lap) get their length at the lap's mean speed.
+    plan_gate_trajectory then fits the whole route to the limits in one go. Optimising every segment of a
+    3-lap route from scratch would take far longer than the ~2 min of one lap."""
+    seg = {}
+    for i in range(len(lap_wps) - 1):
+        seg.setdefault((lap_wps[i]["name"], lap_wps[i + 1]["name"]), float(lap_traj.T[i]))
+    pts = np.array([w["position"] for w in lap_wps])
+    v_mean = np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)) / lap_traj.duration
+
+    def hint(wps):
+        T = []
+        for i in range(len(wps) - 1):
+            k = (wps[i]["name"], wps[i + 1]["name"])
+            d = float(np.linalg.norm(np.asarray(wps[i + 1]["position"]) - np.asarray(wps[i]["position"])))
+            T.append(seg.get(k, max(d / v_mean, 0.05)))
+        return np.array(T)
+    return hint
+
+
+def _stretch_locally(traj, T0, gates, v_max, a_max, iters=15, clearance=0.5):
+    """From segment times T0, stretch only the segments that break v_max / a_max (by their own peak ratio,
+    re-solving a few times) instead of min_snap.fit_to_limits' uniform rescale of the whole route. A 3-lap
+    speed_oval7 plan fitted uniformly flew 14.2-14.4 s laps against 11.2 s for one lap, because one
+    segment (the join between laps) set the scale for all of them. Kept only if within the limits, clear
+    of the gate frames like plan_gate_trajectory's result, and shorter; else `traj` is returned."""
+    from min_snap import MinSnapTrajectory
+    from gate_path import _first_bad_crossing
+    T = np.asarray(T0, dtype=float).copy()
+    if T.shape != np.asarray(traj.T).shape:
+        return traj
+    best = None
+    for _ in range(iters):
+        cand = MinSnapTrajectory(traj.waypoints, T, traj.fixed_dir)
+        times, _, vel, acc, _, _ = cand.sample(0.01)
+        seg = cand.segment_index(times)
+        r = np.maximum(np.linalg.norm(vel, axis=1) / v_max, np.sqrt(np.linalg.norm(acc, axis=1) / a_max))
+        ratio = np.array([r[seg == i].max() if np.any(seg == i) else 0.0 for i in range(len(T))])
+        if ratio.max() <= 1.01:
+            best = cand
+            break
+        T = np.where(ratio > 1.0, T * np.minimum(ratio * 1.02, 2.0), T)
+    if best is None and ratio.max() < 1.2:
+        # Neighbouring segments couple, so the last few percent do not settle (3-lap speed_oval7: 1.02-1.04
+        # after 15 passes). From rest a uniform scale by s divides speeds by s and accelerations by s^2, so
+        # scaling every time by the remaining ratio lands within the limits.
+        T = T * ratio.max()
+        best = MinSnapTrajectory(traj.waypoints, T, traj.fixed_dir)
+    if best is None or best.duration >= traj.duration - 1e-3 or _first_bad_crossing(best, gates, clearance) is not None:
+        print("[plan] local stretch not used; keeping the uniformly fitted route")
+        return traj
+    print(f"[plan] local stretch: {traj.duration:.2f} s -> {best.duration:.2f} s")
+    return best
+
+
+def cached_plan(gates, start, v_max, a_max, optimize_times, laps=1):
     """plan_gate_trajectory, cached on disk when optimize_times is on. The segment-time optimisation
     (min_snap.optimize_segment_times, Powell over every segment's share) took over 10 minutes for the
     7-gate speed_oval7 (2026-11-18): far too long inside reset(), so it runs once per (gates, start,
@@ -85,7 +142,8 @@ def cached_plan(gates, start, v_max, a_max, optimize_times):
     from min_snap import MinSnapTrajectory
     key = hashlib.sha1(repr((
         [(g.name, np.round(g.T_world_gate, 4).tolist(), round(float(g.side), 4)) for g in gates],
-        np.round(start, 4).tolist(), round(float(v_max), 3), round(float(a_max), 3))).encode()).hexdigest()[:16]
+        np.round(start, 4).tolist(), round(float(v_max), 3), round(float(a_max), 3))
+        + ((int(laps),) if laps > 1 else ())).encode()).hexdigest()[:16]
     path = os.path.join(PLAN_CACHE_DIR, f"plan_{key}.json")
     if os.path.isfile(path):
         with open(path) as f:
@@ -96,8 +154,17 @@ def cached_plan(gates, start, v_max, a_max, optimize_times):
         print(f"[plan] optimised plan loaded from {path} ({traj.duration:.2f} s)")
         return traj, wps
     t0 = time.perf_counter()
-    print(f"[plan] optimising segment times (can take minutes); cache {path}")
-    traj, wps = plan_gate_trajectory(gates, start, v_max=v_max, a_max=a_max, verbose=False, optimize_times=True)
+    if laps > 1:                              # gates = one lap's gates repeated `laps` times
+        n = len(gates) // laps
+        lap_traj, lap_wps = cached_plan(gates[:n], start, v_max, a_max, True)
+        print(f"[plan] {laps} laps from the one-lap plan's segment times; cache {path}")
+        hint = _lap_hint(lap_traj, lap_wps)
+        traj, wps = plan_gate_trajectory(gates, start, v_max=v_max, a_max=a_max, verbose=False, optimize_times=False,
+                                         segment_times_hint=hint)
+        traj = _stretch_locally(traj, hint(wps), gates, v_max, a_max)
+    else:
+        print(f"[plan] optimising segment times (can take minutes); cache {path}")
+        traj, wps = plan_gate_trajectory(gates, start, v_max=v_max, a_max=a_max, verbose=False, optimize_times=True)
     save_plan(path, traj, wps)
     print(f"[plan] optimised plan {traj.duration:.2f} s in {time.perf_counter() - t0:.0f} s, saved")
     return traj, wps
@@ -141,6 +208,7 @@ class MpcController:
         # for straight3 on an M-series Mac and minutes under load, inside reset().
         # Off by default here (distance-proportional times, as in the published runs).
         self.optimize_times = optimize_times
+        self.laps = 1          # the course is one lap's gates repeated `laps` times (runner --laps)
         self.dt = params.control_dt
         self.solve_times = []
         self.n_failures = 0
@@ -154,7 +222,7 @@ class MpcController:
             start, start_yaw = self.course.start_pose()
             self.path_gates = gates
             self.traj, self.wps = cached_plan(gates, np.asarray(start, dtype=float), self.v_max, self.a_max,
-                                              self.optimize_times)
+                                              self.optimize_times, laps=self.laps)
             self._ref = TrajectoryReference(self.traj, start_yaw, m=p.mass)
             (self.opti, self.X, self.U, self.X_init, self.U_prev,
              self.X_ref) = create_drone_mpc_optimizer(N=self.N, dt=self.dt, m=p.mass,

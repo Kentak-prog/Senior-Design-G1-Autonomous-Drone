@@ -217,16 +217,20 @@ def edge_margins(pos, course):
     Same math as compare.edge_margins (which takes a (T,N,3) log)."""
     pos = np.asarray(pos, dtype=np.float64)
     out = []
+    k0 = 0                     # crossings are searched in order, so a repeated gate (--laps) is scored per lap
     for g in course.gates:
         T = g.T_world_gate()
         local = (pos - T[:3, 3]) @ T[:3, :3]
         z = local[:, 2]
         m = np.nan
         for k in np.nonzero((z[:-1] < 0) & (z[1:] >= 0))[0]:
+            if k < k0:
+                continue
             a = z[k] / (z[k] - z[k + 1])
             xy = local[k, :2] + a * (local[k + 1, :2] - local[k, :2])
             if np.abs(xy).max() <= g.side / 2 + g.bar:
                 m = g.side / 2 - np.abs(xy).max()
+                k0 = k + 1
                 break
         out.append(m)
     return np.array(out)
@@ -358,7 +362,7 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
                    approach_speed=2.0, ground_z=0.15, max_tilt_deg=80.0, max_gate_dist=30.0,
                    geofence=None, hold_s=1.0, hold_decel=1.5, verbose=True, gate_source=None,
                    preroll_s=1.0, vio=None, vio_max_err=1.0, vio_max_age=0.5, vio_start_err=0.3,
-                   vio_wait_s=20.0, vio_err_ticks=10):
+                   vio_wait_s=20.0, vio_err_ticks=10, lap_gates=None):
     """Returns (log, summary); see the module docstring. `geofence` is
     (min_xyz, max_xyz) in ENU or None. `course` is always the TRUE course
     (scoring); with gate_source (a gate_vision.GateSource) the controller must
@@ -400,6 +404,7 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
     gate_idx = 0
     finished = False
     lap_time = float("nan")
+    lap_splits = []
     t_race0 = None
     try:
         # ---- phase A: fly to the start pose ----
@@ -472,6 +477,10 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
                     gate_idx += 1
                     say(f"[runner] passed gate {gate_idx}/{n_gates} at t = "
                         f"{s.t_sim - t_race0:.2f} s")
+                    if lap_gates and gate_idx % lap_gates == 0:      # --laps: a lap ends at its last gate
+                        lap_splits.append(s.t_sim - t_race0)
+                        say(f"[runner] lap {len(lap_splits)} in "
+                            f"{lap_splits[-1] - (lap_splits[-2] if len(lap_splits) > 1 else 0.0):.2f} s")
                     if gate_idx >= n_gates:
                         finished = True
                         lap_time = s.t_sim - t_race0
@@ -546,6 +555,9 @@ def run_in_vehicle(vehicle, course, controller, params=None, *, max_time=60.0, s
 
     arrays = log.arrays()
     summary = _summarise(arrays, course, params, kind, finished, gate_idx, lap_time)
+    if lap_gates:
+        summary["lap_splits"] = [float(x) for x in lap_splits]
+        summary["lap_times"] = [float(b - a) for a, b in zip([0.0] + lap_splits[:-1], lap_splits)]
     if gs is not None:
         summary["vision"] = gs.summary()
     if vio is not None:
@@ -666,6 +678,8 @@ def main(argv=None):
                     help="ENU box [m]; leaving it aborts to loiter (default: auto_geofence "
                          "around the track)")
     ap.add_argument("--max-time", type=float, default=60.0)
+    ap.add_argument("--laps", type=int, default=1, help="fly the course this many times in one plan (no stop "
+                    "between laps); lap times in summary['lap_times']")
     ap.add_argument("--preroll-s", type=float, default=1.0,
                     help="CTBR position hold at the start pose before the race, so PX4 has "
                          "switched to rate control (its mode flags update every 0.5 s)")
@@ -701,6 +715,11 @@ def main(argv=None):
 
     params = QuadParams()
     course = Course.load(a.track)           # the TRUE course: scoring only, in vision mode
+    lap_gates = None
+    if a.laps > 1:                          # the route is the lap's gates repeated (one plan for all laps)
+        lap_gates = len(course)
+        course = Course(gates=list(course.gates) * a.laps, name=f"{course.name}_x{a.laps}")
+        print(f"[runner] {a.laps} laps: {len(course)} gates")
     gate_source = None
     ctl_course = course
     if a.gates == "vision":
@@ -734,6 +753,8 @@ def main(argv=None):
             gate_source.vision.close()
         print(f"[runner] cannot build controller {a.controller!r}: {e}")
         return 2
+    if hasattr(controller, "laps"):
+        controller.laps = a.laps
     geofence = auto_geofence(ctl_course) if a.geofence is None else (a.geofence[:3], a.geofence[3:])
     print(f"[runner] geofence ENU {np.round(geofence[0], 1)} .. {np.round(geofence[1], 1)}")
     vio = None
@@ -750,7 +771,7 @@ def main(argv=None):
         log, summ = run_in_vehicle(vehicle, course, controller, params, max_time=a.max_time, preroll_s=a.preroll_s,
                                    ground_z=a.ground_z, geofence=geofence,
                                    gate_source=gate_source, vio=vio, vio_max_err=a.vio_max_err,
-                                   vio_start_err=a.vio_start_err, vio_wait_s=a.vio_wait_s)
+                                   vio_start_err=a.vio_start_err, vio_wait_s=a.vio_wait_s, lap_gates=lap_gates)
     finally:
         vehicle.close()
         if vio is not None:
