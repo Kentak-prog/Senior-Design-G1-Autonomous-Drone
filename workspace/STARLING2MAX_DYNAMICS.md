@@ -19,6 +19,16 @@ Unlike the Starling 2, much of this is measured on our own drone.
 >   Pegasus Iris value scaled (0.0829 m).
 >
 > Both are still estimates until the sysid flights.
+>
+> **2026-11-15: C29 CAD model.** The inertia is now
+> $(3.333,\ 2.055,\ 5.170)\times10^{-3}$ kg·m², from a SolidWorks model of our
+> own drone with per-part masses (§7.2). It replaces the uniform-density value
+> $(3.456,\ 2.465,\ 5.469)\times10^{-3}$: roll is 4 % lower, pitch 17 % lower
+> and yaw 5 % lower. (Earlier versions of the model, with fewer of our drone's
+> own parts in it, gave $(3.446,\ 2.072,\ 5.213)$ on 2026-11-14 and
+> $(3.400,\ 2.076,\ 5.187)\times10^{-3}$ earlier on 2026-11-15.) The same model is the Isaac USD,
+> `workspace/assets/starling2max_c29.usd`, which `spawn_starling.py` loads. The
+> SITL pitch-rate gains were rescaled for the new $I_{yy}$ (§11).
 
 **Confidence labels used below**
 
@@ -57,7 +67,7 @@ Unlike the Starling 2, much of this is measured on our own drone.
 | $\tau_m$ | motor time constant | 0.035 s | meas. (F1) |
 | $\kappa=k_m/k_f$ | yaw-moment-to-thrust ratio | 0.0129 m (range 0.007–0.022) | est. |
 | $k_m$ | yaw-moment coefficient | $5.65\times10^{-8}$ N·m/(rad/s)² | est. |
-| $I_{xx},I_{yy},I_{zz}$ | principal inertia | $3.456\times10^{-3}$, $2.465\times10^{-3}$, $5.469\times10^{-3}$ kg·m² | CAD, provisional |
+| $I_{xx},I_{yy},I_{zz}$ | inertia about the center of mass, body axes | $3.333\times10^{-3}$, $2.055\times10^{-3}$, $5.170\times10^{-3}$ kg·m² | C29 CAD, per-part masses, ±5 % (§7.2) |
 | $d_x,d_y,d_z$ | linear drag coefficients | 0.227, 0.137, 0 N/(m/s) | est. |
 | `THR_MDL_FAC` | PX4 thrust model factor | 0.9 | inferred (§4.2) |
 | $T_{cap}$ | total thrust at PX4's `MPC_THR_MAX` = 0.6 | 17.82 N | derived |
@@ -99,7 +109,12 @@ long spacing is lateral, as on the Starling 2 and the Iris USD.
 **Center of mass.** In hover, the front and back pairs, and the left and
 right pairs, run at the same mean RPM to within 0.1 % (F1). The rotors are
 symmetric about the body origin, so the center of mass is centered and no
-offset is modeled.
+offset is modeled. The C29 CAD model (§7.2) puts it 0.3 mm ahead of the motor
+center and on the centerline; ModalAI's `extrinsics.conf` origin is 1.45 mm ahead
+and 0.3 mm left of it. Both are inside the CAD model's uncertainty (the fore-aft
+position of the battery packs and the wiring are assumed), so the measured
+balance stands. In height, ModalAI's origin is 77.6 mm above the ground on the
+landing gear; the CAD center of mass is 3.4 mm below that (§7.2).
 
 ---
 
@@ -256,9 +271,9 @@ $$\tau_{x,max}=2l_yF_{max}=1.158\ \text{N·m},\quad
 
 The profile uses 1.15 / 0.84 / 0.11 (`body_torque_max`, a little below).
 
-$$\dot p_{max}=\frac{1.158}{3.456\times10^{-3}}=335,\quad
-\dot q_{max}=\frac{0.847}{2.465\times10^{-3}}=344,\quad
-\dot r_{max}=\frac{0.115}{5.469\times10^{-3}}=21\ \ \text{rad/s}^2\ \text{(CAD inertia)}.$$
+$$\dot p_{max}=\frac{1.158}{3.333\times10^{-3}}=347,\quad
+\dot q_{max}=\frac{0.847}{2.055\times10^{-3}}=412,\quad
+\dot r_{max}=\frac{0.115}{5.170\times10^{-3}}=22\ \ \text{rad/s}^2\ \text{(CAD inertia)}.$$
 
 $$a_{z,max}=\frac{17.82-5.62}{0.573}=21.3\ \text{m/s}^2,\qquad
 \theta_{hold}=\arccos\frac{5.62}{17.82}=1.250\ \text{rad}\ (71.6^\circ),\qquad
@@ -275,25 +290,117 @@ The profile limits tilt to 1.0 rad, horizontal acceleration to 15 m/s²
 
 0.573 kg, weighed flight-ready (F1).
 
-### 7.2 Inertia (CAD, provisional)
+### 7.2 Inertia (C29 CAD model, per-part masses)
 
-Not yet identified in flight. The profile and the spawn use the CAD mass
-properties of ModalAI's STEP model with a 573 g whole-assembly override
-(`STARLING2_DYNAMICS.md` §6.2, provisional until part masses are set):
+Not yet identified in flight. The profile and the spawn use SolidWorks mass
+properties of a model of our own drone, `Starling2Max_C29.SLDASM` (2026-11-15):
 
-$$I_{xx}=3.456\times10^{-3},\quad I_{yy}=2.465\times10^{-3},\quad
-I_{zz}=5.469\times10^{-3}\ \text{kg·m}^2.$$
+$$I_{xx}=3.333\times10^{-3},\quad I_{yy}=2.055\times10^{-3},\quad
+I_{zz}=5.170\times10^{-3}\ \text{kg·m}^2.$$
 
-Before 2026-11-06 the profile used the scaling below instead. The two
-bracket the truth from opposite sides:
-- The CAD override spreads the mass at uniform density.
-- The scaling assumes the Starling 2's mass distribution.
-- The concentrated 18650 packs probably put the real values below the CAD
-  ones.
+**The model.** It is put together from three ModalAI STEP models. The two Max
+models share one frame: the carbon plate, motors, feet and battery clips are
+identical in both.
 
-Roll / pitch doublets through `fit_rotational` replace both (§12).
+- `D0012-4-V3-C28-M36`: frame, motors, feet, clips, ESC.
+- `D0012 Starling 2 Max Hardware Revision 2`: rear cameras and GPS mount,
+  hoop, VOXL 2 stack with the Wi-Fi dongle, battery packs, props.
+- `D0014 Starling 2-C26 HW Rev1`: the front sensor cluster.
 
-The earlier estimate scaled the Starling 2 estimate
+Our drone is a V2 airframe, and its photos match Revision 2 where the two Max
+models differ:
+
+- **Rear cameras and GPS (Revision 2).** The GPS sits low on the rear camera
+  bezel, under a hold-down plate, reaching 97 mm behind the center. (V3 has
+  it on a mast 61 mm above the plate.) Revision 2 has no GPS receiver in it,
+  so the V3 model's is seated in the bezel pocket.
+- **Hoop (Revision 2).** The simple hoop over the VOXL 2, with the ELRS
+  receiver and its antenna.
+- **VOXL 2 stack and Wi-Fi (Revision 2).** The Alfa AWUS036EACS dongle and
+  its USB cable are under the plate.
+
+- **Front sensor cluster.** The C28 bezel, tracking camera and large-lens
+  hires camera are replaced by our drone's cluster, which is the Starling 2's:
+  ModalAI's "Starling 2 Front TOF Hires Tracking Subassembly" out of their
+  `D0014 Starling 2-C26 HW Rev1` STEP model (bezel, M0161 hires camera, M0166
+  tracking camera, PMD TOF with heatsink and M0178 adapter, cables, screws).
+  It sits 2 mm higher and 2 mm further forward than on the Starling 2, which
+  puts its mounting screws on the Max frame's holes (the Max plate is 5 mm
+  thick, the Starling 2's 3 mm). There it touches nothing else, and the
+  tracking and TOF lenses are where the drone's `extrinsics.conf` says, to
+  0.2 mm: tracking at CAD $(X,Y)=(6.0,\ 21.0)$ mm, TOF at $(-9.5,\ 18.0)$.
+  **The hires camera is not:** its lens axis is at $(6.0,\ 3.0)$, directly
+  below the tracking camera, and the photos of our drone show it there too.
+  `extrinsics.conf` has the right height but puts it on the centerline,
+  6 mm to the right (its `hires_front` entry is 6 mm to the right of
+  `tracking_front`). See §12.
+- **Battery packs (Revision 2).** Two 2S 18650 packs, each two cells stacked
+  vertically, in the side hooks 41.0 mm either side of the centerline.
+- **Props (Revision 2).** Master Airscrew 7x3.7 three-blade props, CCW on the
+  front-right and back-left motors, as in `rot_dir`.
+
+**Body origin in CAD.** `extrinsics.conf` puts the ground 77.6 mm below the
+`body` origin, and the feet are at $Y_{CAD}=-67.6$ mm, so the origin is at
+$Y_{CAD}=10.0$ mm. The downward cameras, which the C29 change does not touch,
+give its position along and across the frame: $Z_{CAD}=1.45$ mm,
+$X_{CAD}=0.3$ mm. With that origin, the `extrinsics.conf` positions of the
+front tracking camera and the TOF land on the lens axes of the Starling 2
+cluster to 0.2 mm.
+
+**Masses** (g). Each part of the model is one material:
+
+| Group | Mass | Basis |
+|---|---|---|
+| Battery packs, 2 | 206.0 | 103 g each: ModalAI's Starling 2 datasheet, 285 g with one of these packs and 182 g without |
+| Carbon plate | 81.5 | CAD volume 52.6 cm³ × 1.55 g/cm³ |
+| Motors, 4 | 78.8 | 19.7 g each with leads: T-Motor F2203.5 1500 KV listing (ModalAI's Revision 2 model names the motor "T-Motor F2203.5") |
+| Props, 4 | 36.0 | 9 g each on average (est.) |
+| Steel fasteners, 65 | 17.1 | CAD volume × 7.8 g/cm³ |
+| Aluminum prop nuts, standoffs and TOF heatsink | 7.6 | CAD volume × 2.7 g/cm³ |
+| Printed plastic | 78.7 | CAD volume × 1.05 g/cm³ × $K$ |
+| Electronics | 51.7 | CAD volume × 2.2 g/cm³ × $K$ |
+| Camera modules | 15.6 | CAD volume × 1.8 g/cm³ × $K$ |
+| **Total** | **573.0** | measured (F1) |
+
+$K=1.16$ is the one free factor. It makes the total 573 g, and stands for the
+wiring, connectors and adhesive that the CAD doesn't model.
+
+**Result** (SolidWorks Mass Properties, converted with $x_B=Z$, $y_B=X$,
+$z_B=Y$):
+
+- Center of mass at CAD $(X,Y,Z)=(-0.03,\ 6.62,\ 0.30)$ mm: 0.3 mm ahead of
+  the motor center, which fits the balanced hover (§3), and 3.4 mm below
+  ModalAI's origin height (10.0 mm). The sim keeps the center of mass at the
+  body origin.
+- Products of inertia: the largest is $1.0\times10^{-5}$ kg·m², 0.5 % of
+  $I_{yy}$. The principal axes are within 1° of the body axes, so the
+  inertia is used as diagonal.
+- $I_{xx}+I_{yy}=5.388>I_{zz}=5.170$ ($\times10^{-3}$), as it must be for a
+  body that is not perfectly flat.
+
+**Checks.**
+
+- `mass_model.py` (in the CAD folder) recomputes the mass, center of mass
+  and inertia from each body's volume and centroid, without SolidWorks' Mass
+  Properties. The two agree to five significant figures.
+- In Isaac the model rests on its feet with the body origin 0.0776 m above
+  the ground, and hovers at PX4 thrust 0.139 (2026-11-14).
+
+**Uncertainty.** With the total held at 573 g, changing one assumption at a
+time (motors 17.4–22 g, props 7–12 g, packs 98–108 g, carbon 1.45–1.65 g/cm³,
+plastic density) moves $I_{xx}$ over 3.21–3.51, $I_{yy}$ over 2.00–2.14 and
+$I_{zz}$ over 4.98–5.43 ($\times10^{-3}$): about ±5 %. The motor and prop
+masses matter most; weighing one of each would tighten it.
+
+**Against the earlier value.** 2026-11-06 to 11-14 the profile used the STEP
+model at uniform density with a 573 g override, $(3.456,\ 2.465,\ 5.469)\times10^{-3}$
+(`STARLING2_DYNAMICS.md` §6.2). Roll is 4 % lower. Pitch is 17 %
+lower: the 206 g of battery sits within 33 mm of the pitch axis, where
+uniform density had spread that mass along the frame.
+
+Roll / pitch doublets through `fit_rotational` replace these (§12).
+
+Before 2026-11-06 the profile scaled the Starling 2 estimate
 (`STARLING2_DYNAMICS.md` §6.2) by mass and, per axis, by the square of the arm
 that dominates it: $l_y$ for roll, $l_x$ for pitch, $l$ for yaw.
 
@@ -306,11 +413,7 @@ $$I_{xx}=5.62\times10^{-4}\times2.011\times2.182=2.47\times10^{-3},\quad
 I_{yy}=4.79\times10^{-4}\times2.011\times2.072=2.00\times10^{-3},\quad
 I_{zz}=9.81\times10^{-4}\times2.011\times2.143=4.23\times10^{-3}\ \text{kg·m}^2.$$
 
-This assumes the Max distributes its mass like the Starling 2. It does not
-quite: the two 18650 packs are a large, concentrated share of the mass, which
-probably makes the true values lower. Two independent replacements are
-planned (§12): ModalAI's STEP model with CAD mass properties, and roll /
-pitch doublets through `fit_rotational`.
+This assumed the Max distributes its mass like the Starling 2.
 
 ---
 
@@ -343,10 +446,10 @@ $T_{sp}\approx0.139$ (§4.2). The linearized input gains (same $\mathbf A$,
 $\mathbf B$ structure as `STARLING2_DYNAMICS.md` §10.2):
 
 $$\frac1m=1.745\ \text{kg}^{-1},\quad
-\frac1{I_{xx}}=405,\quad\frac1{I_{yy}}=500,\quad\frac1{I_{zz}}=236\ \ (\text{kg·m}^2)^{-1}.$$
+\frac1{I_{xx}}=300,\quad\frac1{I_{yy}}=487,\quad\frac1{I_{zz}}=193\ \ (\text{kg·m}^2)^{-1}.$$
 
 Against the Iris ($1/m=0.667$, $1/I_{xx}=34.3$), thrust authority per newton is
-2.6× and roll authority per N·m is 11.8× larger. MPC input weights tuned on the
+2.6× and roll authority per N·m is 8.7× larger. MPC input weights tuned on the
 Iris do not carry over. This is the likely cause of the two MPC tests that
 fail under `starling2max` (Phase 4).
 
@@ -368,6 +471,14 @@ there is one place to change.
 | $\tau_m$ | `tau_motor` | `TAU_MOTOR` → `LaggedQuadraticThrustCurve` (Pegasus rotors are otherwise instantaneous) |
 | $d$ | `drag_coeff` | `DRAG_COEFF` → `LinearDrag` |
 | PX4 cap | `total_thrust_max`, `body_torque_max` | PX4 params (`MPC_THR_MAX`) |
+| Geometry (visuals, landing legs, colliders) | — | `STARLING_USD` → `workspace/assets/starling2max_c29.usd`, built by `workspace/build_starling_usd.py` from the CAD model's STL export |
+
+**SITL rate gains follow the inertia.** `PX4_SITL_PARAMS` scales the Iris
+rate gains by the angular acceleration per unit of normalized torque,
+$4\,T_{max}\,l/I$. With $I_{yy}=2.055\times10^{-3}$ the pitch figure is
+1280 rad/s² (Iris 215, ratio 6.0), so `MC_PITCHRATE_P/I/D` are
+0.025 / 0.034 / 0.0005 (were 0.03 / 0.04 / 0.0006 for $I_{yy}=2.465\times10^{-3}$).
+Roll is unchanged (1079 rad/s², ratio 3.5).
 
 `control/test_vehicles.py`:
 - `test_starling2max_matches_hover_flights` checks the F1 numbers against the
@@ -384,10 +495,13 @@ there is one place to change.
 | F1 logs and analysis script into the repo | copy the two `.ulg` (or CSV extracts) and the script; re-run `python3 px4/sysid.py LOG1.ulg LOG2.ulg --vehicle starling2max` and compare with §2 | to do |
 | `THR_MDL_FAC`, `MPC_THR_HOVER`, `MPC_THR_MAX`, `MC_BAT_SCALE_EN`, rate gains, ESC RPM range | save the drone's full parameter set (QGroundControl, or `param save` in the PX4 shell) and commit it | to do |
 | Camera and IMU extrinsics | the drone's `/etc/modalai/extrinsics.conf`, copied to `workspace/starling2max_c29_extrinsics.conf` | **done 2026-11-06**: hires_front is level, at (0.0711, −0.0003, −0.0070) m body FLU, in `spawn_starling.py` |
+| Hires camera lateral position | CAD and the photos put `hires_front` 5.7 mm left of the body origin (below the tracking camera); `extrinsics.conf`, and so `CAMERA_POS` in `spawn_starling.py`, has 0.3 mm right. Measure it on the drone, then fix `extrinsics.conf` on the drone and `CAMERA_POS` / the nodes' `camera_pos` together | to do |
 | Hires camera calibration (IMX412) | the drone's stored intrinsics (normally under `/data/modalai/`), or calibrate with `voxl-camera-calibration` | to do |
 | $k_m$ (yaw) | yaw-rate steps (`px4/STARLING2MAX_SYSID_FLIGHTS.md` card 2) → `fit_rotational` gives $k_m/I_{zz}$; $I_{zz}$ from CAD | to fly |
 | $I_{xx}$, $I_{yy}$ | roll / pitch doublets (card 1) → `fit_rotational` | to fly |
-| $I_{zz}$ | CAD mass properties from ModalAI's STEP model | to do |
+| $I_{xx}$, $I_{yy}$, $I_{zz}$ from CAD | C29 SolidWorks model with per-part masses (§7.2) | **done 2026-11-15** |
+| Motor and prop mass | weigh one motor and one prop; put them in `mass_model.py` (`FIXED`) and the SolidWorks materials | to do |
+| Retrained RL policies, MPC weights | anything tuned on $I_{yy}=2.465\times10^{-3}$ sees 19 % more pitch acceleration per N·m | check |
 | $k_f$ above 5,900 RPM | short climbs (card 3) → `fit_kf` over the wider range; a curve that bends means $F=k_f\omega^2$ needs a correction | to fly |
 | Drag | steady passes at 2–3 speeds (card 4) → `fit_drag` | to fly |
 | Motor lag as a first-order $\tau_m$ | `fit_motor_lag` on the F1 logs | to do |

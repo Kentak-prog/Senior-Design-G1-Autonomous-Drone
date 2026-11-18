@@ -1,0 +1,32 @@
+[runner] 3 laps: 21 gates
+[runner] geofence ENU [ -8.  -20.    0.5] .. [48.   8.   6.5]
+[plan] optimised plan loaded from /workspace/speed_dev/plan_cache/plan_3ab56d6384862bf1.json (37.79 s)
+[runner] start phase: from [ 0.03 -0.01  2.55] to [2.  0.  2.5] yaw 0 deg (offboard=False)
+[runner] at start pose (t_sim 29.27); racing speed_oval7_x3 (21 gates)
+[runner] passed gate 1/21 at t = 1.12 s
+[runner] passed gate 2/21 at t = 2.48 s
+[runner] passed gate 3/21 at t = 3.78 s
+[runner] passed gate 4/21 at t = 5.24 s
+[runner] passed gate 5/21 at t = 6.90 s
+[runner] passed gate 6/21 at t = 9.12 s
+[runner] passed gate 7/21 at t = 11.88 s
+[runner] lap 1 in 11.88 s
+[runner] passed gate 8/21 at t = 13.72 s
+[runner] passed gate 9/21 at t = 15.06 s
+[runner] passed gate 10/21 at t = 16.36 s
+[runner] passed gate 11/21 at t = 17.82 s
+[runner] passed gate 12/21 at t = 19.48 s
+[runner] passed gate 13/21 at t = 21.72 s
+[runner] passed gate 14/21 at t = 24.44 s
+[runner] lap 2 in 12.56 s
+[runner] passed gate 15/21 at t = 26.30 s
+[runner] passed gate 16/21 at t = 27.64 s
+[runner] passed gate 17/21 at t = 28.96 s
+[runner] passed gate 18/21 at t = 30.42 s
+[runner] passed gate 19/21 at t = 32.08 s
+[runner] passed gate 20/21 at t = 34.30 s
+[runner] passed gate 21/21 at t = 36.62 s
+[runner] lap 3 in 12.18 s
+[runner] lap complete in 36.62 s; braking to a hold
+speed_oval7_x3: completed=True lap_time=36.62s gates=21/21 crash_kind=- max_speed=11.65m/s min_margin=0.67m ctrl=3.57/11.0ms rtf=0.43
+wrote /workspace/speed_runs/mpc_rate_speedx3_v12a12_speed_oval7/log.csv and summary.json

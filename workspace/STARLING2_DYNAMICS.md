@@ -9,6 +9,7 @@ derivation, and every derived number is worked out step by step.
 > **Status.**
 > - **Mass:** 0.573 kg, **measured** on our C29 drone with both batteries.
 > - **Inertia (provisional):** read from CAD with a 500 g whole-assembly mass override (uniform density), then scaled to 573 g (§6.2, §6.4). It will be redone once per-part masses are set in CAD.
+>   **Superseded 2026-11-14:** per-part masses are set in a C29 CAD model of our drone, giving $(3.333,\ 2.055,\ 5.170)\times10^{-3}$ kg·m². That is what the code uses now; see `STARLING2MAX_DYNAMICS.md` §7.2. The $(3.456,\ 2.465,\ 5.469)\times10^{-3}$ below, and the numbers derived from it in §6, §8–§10, are the uniform-density values.
 > - **Thrust:** $k_f$ is **measured** from two hover flights on 2026-11-03 (§4.4), at real rotor speed. PX4's output-to-RPM mapping and the motor lag come from the same logs (§4.1, §4.2).
 > - **Yaw torque (estimated):** $k_m$ is still a propeller-theory estimate (§4.6). The hover flights had no yaw maneuvers.
 

@@ -1,0 +1,12 @@
+[runner] geofence ENU [ -8.3 -16.6   0.5] .. [16.3  7.8  6.6]
+[runner] VIO mode: controller state from /vio/odometry
+[runner] start phase: from [ 0.91 -0.23  2.63] to [ 0.94 -0.17  2.6 ] yaw -7 deg (offboard=False)
+[runner] VIO ready: 0.12 m from PX4's estimate
+[runner] at start pose (t_sim 1131.20); racing circle3_pink36 (3 gates)
+[runner] passed gate 1/3 at t = 2.26 s
+[runner] passed gate 2/3 at t = 7.98 s
+[runner] passed gate 3/3 at t = 13.60 s
+[runner] lap complete in 13.60 s; braking to a hold
+circle3_pink36: completed=True lap_time=13.60s gates=3/3 crash_kind=- max_speed=3.01m/s min_margin=0.32m ctrl=4.06/11.9ms rtf=0.48
+  vio: error vs PX4 estimate mean 0.12 m, p95 0.17 m, max 0.26 m (5732 odometry messages)
+wrote /workspace/swift_vio_runs/mpc_rate_swift6m_v3a4_circle3_pink36_s2/log.csv and summary.json

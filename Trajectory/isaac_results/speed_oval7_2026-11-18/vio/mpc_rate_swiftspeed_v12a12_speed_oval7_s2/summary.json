@@ -1,0 +1,87 @@
+{
+  "completed": true,
+  "lap_time": 11.159999999999854,
+  "gates_passed": 7,
+  "n_gates": 7,
+  "crashed": false,
+  "crash_kind": "",
+  "aborted": false,
+  "max_speed": 12.045876779383521,
+  "mean_speed": 7.998468162261692,
+  "completed_frac": 1.0,
+  "min_margin": 0.45917291264567694,
+  "margins": [
+    0.7042980031466146,
+    0.707510544412995,
+    0.6493943131762997,
+    0.45917291264567694,
+    0.6876835932258432,
+    0.6517648026306382,
+    0.61539228969402
+  ],
+  "ctrl_ms_mean": 4.071445271079044,
+  "ctrl_ms_max": 12.544907629489899,
+  "real_time_factor": 0.4776094301452477,
+  "vio": {
+    "err_mean": 0.15462160266955344,
+    "err_max": 0.3582702072862372,
+    "err_p95": 0.28028312585868587,
+    "samples": 5465
+  },
+  "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+  "controller": "mpc_rate",
+  "args": {
+    "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+    "controller": "mpc_rate",
+    "mpc_delay_ms": 0.0,
+    "mpc_backend": "acados",
+    "mpc_vmax": 12.0,
+    "mpc_amax": 12.0,
+    "mpc_optimize_times": true,
+    "mpc_yaw": "next_gate",
+    "model": null,
+    "connection": "udpin:0.0.0.0:14540",
+    "origin_offset": [
+      0.0,
+      0.0,
+      0.05
+    ],
+    "thrust_map": "model",
+    "u_hover": null,
+    "thrust_scale": 1.0,
+    "sim": false,
+    "sim_start": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "geofence": null,
+    "max_time": 90.0,
+    "preroll_s": 1.0,
+    "ground_z": 0.15,
+    "out_dir": "/workspace/swift_vio_runs/mpc_rate_swiftspeed_v12a12_speed_oval7_s2",
+    "gates": "truth",
+    "prior_pos_std": 0.5,
+    "prior_yaw_std": 10.0,
+    "prior_seed": 0,
+    "mount_xyz": [
+      0.3,
+      0.0,
+      0.05
+    ],
+    "mount_rot_xyz_deg": [
+      105.0,
+      0.0,
+      -90.0
+    ],
+    "hfov_override": null,
+    "sim_vision": false,
+    "cam_namespace": "/iris_0",
+    "pose_topic": "/drone00/state/pose",
+    "state": "vio",
+    "vio_topic": "/vio/odometry",
+    "vio_max_err": 1.0,
+    "vio_start_err": 0.3,
+    "vio_wait_s": 20.0
+  }
+}

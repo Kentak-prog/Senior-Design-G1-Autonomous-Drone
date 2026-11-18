@@ -1,0 +1,112 @@
+{
+  "completed": true,
+  "lap_time": 36.616,
+  "gates_passed": 21,
+  "n_gates": 21,
+  "crashed": false,
+  "crash_kind": "",
+  "aborted": false,
+  "max_speed": 11.713405655476112,
+  "mean_speed": 7.677164883464535,
+  "completed_frac": 1.0,
+  "min_margin": 0.5324779298826448,
+  "margins": [
+    0.6555211991928152,
+    0.6743586237861355,
+    0.6600000648363892,
+    0.5537504814330088,
+    0.7010780058906705,
+    0.6673042998494667,
+    0.6371784042289478,
+    0.6657053211430947,
+    0.6684350379864764,
+    0.6789588298052703,
+    0.5324779298826448,
+    0.6908868470008609,
+    0.6646039566514984,
+    0.6356769304136531,
+    0.6620481210575275,
+    0.6362972896653804,
+    0.6735510732897759,
+    0.5388261375811476,
+    0.6905121522993023,
+    0.6687086760499021,
+    0.6625738672044913
+  ],
+  "ctrl_ms_mean": 4.382641946316743,
+  "ctrl_ms_max": 83.17205496132374,
+  "real_time_factor": 0.42487708102366495,
+  "lap_splits": [
+    11.864000000000004,
+    24.439999999999998,
+    36.616
+  ],
+  "lap_times": [
+    11.864000000000004,
+    12.575999999999993,
+    12.176000000000002
+  ],
+  "vio": {
+    "err_mean": 0.11615711621796498,
+    "err_max": 0.3156708084832504,
+    "err_p95": 0.22222199999049583,
+    "samples": 11876
+  },
+  "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+  "controller": "mpc_rate",
+  "args": {
+    "track": "/workspace/swift_dev/tracks/speed_oval7.json",
+    "controller": "mpc_rate",
+    "mpc_delay_ms": 0.0,
+    "mpc_backend": "acados",
+    "mpc_vmax": 12.0,
+    "mpc_amax": 12.0,
+    "mpc_optimize_times": true,
+    "mpc_yaw": "next_gate",
+    "model": null,
+    "connection": "udpin:0.0.0.0:14540",
+    "origin_offset": [
+      0.0,
+      0.0,
+      0.05
+    ],
+    "thrust_map": "model",
+    "u_hover": null,
+    "thrust_scale": 1.0,
+    "sim": false,
+    "sim_start": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "geofence": null,
+    "max_time": 90.0,
+    "laps": 3,
+    "preroll_s": 1.0,
+    "ground_z": 0.15,
+    "out_dir": "/workspace/swift_vio_runs/mpc_rate_swiftx3_v12a12_speed_oval7_s2",
+    "gates": "truth",
+    "prior_pos_std": 0.5,
+    "prior_yaw_std": 10.0,
+    "prior_seed": 0,
+    "mount_xyz": [
+      0.3,
+      0.0,
+      0.05
+    ],
+    "mount_rot_xyz_deg": [
+      105.0,
+      0.0,
+      -90.0
+    ],
+    "hfov_override": null,
+    "sim_vision": false,
+    "cam_namespace": "/iris_0",
+    "pose_topic": "/drone00/state/pose",
+    "state": "vio",
+    "vio_topic": "/vio/odometry",
+    "vio_max_err": 1.0,
+    "vio_start_err": 0.3,
+    "vio_wait_s": 20.0
+  }
+}

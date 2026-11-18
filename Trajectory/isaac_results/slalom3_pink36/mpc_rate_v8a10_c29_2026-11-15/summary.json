@@ -1,0 +1,76 @@
+{
+  "completed": true,
+  "lap_time": 5.5,
+  "gates_passed": 3,
+  "n_gates": 3,
+  "crashed": false,
+  "crash_kind": "",
+  "aborted": false,
+  "max_speed": 4.493330207434717,
+  "mean_speed": 2.7999621516005226,
+  "completed_frac": 1.0,
+  "min_margin": 0.37142951073591535,
+  "margins": [
+    0.39002173926850603,
+    0.37142951073591535,
+    0.37777297431607987
+  ],
+  "ctrl_ms_mean": 3.499175865541805,
+  "ctrl_ms_max": 11.12767681479454,
+  "real_time_factor": 0.4096663268181552,
+  "track": "../tracks/slalom3_pink36.json",
+  "controller": "mpc_rate",
+  "args": {
+    "track": "../tracks/slalom3_pink36.json",
+    "controller": "mpc_rate",
+    "mpc_delay_ms": 0.0,
+    "mpc_backend": "acados",
+    "mpc_vmax": 8.0,
+    "mpc_amax": 10.0,
+    "mpc_yaw": "velocity",
+    "model": null,
+    "connection": "udpin:0.0.0.0:14540",
+    "origin_offset": [
+      0.0,
+      0.0,
+      0.05
+    ],
+    "thrust_map": "model",
+    "u_hover": null,
+    "thrust_scale": 1.0,
+    "sim": false,
+    "sim_start": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "geofence": null,
+    "max_time": 90.0,
+    "preroll_s": 1.0,
+    "ground_z": 0.15,
+    "out_dir": "/workspace/runs_mpc_rate/mpc_rate_v8a10_slalom3_pink36_chase1",
+    "gates": "truth",
+    "prior_pos_std": 0.5,
+    "prior_yaw_std": 10.0,
+    "prior_seed": 0,
+    "mount_xyz": [
+      0.3,
+      0.0,
+      0.05
+    ],
+    "mount_rot_xyz_deg": [
+      105.0,
+      0.0,
+      -90.0
+    ],
+    "hfov_override": null,
+    "sim_vision": false,
+    "cam_namespace": "/iris_0",
+    "pose_topic": "/drone00/state/pose",
+    "state": "px4",
+    "vio_topic": "/vio/odometry",
+    "vio_max_err": 1.0,
+    "vio_start_err": 0.3,
+    "vio_wait_s": 20.0
+  }
+}

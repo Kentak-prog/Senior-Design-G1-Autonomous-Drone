@@ -1,0 +1,18 @@
+  from scipy.linalg import expm
+[INFO] [1794976916.346145845] [swift_vio_node]: 3 gates (side 0.8636 m) from /workspace/Senior-Design-G1-Autonomous-Drone/rl/tracks/slalom3_pink36.json; drift: scale [0.69 1.64 0.66] %, velocity bias 0.005 m/s (5.0 s), start offset [-0.39  0.27  0.07] m (seed 1); correct=False; log /workspace/swift_vio_runs/mpc_rate_nofilter_v8a10_slalom3_pink36_s1/vio; use_sim_time=True
+[INFO] [1794976916.347976754] [swift_vio_node]: camera 1024x768, fx 505.8
+[INFO] [1794976918.317267898] [swift_vio_node]: base VIO error 0.48 m, corrected 0.01 m (+-[0.03 0.03 0.03]), fixes 106, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976920.324725321] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 222, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976922.328607300] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 338, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976924.336668318] [swift_vio_node]: base VIO error 0.48 m, corrected 0.03 m (+-[0.03 0.03 0.03]), fixes 458, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976926.344939426] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 564, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976928.340789354] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 682, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976930.348586603] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 796, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976932.349609639] [swift_vio_node]: base VIO error 0.48 m, corrected 0.03 m (+-[0.03 0.03 0.03]), fixes 918, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976934.356081019] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1038, rejected 0, unmatched 0, camera 9 ms/frame
+[INFO] [1794976936.368309966] [swift_vio_node]: base VIO error 0.48 m, corrected 0.02 m (+-[0.03 0.03 0.03]), fixes 1158, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976938.368365795] [swift_vio_node]: base VIO error 0.48 m, corrected 0.01 m (+-[0.03 0.03 0.03]), fixes 1276, rejected 0, unmatched 0, camera 10 ms/frame
+[INFO] [1794976940.388552051] [swift_vio_node]: base VIO error 0.48 m, corrected 0.24 m (+-[0.04 0.04 0.04]), fixes 1375, rejected 0, unmatched 0, camera 9 ms/frame
+[INFO] [1794976942.394978574] [swift_vio_node]: base VIO error 0.47 m, corrected 0.04 m (+-[0.03 0.03 0.03]), fixes 1446, rejected 0, unmatched 0, camera 9 ms/frame
+[INFO] [1794976942.688520807] [swift_vio_node]: logs in /workspace/swift_vio_runs/mpc_rate_nofilter_v8a10_slalom3_pink36_s1/vio
+Failed to publish log message to rosout: publisher's context is invalid, at ./src/rcl/publisher.c:389

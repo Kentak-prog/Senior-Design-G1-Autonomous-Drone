@@ -224,10 +224,12 @@ VEHICLES = {
     #     STARLING2_DYNAMICS.md 4.6. (Until 2026-11-06 this was the Pegasus Iris
     #     kappa 0.117 m scaled by prop diameter, 0.0829 m: above that whole range;
     #     4.6 explains why the Pegasus default is not a propeller value.)
-    #   Inertia (provisional): CAD mass properties of ModalAI's STEP model with a
-    #     573 g whole-assembly override, STARLING2_DYNAMICS.md 6.2. (Until
-    #     2026-11-06: Starling 2 estimates scaled by mass and arm, (2.47, 2.00,
-    #     4.23)e-3.)
+    #   Inertia (CAD, +-5 %): SolidWorks mass properties of the C29 model, which is
+    #     ModalAI's STEP model with our front sensor cluster, the battery packs
+    #     and the props added and per-part masses adding up to 573 g,
+    #     STARLING2MAX_DYNAMICS.md 7.2 (2026-11-15). (2026-11-06 to 11-14: the
+    #     STEP model at uniform density with a 573 g override, (3.456, 2.465,
+    #     5.469)e-3. Before: Starling 2 estimates scaled, (2.47, 2.00, 4.23)e-3.)
     #   Drag (est.): STARLING2_DYNAMICS.md 7.
     #   These must equal workspace/spawn_starling.py (control/test_vehicles.py).
     #   Battery: two 2S 18650 packs in series = 4S.
@@ -235,7 +237,7 @@ VEHICLES = {
         name="starling2max",
         description="ModalAI Starling 2 Max (0.573 kg), hover-identified rotors + estimates",
         mass=0.573,                                                       # (meas.)
-        inertia_diag=(3.456e-3, 2.465e-3, 5.469e-3),                      # CAD, provisional
+        inertia_diag=(3.333e-3, 2.055e-3, 5.170e-3),                      # C29 CAD, per-part masses
         rotor_xy=((0.095, -0.130), (-0.095, 0.130), (0.095, 0.130), (-0.095, -0.130)),
         rotor_z=0.023,                                                    # (est.)
         rot_dir=(-1.0, -1.0, 1.0, 1.0),                                   # (meas.)

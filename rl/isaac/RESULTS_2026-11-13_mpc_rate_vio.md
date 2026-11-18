@@ -187,14 +187,23 @@ Video: `isaac_mpc_rate_vioswift2_three_gate_isaac.webm` (Downloads). Logs: `/wor
 nose and front camera at the next gate (`Trajectory/min_snap_planner.look_at_yaw_profile`, already used
 by the ROS stack) instead of along the velocity. The planned path is unchanged. The bench
 (`bench_mpc_delay.py --yaw`) now reports how often SOME gate is whole in the C29 camera (all four opening
-corners inside 98.7° × 82.3°, within 12 m), which is what a VIO fix needs:
+corners inside the camera's field of view, within 12 m), which is what a VIO fix needs. Whole gate in view /
+longest stretch with none:
 
-| Course, limits | velocity yaw: whole gate in view / longest blind | next_gate yaw |
-|---|---|---|
-| 3-gate, 3/4 | 74 % / 1.28 s (live: 1.5 s without fixes) | 91 % / 0.80 s |
-| 3-gate, 8/10 | 66 % / 0.76 s | 77 % / 0.58 s |
-| circle, 3/4 | 50 % / 3.30 s | 91 % / 0.84 s |
-| circle, 8/10 | 42 % / 2.12 s | 87 % / 0.64 s |
+| Course, limits | velocity yaw, 98.7° × 82.3° | next_gate yaw, 98.7° × 82.3° | velocity yaw, **90.7° × 74.4°** | next_gate yaw, **90.7° × 74.4°** |
+|---|---|---|---|---|
+| 3-gate, 3/4 | 74 % / 1.28 s (live: 1.5 s without fixes) | 91 % / 0.80 s | 63 % / 1.88 s | 90 % / 0.90 s |
+| 3-gate, 5/7 | | | 60 % / 1.16 s | 80 % / 0.72 s |
+| 3-gate, 8/10 | 66 % / 0.76 s | 77 % / 0.58 s | 58 % / 0.88 s | 70 % / 0.62 s |
+| circle, 3/4 | 50 % / 3.30 s | 91 % / 0.84 s | 45 % / 3.46 s | 88 % / 0.96 s |
+| circle, 5/7 | | | 39 % / 2.62 s | 83 % / 0.78 s |
+| circle, 8/10 | 42 % / 2.12 s | 87 % / 0.64 s | 31 % / 2.30 s | 83 % / 0.70 s |
+
+The live runs below used the 98.7° camera (ModalAI's M0161 lens figure). The 2026-11-15 checkerboard
+calibration (`vision/calib/`, fx 505.6 px at 1024 wide) gives 90.7° × 74.4°, now in `spawn_starling.py`
+and the bench (bench rerun 2026-11-15, acados, 20 ms delay; laps, tilt and margins unchanged). With the
+narrower camera, next-gate yaw still keeps a gate in view 70–90 % of the time with blind stretches ≤ 0.96 s,
+but those are 0.04–0.12 s longer than in the runs flown: the live VIO laps should be repeated on it.
 
 Laps, tilt and margins are identical on the bench (only the yaw changes). Live, with the Swift-mode VIO of
 follow-up 2 (`attitude_updates:=yaw tilt_init:=accel init_fixes:=5 calib_still:=true tilt_tau_s:=5.0`):

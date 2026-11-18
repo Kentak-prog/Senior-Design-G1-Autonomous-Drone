@@ -1,0 +1,17 @@
+[runner] geofence ENU [ -8.  -20.    0.5] .. [48.   8.   6.5]
+[runner] VIO mode: controller state from /vio/odometry
+[plan] optimised plan loaded from /workspace/speed_dev/plan_cache/plan_f1152f442ae2e083.json (11.71 s)
+[runner] start phase: from [ 1.95 -0.02  2.49] to [2.  0.  2.5] yaw 0 deg (offboard=False)
+[runner] VIO ready: 0.16 m from PX4's estimate
+[runner] at start pose (t_sim 3119.19); racing speed_oval7 (7 gates)
+[runner] passed gate 1/7 at t = 1.04 s
+[runner] passed gate 2/7 at t = 2.42 s
+[runner] passed gate 3/7 at t = 3.62 s
+[runner] passed gate 4/7 at t = 5.02 s
+[runner] passed gate 5/7 at t = 6.62 s
+[runner] passed gate 6/7 at t = 8.54 s
+[runner] passed gate 7/7 at t = 10.66 s
+[runner] lap complete in 10.66 s; braking to a hold
+speed_oval7: completed=True lap_time=10.66s gates=7/7 crash_kind=- max_speed=14.06m/s min_margin=0.31m ctrl=4.16/11.9ms rtf=0.47
+  vio: error vs PX4 estimate mean 0.19 m, p95 0.47 m, max 0.59 m (5543 odometry messages)
+wrote /workspace/swift_vio_runs/mpc_rate_swiftspeed_v14a14_speed_oval7_s2/log.csv and summary.json

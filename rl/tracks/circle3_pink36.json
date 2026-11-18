@@ -1,0 +1,39 @@
+{
+  "yaw_convention": "yaw_deg=0 means gate +Z (flight direction) is world +X; positive yaw rotates the gate counter-clockwise about world +Z (right-hand rule); at yaw=0, gate +X = world -Y and gate +Y = world -Z.",
+  "course_name": "circle3_pink36",
+  "gate_color": [
+    1.0,
+    0.141,
+    0.456
+  ],
+  "gates": [
+    {
+      "name": "gate_0",
+      "x": 4.911,
+      "y": -0.667,
+      "z": 2.6,
+      "yaw_deg": -7.2,
+      "side": 0.8636,
+      "bar": 0.0254
+    },
+    {
+      "name": "gate_1",
+      "x": 8.267,
+      "y": -8.65,
+      "z": 2.6,
+      "yaw_deg": -127.2,
+      "side": 0.8636,
+      "bar": 0.0254
+    },
+    {
+      "name": "gate_2",
+      "x": -0.325,
+      "y": -7.565,
+      "z": 2.6,
+      "yaw_deg": 112.8,
+      "side": 0.8636,
+      "bar": 0.0254
+    }
+  ],
+  "gate_note": "circle3_isaac's gate positions (2026-11-06) with Tony's pink gates: 36 in (0.914 m) outer, 1 in (0.0254 m) pipe, opening 0.864 m (2026-11-18)"
+}
