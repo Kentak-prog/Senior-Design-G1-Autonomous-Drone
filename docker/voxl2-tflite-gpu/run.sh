@@ -14,7 +14,11 @@ CPUS="${CPUS:-4-6}"   # big cores; 7 (the fastest) stays free for the MPC
 
 if [ $# -eq 0 ]; then set -- bash; fi
 
-exec docker run --rm -it \
+# -it only with a terminal: `adb shell "<cmd>"` or a script has none, and docker refuses -t then.
+TTY=()
+if [ -t 0 ] && [ -t 1 ]; then TTY=(-it); fi
+
+exec docker run --rm "${TTY[@]}" \
   --device /dev/kgsl-3d0 --device /dev/ion \
   --network host --ipc host \
   --cpuset-cpus "$CPUS" \
