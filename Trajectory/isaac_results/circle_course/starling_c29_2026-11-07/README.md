@@ -8,8 +8,8 @@ fixes to the Starling sim found on the way (below). Pod run folder:
 
 | File | |
 |---|---|
-| `s3/flight_report.png`, `s3/flight_summary.txt` | Stage 3: 15 s hover hold on our MPC (ground truth) |
-| `s4/flight_report.png`, `s4/flight_summary.txt` | Stage 4: the course gate_0 → gate_1 → gate_2 on ground truth, VIO as a preview |
+| `../../../../graphics/images/2026-11-07_circle_starling-c29_stage3_flight-report.png`, `s3/flight_summary.txt` | Stage 3: 15 s hover hold on our MPC (ground truth) |
+| `../../../../graphics/images/2026-11-07_circle_starling-c29_stage4_flight-report.png`, `s4/flight_summary.txt` | Stage 4: the course gate_0 → gate_1 → gate_2 on ground truth, VIO as a preview |
 | (pod only) | `/workspace/vio_runs/s29_1/`: every flight_log / bridge_log CSV, `vio/` (Stages 2–4) and `s4r_vio/` (4R) with `vio_log.csv` and `vio_events.csv`, and the PX4 logs in `/workspace/PX4-Autopilot/log/2026-11-07/` |
 | `s4r2/`, `s4r3/` | Stage 4R attempts 1 and 2 (below): analyzer figure and summary, plus `replan_events.txt` (every plan, pass, failure) and `gate_map.txt` (the map at each plan), the pod's CSVs renamed so git keeps them |
 

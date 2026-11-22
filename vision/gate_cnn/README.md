@@ -38,7 +38,7 @@ The first version, trained only on black backgrounds, failed on real Isaac frame
 grid floor and the 3D gate boxes were new to it. The renderer now draws an Isaac-style grid floor,
 3D gate boxes, and the measured Isaac gate color, and the CNN was retrained on that.
 
-Running `run_on_video.py` on Aaron's recording (`isaac_flight_cnn.mp4`):
+Running `run_on_video.py` on Aaron's recording (`../../graphics/videos/2026-11-10_gate-cnn_detections-on-isaac-flight.mp4`):
 * The CNN accepted 26 frames during the flight. In every one, the corners sit on the right gate.
 * It correctly refuses frames where the nearest gate is cut off by the frame edge or seen
   edge-on. The color detector in those frames often outlines a partial gate or a farther gate.
@@ -69,7 +69,7 @@ So the refine step keeps color-level precision on clean frames while keeping the
 robustness. Speed: about 10 ms per frame for the CNN on a laptop CPU in plain NumPy (color
 threshold: 0.2 ms), which fits a 30 fps camera loop.
 
-![results](results.png)
+![results](../../graphics/images/2026-11-10_gate-cnn_training-results.png)
 
 ## Files
 
@@ -81,13 +81,13 @@ threshold: 0.2 ms), which fits a 30 fps camera loop.
 | `train.py` | Trains the CNN. `--real folder/` mixes in labelled Isaac frames. |
 | `detector.py` | **Integration API:** `GateCNN.detect()`, `refine_with_color()`, `estimate_pose()`. |
 | `baseline.py` | Color-threshold detector used for comparison. |
-| `evaluate.py` | Head-to-head test → `results.png`, `examples.png`, `results.json`. |
+| `evaluate.py` | Head-to-head test → `../../graphics/images/2026-11-10_gate-cnn_training-results.png`, `../../graphics/images/2026-11-10_gate-cnn_example-detections.png`, `results.json`. |
 | `label_isaac.py` | Auto-labels real Isaac frames so the CNN can be fine-tuned on them. |
 | `run_on_video.py` | Runs CNN + color detector on a recording or frame folder → annotated video. |
 | `isaac_live.py` | Live hook for Isaac: `process_frame()` for gate_vision.py, or a ROS 2 node. |
 | `gate_cnn.npz` | Trained weights. |
 | `Gate_CNN_demo.ipynb` | Google Colab notebook: upload the zip, run the cells, see the CNN work. |
-| `isaac_flight_cnn.mp4` | The CNN run on Aaron's Isaac Sim recording (green = CNN, red = color detector). |
+| `../../graphics/videos/2026-11-10_gate-cnn_detections-on-isaac-flight.mp4` | The CNN run on Aaron's Isaac Sim recording (green = CNN, red = color detector). |
 
 ## Quick start
 

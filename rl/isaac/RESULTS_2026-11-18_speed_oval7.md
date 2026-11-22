@@ -52,7 +52,7 @@ Offline (QuadSim, Isaac rate loop, optimised plans, after the fix):
 - 14/14 tilts to 63°, past the profile's 57° `tilt_limit` (chosen to keep thrust margin; altitude can be
   held to ~72° at the PX4 cap). 12/12 stays at 55°. On hardware, start at 12/12 or below.
 
-GIF: `Trajectory/isaac_results/speed_oval7_2026-11-18/flight_realtime.gif` (speed and tilt panels).
+GIF: `../../graphics/gifs/2026-11-18_speed-oval7_mpc-rate_v12a12-vs-v14a14_gps_top-speed.gif` (speed and tilt panels).
 Videos (chase camera, Downloads): `isaac_mpc_rate_v12a12_speed_oval7.webm`,
 `isaac_mpc_rate_v14a14_speed_oval7.webm`.
 
@@ -78,7 +78,7 @@ compensated), drift seed 2: the base VIO was **0.89–0.95 m** off the truth for
 - No-filter run: the runner's VIO checks were loosened (`--vio-start-err 1.5 --vio-max-err 2.5`) so it
   would start at all.
 
-GIF: `Trajectory/isaac_results/speed_oval7_2026-11-18/flight_realtime_vio.gif`. Logs in `.../vio/`.
+GIF: `../../graphics/gifs/2026-11-18_speed-oval7_swift-vio-vs-no-filter_v12a12-v14a14.gif`. Logs in `.../vio/`.
 Videos (Downloads): `isaac_mpc_rate_swiftvio_v{12a12,14a14}_speed_oval7_s2.webm`,
 `isaac_mpc_rate_nofilter_v12a12_speed_oval7_s2.webm`.
 
@@ -115,7 +115,7 @@ Live in Isaac, 12/12, 1.5 m gates:
   once landed **upside down**; PX4 then refuses to arm ("Attitude failure (roll)"). Check the true tilt
   before starting PX4; respawn if needed.
 
-GIF: `Trajectory/isaac_results/speed_oval7_2026-11-18/laps3/flight_realtime.gif`. Logs: `.../laps3/`.
+GIF: `../../graphics/gifs/2026-11-18_speed-oval7_3-laps_swift-vio-vs-gps_v12a12.gif`. Logs: `.../laps3/`.
 Videos (Downloads): `isaac_mpc_rate_v12a12_speed_oval7_3laps.webm`,
 `isaac_mpc_rate_swiftvio_v12a12_speed_oval7_3laps_s2.webm`.
 

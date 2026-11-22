@@ -52,7 +52,7 @@ where no gate is in view and the drift estimate coasts).
 - Live estimate error (0.11–0.18 m mean) is larger than offline (0.03–0.05 m): the real images, PnP
   bias, the pose/clock pairing in the node, and the braking after the lap (no gates in view) count here.
 
-GIF: `Trajectory/isaac_results/swift_vio_2026-11-17/flight_realtime.gif` (Swift seeds 2 and 1, no filter
+GIF: `../../graphics/gifs/2026-11-18_slalom3-pink_swift-vio-vs-no-filter_v8a10.gif` (Swift seeds 2 and 1, no filter
 seed 2). Logs (runner `log.csv` / `summary.json`, `vio/swift_vio_log.csv`, `vio/swift_vio_events.csv`) in
 the same folder. Videos (chase camera, Downloads): `isaac_mpc_rate_swiftvio_v8a10_*` and
 `isaac_mpc_rate_nofilter_v8a10_*`.

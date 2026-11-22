@@ -24,3 +24,17 @@ vision/calib/hires_front_frames/
 vision/yolo_gate/datasets/
 vision/yolo_gate/runs/
 vision/yolo_gate/*.pt
+
+# Isaac Sim screen recordings (graphics/videos/*.webm, ~1.3 GB, some > 100 MB) stay local: see graphics/README.md.
+graphics/videos/*.webm
+# Explainer videos and the gate-CNN stage-4 videos (~63 MB) stay local too.
+graphics/videos/explainer_*.mp4
+graphics/videos/*_gate-cnn_detections-on-stage4-flight*.mp4
+# Poster images stay local, except the control-system block diagram.
+graphics/images/poster_*
+!graphics/images/poster_big1-control-block-diagram.png
+# Diagram SVG sources, the near-empty Isaac camera test frame and the gate-CNN check images stay local too.
+graphics/images/diagram_*.svg
+graphics/images/isaac_starling2max-c29-model_drone-camera-view.png
+graphics/images/*_gate-cnn_contact-sheet.png
+graphics/images/*_gate-cnn_no-crop-check.png

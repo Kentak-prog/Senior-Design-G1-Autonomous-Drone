@@ -193,7 +193,7 @@ axis at the rotor prim's position (S8).
 
 ### 4.4 Measuring $k_f$ from hover (S7b)
 
-![Hover flight identification: timeline, thrust fit, per-rotor speeds, thrust curve, motor lag](../flight_logs/2026-11-03/hover_identification.png)
+![Hover flight identification: timeline, thrust fit, per-rotor speeds, thrust curve, motor lag](../graphics/images/2026-11-05_real-starling_hover-thrust-identification.png)
 
 *Figure: the two hover flights and what was identified from them. Made with
 `flight_logs/2026-11-03/plot_hover_identification.py`.*

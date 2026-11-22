@@ -57,7 +57,7 @@ Run from `Senior-Design-G1-Autonomous-Drone/Trajectory`.
 
 | Script | |
 |---|---|
-| `plot_3_gates.py` | redraws `python_sim/min_snap_plan.png` and `mpc_course.png` from the cached flight. `--mpc` re-flies the NMPC (~4 min). |
+| `plot_3_gates.py` | redraws `../../../graphics/images/2026-10-23_3gate_min-snap-plan.png` and `mpc_course.png` from the cached flight. `--mpc` re-flies the NMPC (~4 min). |
 | `plot_px4_flight.py [run folder]` | draws `px4_flight.png` for a PX4 run. Defaults to the successful run. |
 | `record_novnc.js` | paste into the browser console on the noVNC page: `startRec()`, then `stopAndSave("name.webm")` |
 

@@ -20,7 +20,7 @@ control and passed all three gates. Recording:
 - **Controller:** PX4's own position controller tracks the min-snap reference.
   The repo NMPC is **not** in the loop yet; that's stage 2.
 
-Plot: `3_gates/px4_flights/20261023_152804_all_gates_passed/px4_flight.png`.
+Plot: `../../graphics/images/2026-10-23_3gate_first-px4-flight_all-gates-passed.png`.
 
 ## Where everything is
 
