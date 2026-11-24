@@ -87,8 +87,10 @@ def main():
             dp("use_camera", True)
             dp("yaw_mode", "velocity")      # next_gate: look at the next gate (needed when the VIO flies)
             dp("gate_side", DEFAULT_GATE_SIDE)
-            dp("max_gate_range_m", 0.0)     # ignore camera gate poses farther than this (0 = no limit);
-                                            # 9.0 for the Starling's wide C29 camera (replan_session.py)
+            dp("max_gate_range_m", 4.5)     # ignore camera gate poses farther than this (0 = no limit).
+                                            # Replanning needs the gate's orientation, i.e. its corners:
+                                            # on the drone (2026-11-23) found to 4 m, none at 5 m
+                                            # (vision/live_runs/ONBOARD_HYBRID_RANGE_TEST_2026-11-23.md)
             dp("map_new_gates", True)       # false: the camera only corrects the prior's gates, never
                                             # adds one (a known course; gate_map.GateMap allow_new_gates)
             dp("log_dir", "")

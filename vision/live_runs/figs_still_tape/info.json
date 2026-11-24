@@ -1,0 +1,39 @@
+{
+  "runs": [
+    {
+      "run": "onboard_hybrid_1m",
+      "taped_m": 1.0,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_2m",
+      "taped_m": 2.0,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_3m",
+      "taped_m": 3.0,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_02",
+      "taped_m": 3.5,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_4m",
+      "taped_m": 4.0,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_5m",
+      "taped_m": 5.0,
+      "kind": "range"
+    },
+    {
+      "run": "onboard_hybrid_fixed_0deg",
+      "taped_m": 2.54,
+      "kind": "horizontal"
+    }
+  ]
+}

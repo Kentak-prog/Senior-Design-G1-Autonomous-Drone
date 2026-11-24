@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path[:0] = [HERE, os.path.join(REPO, "Trajectory"), os.path.join(REPO, "vision")]
 
-from vio import GateVIO, camera_mount_usd, rot_rpy, rpy_from_rot, FRD_FROM_FLU, _T, _inv   # noqa: E402
+from vio import GateVIO as _GateVIO, camera_mount_usd, rot_rpy, rpy_from_rot, FRD_FROM_FLU, _T, _inv   # noqa: E402
 from gate_pose import GateDetection                                                       # noqa: E402
 from gate_path import Gate, gate_crossings                                                # noqa: E402
 from eval_isaac_gates import T_world_gate_from_spec, T_body_cam_usd_from_mount           # noqa: E402
@@ -26,6 +26,13 @@ GATES = [Gate(f"gate_{i}", T_world_gate_from_spec(*g)) for i, g in enumerate(GAT
 START = np.array([-0.04, 0.0, 2.56])
 START_YAW = math.radians(-7.1)
 MOUNT0 = camera_mount_usd(0.0)
+# This is the Isaac 3-gate course (1.5 m gates, gate_0 ~5 m and gate_2 ~13 m from START), so it keeps
+# the sim's ranges; GateVIO's defaults are now the real 0.86 m gates' (4-5 m).
+SIM_RANGES = dict(max_range=15.0, relock_max_range=10.0, pos_only_max_range=8.0)
+
+
+def GateVIO(*args, **kw):
+    return _GateVIO(*args, **{**SIM_RANGES, **kw})
 
 
 def _det(T_world_body, gate, mount=MOUNT0, center_std=0.03, normal_std=2.0):

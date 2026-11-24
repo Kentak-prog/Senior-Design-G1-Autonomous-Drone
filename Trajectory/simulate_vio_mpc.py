@@ -125,7 +125,9 @@ def run(args):
     vio = GateVIO(gates, mount, imu_rate=args.imu_rate,
                   initial_guess=(start + rng.normal(0, args.guess_error, 3), start_yaw),
                   delay_compensation=not args.no_delay_compensation,
-                  attitude_updates=args.attitude_updates, tilt_init=args.tilt_init, init_fixes=args.init_fixes)
+                  attitude_updates=args.attitude_updates, tilt_init=args.tilt_init, init_fixes=args.init_fixes,
+                  # sim courses' 1.5 m gates: the ranges GateVIO had before its real-gate defaults
+                  max_range=args.max_range, relock_max_range=10.0, pos_only_max_range=8.0)
     camera = SimCamera(gates, args.corner_noise_px, args.range_bias, args.max_range, rng, mount,
                        resolution=tuple(int(v) for v in args.camera_resolution.lower().split("x")),
                        hfov_deg=args.camera_hfov)

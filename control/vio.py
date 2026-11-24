@@ -112,16 +112,20 @@ def camera_mount_usd(pitch_deg=15.0, translation=(0.30, 0.0, 0.05)):
 
 class GateVIO:
     def __init__(self, gates, T_body_cam_usd, imu_rate=250.0, accel_noise=0.07, gyro_noise=0.006,
-                 calib_s=2.0, history_s=1.5, max_range=15.0, min_pos_std=0.05, min_ang_std_deg=1.0,
+                 calib_s=2.0, history_s=1.5, max_range=5.0, min_pos_std=0.05, min_ang_std_deg=1.0,
                  assoc_tol=1.0, chi2_full=22.5, chi2_pos=16.3, initial_guess=None, delay_compensation=True,
-                 accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=10.0,
-                 pos_only_max_range=8.0, relock_blind_s=1.0, attitude_updates="full", tilt_init="pnp",
+                 accel_rw=0.1, relock_n=5, relock_window_s=0.5, relock_spread_m=0.3, relock_max_range=4.0,
+                 pos_only_max_range=5.0, relock_blind_s=1.0, attitude_updates="full", tilt_init="pnp",
                  init_fixes=1, chi2_pos_yaw=18.5, calib_still=False, calib_rate_agree_deg_s=0.15,
                  calib_max_rate_deg_s=1.5, calib_acc_agree=0.1, calib_g_tol=0.15, tilt_tau_s=None):
         """
         gates:          map gates (gate_path.Gate, world ENU), e.g. gates_from_manifest(test_gates.json)
         T_body_cam_usd: static camera mount, body FLU -> camera USD (eval_isaac_gates.T_body_cam_usd_from_mount)
         initial_guess:  (pos ENU, yaw) used ONLY to match the first detections to map gates
+        max_range, pos_only_max_range, relock_max_range: defaults from the real 0.86 m gates on the
+                        drone (vision/live_runs/ONBOARD_HYBRID_RANGE_TEST_2026-11-23.md): corner fixes
+                        within ~5 cm out to 4 m, none found at 5 m; box-only range within 1-3 % to 5 m.
+                        Sim courses with larger gates can pass longer ranges.
         chi2_full/pos:  innovation gates (99.9 % for 6 / 3 degrees of freedom)
         accel_rw:       unmodelled acceleration, m/s^2 per sqrt(s) (Kalman_Filter_MPC). In Isaac
                         (2026-11-06) with white accel noise only, the reported std was 3.5x too small

@@ -1,0 +1,203 @@
+{
+  "euler": "xyz",
+  "latency_s": 0.45,
+  "median_scatter_to_nearest_gate_m": 0.05197409907241671,
+  "gate_windows_s": {
+    "gate_A": [
+      2.2200000286102295,
+      295.12199997901917
+    ],
+    "gate_B": [
+      207.81500005722046,
+      283.2149999141693
+    ]
+  },
+  "gates": {
+    "gate_A": [
+      1.9034259103166018,
+      0.05991515049094481,
+      -0.8047913595520209
+    ],
+    "gate_B": [
+      2.804458911213635,
+      -1.4855688713777555,
+      -0.7525228582800549
+    ]
+  },
+  "detections": 960,
+  "unmatched_detections": 17,
+  "clock_offset_s": 1793742420.8196192,
+  "n_vio": 9802,
+  "sync_search": [
+    {
+      "euler": "zyx",
+      "latency_s": 0.0,
+      "scatter_m": 0.0584
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.05,
+      "scatter_m": 0.0551
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.1,
+      "scatter_m": 0.0533
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.15,
+      "scatter_m": 0.0536
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.2,
+      "scatter_m": 0.0533
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.25,
+      "scatter_m": 0.0524
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.3,
+      "scatter_m": 0.0525
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.35,
+      "scatter_m": 0.0531
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.4,
+      "scatter_m": 0.0528
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.45,
+      "scatter_m": 0.0525
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.5,
+      "scatter_m": 0.0522
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.55,
+      "scatter_m": 0.0527
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.6,
+      "scatter_m": 0.0534
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.65,
+      "scatter_m": 0.0539
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.7,
+      "scatter_m": 0.0554
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.75,
+      "scatter_m": 0.0571
+    },
+    {
+      "euler": "zyx",
+      "latency_s": 0.8,
+      "scatter_m": 0.0585
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.0,
+      "scatter_m": 0.0579
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.05,
+      "scatter_m": 0.0565
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.1,
+      "scatter_m": 0.0551
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.15,
+      "scatter_m": 0.0533
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.2,
+      "scatter_m": 0.0528
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.25,
+      "scatter_m": 0.0523
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.3,
+      "scatter_m": 0.0525
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.35,
+      "scatter_m": 0.0524
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.4,
+      "scatter_m": 0.0523
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.45,
+      "scatter_m": 0.052
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.5,
+      "scatter_m": 0.0526
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.55,
+      "scatter_m": 0.0535
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.6,
+      "scatter_m": 0.0538
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.65,
+      "scatter_m": 0.0545
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.7,
+      "scatter_m": 0.0561
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.75,
+      "scatter_m": 0.0588
+    },
+    {
+      "euler": "xyz",
+      "latency_s": 0.8,
+      "scatter_m": 0.0571
+    }
+  ]
+}

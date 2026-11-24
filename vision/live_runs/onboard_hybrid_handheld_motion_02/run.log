@@ -1,0 +1,80 @@
+nohup: ignoring input
+INFO: Created TensorFlow Lite delegate for GPU.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Initialized OpenCL-based API.
+INFO: Created 1 GPU delegate kernels.
+[feed] http://localhost/video_raw/hires_front_small_color  1024x768
+[calib] vision/calib/hires_front_1024x768.yml fisheye=True fx=505.4 D=[-0.0171, -0.0092, 0.0052, -0.0001]
+[cnn] vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite: TFLite GPU (OpenCL, fp16), whole graph on the GPU, input (1, 480, 640, 3), output (1, 5, 6300) (box model, no Ultralytics; --imgsz ignored)
+[run] 30 frames  6.3 fps  with-gate 30  nearest 2.56 m
+[run] 60 frames  6.3 fps  with-gate 60  nearest 2.55 m
+[run] 90 frames  8.1 fps  with-gate 90  nearest 2.53 m
+[run] 120 frames  5.7 fps  with-gate 120  nearest 0.99 m
+[run] 150 frames  9.8 fps  with-gate 123
+[run] 180 frames  9.0 fps  with-gate 136  nearest 1.45 m
+[run] 210 frames  10.1 fps  with-gate 150
+[run] 240 frames  6.0 fps  with-gate 166  nearest 1.77 m
+[run] 270 frames  6.4 fps  with-gate 196  nearest 1.96 m
+[run] 300 frames  5.6 fps  with-gate 226  nearest 1.78 m
+[run] 330 frames  6.5 fps  with-gate 256  nearest 1.36 m
+[run] 360 frames  9.4 fps  with-gate 261
+[run] 390 frames  7.3 fps  with-gate 285  nearest 1.84 m
+[run] 420 frames  6.5 fps  with-gate 310
+[run] 450 frames  11.3 fps  with-gate 310
+[run] 480 frames  6.4 fps  with-gate 330  nearest 2.09 m
+[run] 510 frames  6.8 fps  with-gate 360  nearest 1.95 m
+[run] 540 frames  8.2 fps  with-gate 386  nearest 0.73 m
+[run] 570 frames  11.3 fps  with-gate 389
+[run] 600 frames  9.7 fps  with-gate 389
+[run] 630 frames  7.0 fps  with-gate 395  nearest 0.66 m
+[run] 660 frames  8.8 fps  with-gate 397  nearest 0.66 m
+[run] 690 frames  8.7 fps  with-gate 398
+[run] 720 frames  10.1 fps  with-gate 398
+[run] 750 frames  8.0 fps  with-gate 410
+[run] 780 frames  11.4 fps  with-gate 411
+[run] 810 frames  11.5 fps  with-gate 411
+[run] 840 frames  10.5 fps  with-gate 411
+[run] 870 frames  9.7 fps  with-gate 411
+[run] 900 frames  8.8 fps  with-gate 426
+[run] 930 frames  13.3 fps  with-gate 426
+[run] 960 frames  10.8 fps  with-gate 426
+[run] 990 frames  10.9 fps  with-gate 426
+[run] 1020 frames  8.6 fps  with-gate 435
+[run] 1050 frames  9.2 fps  with-gate 445
+[run] 1080 frames  12.6 fps  with-gate 450
+[run] 1110 frames  9.4 fps  with-gate 456
+[run] 1140 frames  11.5 fps  with-gate 456
+[run] 1170 frames  10.2 fps  with-gate 456
+[run] 1200 frames  12.9 fps  with-gate 456
+[run] 1230 frames  9.8 fps  with-gate 456
+[run] 1260 frames  10.1 fps  with-gate 458  nearest 1.16 m
+[run] 1290 frames  10.2 fps  with-gate 483
+[run] 1320 frames  10.1 fps  with-gate 487
+[run] 1350 frames  9.1 fps  with-gate 496  nearest 1.49 m
+[run] 1380 frames  9.3 fps  with-gate 502  nearest 0.99 m
+[run] 1410 frames  9.7 fps  with-gate 531  nearest 1.49 m
+[run] 1440 frames  8.7 fps  with-gate 558  nearest 1.64 m
+[run] 1470 frames  7.0 fps  with-gate 588  nearest 1.50 m
+[run] 1500 frames  12.1 fps  with-gate 596
+[run] 1530 frames  11.3 fps  with-gate 596
+[run] 1560 frames  12.3 fps  with-gate 596
+[run] 1590 frames  14.5 fps  with-gate 596
+[run] 1620 frames  9.8 fps  with-gate 596
+[run] 1650 frames  14.7 fps  with-gate 596
+[run] 1680 frames  11.6 fps  with-gate 597  nearest 0.85 m
+[run] 1710 frames  13.7 fps  with-gate 612
+[run] 1740 frames  21.0 fps  with-gate 612
+[run] 1770 frames  10.2 fps  with-gate 613  nearest 0.84 m
+[run] 1800 frames  12.5 fps  with-gate 615
+[run] 1830 frames  12.6 fps  with-gate 615
+[run] 1860 frames  11.0 fps  with-gate 617
+[run] 1890 frames  12.7 fps  with-gate 617
+[run] 1920 frames  9.4 fps  with-gate 623
+[run] 1950 frames  10.2 fps  with-gate 627
+[run] 1980 frames  15.4 fps  with-gate 635
+[run] 2010 frames  15.6 fps  with-gate 635
+[run] 2040 frames  12.4 fps  with-gate 638
+[run] 2070 frames  11.2 fps  with-gate 638
+[run] 2100 frames  14.9 fps  with-gate 638
+[done] 2127 frames @ 7.1 fps, 638 with a gate -> vision/live_runs/onboard_hybrid_handheld_motion_01/overlay.mp4

@@ -86,7 +86,8 @@ def main():
             dp("calib_s", 2.0)
             dp("corner_sigma_px", 1.0)
             dp("bootstrap_n", 8)
-            dp("max_range", 15.0)
+            dp("max_range", 5.0)                  # real 0.86 m gates: corners to ~4.5 m, box-only to 5 m
+                                                  # (vision/live_runs/ONBOARD_HYBRID_RANGE_TEST_2026-11-23.md)
             dp("delay_compensation", True)
             dp("publish_every", 2)                # publish odometry every N IMU samples (250 Hz / 2)
             # gate color, OpenCV HSV (H 0-179). Default = color_gate_detector's magenta (spawn_test_gates).

@@ -1,0 +1,16 @@
+{
+	"log_format_version":	1,
+	"note":	"na",
+	"n_channels":	1,
+	"start_time_monotonic_ns":	2103180747790,
+	"start_time_date":	"2026-11-03 22:22:04",
+	"duration_s":	330.132589822,
+	"channels":	[{
+			"channel":	0,
+			"n_samples":	9802,
+			"n_to_skip":	0,
+			"type":	3,
+			"type_string":	"vio",
+			"pipe_path":	"/run/mpa/qvio/"
+		}]
+}

@@ -1,0 +1,66 @@
+INFO: Created TensorFlow Lite delegate for GPU.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Initialized OpenCL-based API.
+INFO: Created 1 GPU delegate kernels.
+[feed] http://localhost/video_raw/hires_front_small_color  1024x768
+[calib] vision/calib/hires_front_1024x768.yml fisheye=True fx=505.4 D=[-0.0171, -0.0092, 0.0052, -0.0001]
+[cnn] vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite: TFLite GPU (OpenCL, fp16), whole graph on the GPU, input (1, 480, 640, 3), output (1, 5, 6300) (box model, no Ultralytics; --imgsz ignored)
+[serve] live overlay on port 8091: http://<drone-ip>:8091/
+[run] 30 frames  8.0 fps  with-gate 0
+[run] 60 frames  10.0 fps  with-gate 14  nearest 1.81 m
+[run] 90 frames  7.0 fps  with-gate 44  nearest 1.79 m
+[run] 120 frames  7.1 fps  with-gate 69
+[run] 150 frames  10.4 fps  with-gate 70
+[run] 180 frames  11.2 fps  with-gate 70
+[run] 210 frames  11.5 fps  with-gate 70
+[run] 240 frames  10.1 fps  with-gate 70
+[run] 270 frames  9.3 fps  with-gate 70
+[run] 300 frames  9.4 fps  with-gate 70
+[run] 330 frames  6.0 fps  with-gate 90  nearest 2.81 m
+[run] 360 frames  7.0 fps  with-gate 120  nearest 2.82 m
+[run] 390 frames  9.8 fps  with-gate 148  nearest 2.78 m
+[run] 420 frames  6.0 fps  with-gate 178  nearest 2.84 m
+[run] 450 frames  5.5 fps  with-gate 208  nearest 2.82 m
+[run] 480 frames  5.3 fps  with-gate 238  nearest 2.82 m
+[run] 510 frames  7.0 fps  with-gate 268  nearest 2.83 m
+[run] 540 frames  5.5 fps  with-gate 298  nearest 2.83 m
+[run] 570 frames  7.8 fps  with-gate 327  nearest 2.84 m
+[run] 600 frames  5.9 fps  with-gate 357  nearest 2.84 m
+[run] 630 frames  9.0 fps  with-gate 387  nearest 2.83 m
+[run] 660 frames  7.0 fps  with-gate 414
+[run] 690 frames  8.4 fps  with-gate 430
+[run] 720 frames  7.2 fps  with-gate 443  nearest 2.81 m
+[run] 750 frames  6.4 fps  with-gate 468  nearest 2.45 m
+[run] 780 frames  5.3 fps  with-gate 498  nearest 2.43 m
+[run] 810 frames  6.7 fps  with-gate 528  nearest 2.02 m
+[run] 840 frames  6.3 fps  with-gate 558  nearest 2.17 m
+[run] 870 frames  8.6 fps  with-gate 574
+[run] 900 frames  9.0 fps  with-gate 574
+[run] 930 frames  8.5 fps  with-gate 576
+[run] 960 frames  7.8 fps  with-gate 576
+[run] 990 frames  7.8 fps  with-gate 582
+[run] 1020 frames  8.3 fps  with-gate 607
+[run] 1050 frames  8.7 fps  with-gate 607
+[run] 1080 frames  7.8 fps  with-gate 611  nearest 1.17 m
+[run] 1110 frames  5.4 fps  with-gate 640  nearest 1.49 m
+[run] 1140 frames  6.2 fps  with-gate 667  nearest 1.49 m
+[run] 1170 frames  7.0 fps  with-gate 688
+[run] 1200 frames  7.9 fps  with-gate 688
+[run] 1230 frames  13.7 fps  with-gate 689
+[run] 1260 frames  10.2 fps  with-gate 705
+[run] 1290 frames  9.4 fps  with-gate 705
+[run] 1320 frames  6.7 fps  with-gate 728  nearest 1.70 m
+[run] 1350 frames  7.8 fps  with-gate 747
+[run] 1380 frames  10.1 fps  with-gate 751
+[run] 1410 frames  9.2 fps  with-gate 751
+[run] 1440 frames  8.0 fps  with-gate 753
+[run] 1470 frames  9.6 fps  with-gate 762
+[run] 1500 frames  7.4 fps  with-gate 770  nearest 1.43 m
+[run] 1530 frames  5.8 fps  with-gate 800  nearest 1.76 m
+[run] 1560 frames  9.3 fps  with-gate 823
+[run] 1590 frames  6.9 fps  with-gate 847  nearest 0.90 m
+[run] 1620 frames  11.7 fps  with-gate 849
+[run] 1650 frames  8.8 fps  with-gate 853
+[run] 1680 frames  9.9 fps  with-gate 863  nearest 0.70 m
+[done] 1681 frames @ 5.6 fps, 864 with a gate -> vision/live_runs/onboard_hybrid_handheld_motion_03/overlay.mp4

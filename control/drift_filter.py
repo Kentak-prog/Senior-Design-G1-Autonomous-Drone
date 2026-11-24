@@ -86,7 +86,7 @@ class DriftFilter:
     """
 
     def __init__(self, gates, T_body_cam_usd, q_v=0.15, p0_std=0.5, v0_std=0.1, history_s=1.5,
-                 max_range=9.0, min_pos_std=0.05, assoc_tol=1.0, chi2=16.3, att_std_deg=1.0):
+                 max_range=5.0, min_pos_std=0.05, assoc_tol=1.0, chi2=16.3, att_std_deg=1.0):
         self.gates = list(gates)
         T = np.asarray(T_body_cam_usd, dtype=float).copy()
         T[:3, :3] = T[:3, :3] @ R_CV_FROM_USD.T

@@ -97,7 +97,9 @@ def main():
             # Gate fixes from at most this far. A 0.864 m pink gate at 8-9 m is ~50 px wide and one pixel of
             # corner error is ~0.15 m in depth; the base VIO drifts slowly, so fewer, closer fixes are better
             # (9 m: 0.1-0.2 m cross-track error on the circle's turns, gate 1 hit at 5/7, 2026-11-18).
-            dp("max_range", 6.0)
+            # On the drone (2026-11-23): real gate's corners found to 4 m, none at 5 m; box-only range
+            # within 1-3 % to 5 m (vision/live_runs/ONBOARD_HYBRID_RANGE_TEST_2026-11-23.md).
+            dp("max_range", 5.0)
             dp("image_delay_s", 0.017)
             dp("log_dir", "")
             gp = lambda n: self.get_parameter(n).value   # noqa: E731

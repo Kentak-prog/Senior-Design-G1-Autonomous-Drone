@@ -19,6 +19,8 @@ overlay video + per-frame CSV.
         --model vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite --delegate gpu \
         --url http://localhost/video_raw/hires_front_small_color --gate-side 0.8636 \
         --calib vision/calib/hires_front_1024x768.yml --duration 120 --out-dir vision/live_runs/onboard_hybrid_01
+    # add --serve-port 8091 to watch the overlay live: http://<drone-ip>:8091/ (e.g. http://192.168.8.1:8091/
+    # on the drone's softAP Wi-Fi); /stream is the MJPEG, /snapshot.jpg one frame
 
 (Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas. Only a .pt needs it;
 an .onnx / .tflite runs through yolo_gate/bench_yolo.py's backends, and stops at the first frame if
@@ -75,6 +77,80 @@ from gate_pose import estimate_gate_pose, project_gate, order_corners  # noqa: E
 
 
 # --------------------------------------------------------------------------- feed
+
+class OverlayServer:
+    """Serves the newest annotated frame over HTTP (--serve-port), for watching the detector live
+    from a browser on the drone's network: http://<drone-ip>:<port>/ (page), /stream (MJPEG),
+    /snapshot.jpg. The drone container runs with --network host, so the port is the drone's.
+    Each viewer gets only the newest frame (a slow viewer skips frames, never slows the test)."""
+
+    PAGE = (b"<!doctype html><html><head><title>gate test overlay</title>"
+            b"<style>body{margin:0;background:#111;color:#ccc;font:14px sans-serif}"
+            b"img{display:block;max-width:100vw;max-height:100vh;margin:auto}</style></head>"
+            b"<body><img src='/stream' alt='overlay'></body></html>")
+
+    def __init__(self, port, host="0.0.0.0"):
+        import http.server
+        self._jpg, self._seq = None, 0
+        self._cond = threading.Condition()
+        srv = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                if self.path in ("/", "/index.html"):
+                    self._send(200, "text/html", srv.PAGE)
+                elif self.path.startswith("/snapshot"):
+                    jpg = srv.wait_frame(0, 5.0)[1]
+                    if jpg is None:
+                        self._send(503, "text/plain", b"no frame yet")
+                    else:
+                        self._send(200, "image/jpeg", jpg)
+                elif self.path.startswith("/stream"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    seq = 0
+                    try:
+                        while True:
+                            seq, jpg = srv.wait_frame(seq, 5.0)
+                            if jpg is None:
+                                continue
+                            self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                             + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n")
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                        pass                       # viewer closed the page
+                else:
+                    self._send(404, "text/plain", b"not found")
+
+            def _send(self, code, ctype, body):
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.httpd = http.server.ThreadingHTTPServer((host, port), Handler)
+        self.httpd.daemon_threads = True
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def publish(self, jpg_bytes):
+        with self._cond:
+            self._jpg, self._seq = bytes(jpg_bytes), self._seq + 1
+            self._cond.notify_all()
+
+    def wait_frame(self, after_seq, timeout):
+        """(seq, jpg) of a frame newer than after_seq; (after_seq, None) on timeout."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._seq > after_seq, timeout)
+            return (self._seq, self._jpg) if self._seq > after_seq else (after_seq, None)
+
+    def stop(self):
+        self.httpd.shutdown()
+
 
 class MjpegReader:
     """Background thread keeping only the newest decoded BGR frame."""
@@ -504,6 +580,9 @@ def main(argv=None):
     ap.add_argument("--duration", type=float, default=60.0, help="seconds; 0 = until Ctrl-C")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--show", action="store_true", help="also open a live preview window")
+    ap.add_argument("--serve-port", type=int, default=0,
+                    help="also serve the live overlay over HTTP on this port (0 = off): open "
+                         "http://<drone-ip>:<port>/ in a browser on the drone's network")
     ap.add_argument("--dry-run", action="store_true", help="no detector: test feed + video only")
     a = ap.parse_args(argv)
 
@@ -565,6 +644,11 @@ def main(argv=None):
     wr.writerow(["frame", "t_wall", "det_idx", "src", "score", "range_m", "x_m", "y_m", "z_m",
                  "nx", "ny", "nz", "reproj_px", "c0x", "c0y", "c1x", "c1y", "c2x", "c2y", "c3x", "c3y"])
 
+    server = None
+    if a.serve_port:
+        server = OverlayServer(a.serve_port)
+        print(f"[serve] live overlay on port {a.serve_port}: http://<drone-ip>:{a.serve_port}/", flush=True)
+
     t0, n, last_t, fps, n_det = time.time(), 0, None, 0.0, 0
     try:
         while a.duration <= 0 or time.time() - t0 < a.duration:
@@ -600,6 +684,8 @@ def main(argv=None):
             last_t = tf
             out = draw(frame, dets, lens, a.gate_side, fps, not lens.calibrated, label)
             frames.append((tf, cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 90])[1]))
+            if server:
+                server.publish(frames[-1][1])
             cv2.imwrite(os.path.join(raw_dir, f"{n:05d}.jpg"), raw)   # every frame: re-run offline
             if a.show:
                 cv2.imshow("gate test", out)
@@ -614,6 +700,8 @@ def main(argv=None):
         pass
     finally:
         reader.stop()
+        if server:
+            server.stop()
         csv_f.close()
         if frames:
             span = frames[-1][0] - frames[0][0]
