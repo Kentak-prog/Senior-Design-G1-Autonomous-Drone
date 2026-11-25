@@ -480,6 +480,108 @@ def test_plan_only_needs_no_px4():
     print("  --plan-only writes the plan without pymavlink  OK")
 
 
+# --------------------------------------------------------------------------
+# Real drone, one gate (--gate-ahead, --camera-url, --finish-dist)
+# --------------------------------------------------------------------------
+
+LAB_START = np.array([0.4, -0.2, 1.5])     # hovering on the taped spot, VIO-local ENU
+LAB_HEADING_DEG = 25.0
+SINGLE = ("--yes", "--gate-ahead", "3.0", "--v-max", "1", "--a-max", "1", "--finish-dist", "2",
+          "--max-error", "0.5")
+
+
+def test_gate_ahead_geometry():
+    g = fms.gate_ahead(LAB_START, math.radians(LAB_HEADING_DEG), 3.0, dz=0.2)
+    h = math.radians(LAB_HEADING_DEG)
+    assert np.allclose([g["x"], g["y"], g["z"]], LAB_START + [3 * math.cos(h), 3 * math.sin(h), 0.2])
+    assert abs(g["yaw_deg"] - LAB_HEADING_DEG) < 1e-9 and abs(g["side"] - 0.8636) < 1e-9
+    # its normal (flight direction) points along the heading: the manifest convention
+    from eval_isaac_gates import T_world_gate_from_spec      # on sys.path via fms
+    T = T_world_gate_from_spec(g["x"], g["y"], g["z"], g["yaw_deg"])
+    assert np.allclose(T[:3, 2], [math.cos(h), math.sin(h), 0.0], atol=1e-9)
+    print("  --gate-ahead: 3 m along the heading, facing along it  OK")
+
+
+def test_single_gate_flight_against_fake_px4():
+    fake = FakePX4(start_enu=LAB_START, heading_enu_deg=LAB_HEADING_DEG)
+    (rc, out), log = _quiet(_fly, fake, extra=SINGLE)
+    summary = json.load(open(os.path.join(out, "summary.json")))
+    manifest = json.load(open(os.path.join(out, "test_gates.json")))
+    assert rc == 0, log[-2000:]
+    assert len(manifest["gates"]) == 1 and summary["gates_passed"], summary["crossings"]
+    assert summary["plan_peak_speed"] <= 1.0 + 1e-3 and summary["plan_peak_accel"] <= 1.0 + 1e-3
+    assert summary["err_max_m"] < 0.5 and fake.loiter_commands >= 1
+    # the plan ends 2 m past the gate (--finish-dist), not the default 4
+    h = math.radians(LAB_HEADING_DEG)
+    end = fms.ned_to_enu(fake.pos)
+    past = float((end - LAB_START) @ np.array([math.cos(h), math.sin(h), 0.0])) - 3.0
+    assert 1.5 < past < 2.5, past
+    print(f"  one gate 3 m ahead at 1 m/s: passed, peak {summary['plan_peak_speed']:.2f} m/s, "
+          f"stops {past:.2f} m past the gate, then AUTO.LOITER  OK")
+
+
+def _cam(age=0.2, dets=None):
+    return {"age_s": age, "frame": 10, "detections": dets if dets is not None else
+            [{"src": "yolo+color", "range_m": 2.94, "x_m": 0.03, "y_m": -0.05, "z_m": 2.93}]}
+
+
+def test_camera_check():
+    ok, msg = fms.camera_check(_cam(), 3.0, 0.0, 0.15)
+    assert ok, msg
+    assert not fms.camera_check(_cam(age=5.0), 3.0, 0.0, 0.15)[0]                  # stale
+    assert not fms.camera_check(_cam(age=None), 3.0, 0.0, 0.15)[0]                 # no frame yet
+    assert not fms.camera_check(_cam(dets=[{"src": "bbox", "range_m": 2.9, "x_m": 0.0, "y_m": 0.0,
+                                            "z_m": 2.93}]), 3.0, 0.0, 0.15)[0]       # box only: no
+    assert not fms.camera_check(_cam(dets=[{"src": "yolo+color", "range_m": 2.6, "x_m": 0.0, "y_m": 0.0,
+                                            "z_m": 2.6}]), 3.0, 0.0, 0.15)[0]        # 0.33 m short
+    assert not fms.camera_check(_cam(dets=[{"src": "yolo+color", "range_m": 2.95, "x_m": 0.4, "y_m": 0.0,
+                                            "z_m": 2.93}]), 3.0, 0.0, 0.15)[0]       # 0.4 m to the side
+    assert fms.camera_check(_cam(dets=[{"src": "yolo+color", "range_m": 2.95, "x_m": 0.0, "y_m": -0.3,
+                                        "z_m": 2.93}]), 3.0, 0.3, 0.15)[0]           # --gate-dz 0.3: up
+    print("  camera check: passes a matching corner fix; refuses stale, box-only, short, sideways  OK")
+
+
+def test_camera_disagreeing_refuses_before_offboard():
+    fake = FakePX4(start_enu=LAB_START, heading_enu_deg=LAB_HEADING_DEG)
+    real = fms.fetch_camera_gate
+    try:
+        fms.fetch_camera_gate = lambda url, timeout=3.0: _cam(dets=[
+            {"src": "yolo+color", "range_m": 2.2, "x_m": 0.0, "y_m": 0.0, "z_m": 2.2}])
+        (rc, _), log = _quiet(_fly, fake, extra=(*SINGLE, "--camera-url", "http://x/latest.json"))
+        assert rc == 2 and "REFUSING" in log and fake.offboard_commands == 0 and not fake.sp_times
+
+        def boom(url, timeout=3.0):
+            raise OSError("connection refused")
+        fms.fetch_camera_gate = boom
+        fake = FakePX4(start_enu=LAB_START, heading_enu_deg=LAB_HEADING_DEG)
+        (rc, _), log = _quiet(_fly, fake, extra=(*SINGLE, "--camera-url", "http://x/latest.json"))
+        assert rc == 2 and "could not read" in log and fake.offboard_commands == 0
+
+        fms.fetch_camera_gate = lambda url, timeout=3.0: _cam()
+        fake = FakePX4(start_enu=LAB_START, heading_enu_deg=LAB_HEADING_DEG)
+        (rc, _), log = _quiet(_fly, fake, extra=(*SINGLE, "--camera-url", "http://x/latest.json"))
+        assert rc == 0 and "[camera]" in log
+    finally:
+        fms.fetch_camera_gate = real
+    print("  --camera-url: a disagreeing or unreachable camera refuses before OFFBOARD; a matching one flies  OK")
+
+
+def test_gate_ahead_refuses_reposition():
+    fake = FakePX4(start_enu=LAB_START, heading_enu_deg=LAB_HEADING_DEG)
+    (rc, _), log = _quiet(_fly, fake, extra=(*SINGLE, "--reposition"))
+    assert rc == 2 and "REFUSING" in log and fake.offboard_commands == 0
+    print("  --gate-ahead with --reposition refuses  OK")
+
+
+def test_gate_ahead_plan_only():
+    tmp = tempfile.mkdtemp()
+    args = _args(tmp, ["--plan-only", "--gate-ahead", "3", "--start", "0", "0", "1.5", "--heading", "0",
+                       "--v-max", "1", "--a-max", "1", "--finish-dist", "2"])
+    rc, _ = _quiet(fms.run, args)
+    assert rc == 0 and os.path.exists(os.path.join(args.out_dir, "plan_reference.csv"))
+    print("  --plan-only --gate-ahead writes the one-gate plan  OK")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:

@@ -50,6 +50,20 @@ clockwise). The two share an origin (measured 2026-10-01, see
 vision/gate_error_eval/fly_gate_approach.py), so positions convert with
 enu_to_ned / ned_to_enu and yaw with yaw_ned = pi/2 - yaw_enu.
 
+REAL DRONE, ONE GATE (--gate-ahead; added 2026-11-24, tested only against FakePX4, NOT flown yet):
+there is no gate manifest, so the gate is placed relative to where the drone hovers when the script
+starts: the pilot hovers on a taped spot M metres in front of the gate, facing it squarely, at the
+height of its center (--gate-dz if not). PX4's local frame comes from the VIO, so the plan is only
+as good as that hover. --camera-url makes the script refuse unless live_gate_test.py (running with
+--serve-port on the drone) sees the gate within --camera-tol of that spot. With a pilot on the RC:
+the mode switch or the sticks (COM_RC_OVERRIDE) take over at any time.
+    python3 px4/fly_min_snap_offboard.py --gate-ahead 3.0 --v-max 1 --a-max 1 --finish-dist 2 \
+        --max-error 0.5 --camera-url http://192.168.8.1:8091/latest.json \
+        --connection <the drone's MAVLink link> --out-dir px4_runs/single_gate_01
+    # the same plan without PX4, to check it first:
+    python3 px4/fly_min_snap_offboard.py --plan-only --gate-ahead 3.0 --start 0 0 1.5 --heading 0 \
+        --v-max 1 --a-max 1 --finish-dist 2 --out-dir px4_runs/single_gate_plan
+
 Examples (from the repo root, inside the pod):
     python3 px4/fly_min_snap_offboard.py --plan-only --start -0.05 -0.04 2.55 --heading -7.2
     python3 px4/fly_min_snap_offboard.py                      # plan from the live pose, confirm, fly
@@ -172,13 +186,61 @@ def straight_move(a_enu, b_enu, yaw_a: float, yaw_b: float, speed: float, t: flo
     return {"pos": a + frac * (b - a), "vel": vel, "yaw": yaw, "done": done, "duration": duration}
 
 
+def gate_ahead(start_enu, heading_enu: float, dist: float, dz: float = 0.0, side: float = 0.8636,
+               name: str = "gate_0") -> dict:
+    """One manifest gate spec `dist` m straight ahead of start_enu along heading_enu (ENU, rad),
+    `dz` m above it, facing along the heading (manifest yaw_deg 0 = flight direction world +X)."""
+    p = np.asarray(start_enu, dtype=float)
+    return {"name": name, "x": float(p[0] + dist * math.cos(heading_enu)),
+            "y": float(p[1] + dist * math.sin(heading_enu)), "z": float(p[2] + dz),
+            "yaw_deg": math.degrees(heading_enu), "side": float(side)}
+
+
+# hires_front lens ahead of the body origin (PX4's position): imu_apps 0.0303 m ahead of body,
+# hires_front 0.0408 m ahead of imu_apps (/etc/modalai/extrinsics.conf, Starling 2 Max C29).
+CAMERA_AHEAD_OF_BODY_M = 0.071
+
+
+def fetch_camera_gate(url: str, timeout: float = 3.0):
+    """Newest gate detections from live_gate_test.py --serve-port (/latest.json): a list of dicts
+    with src, range_m and x_m, y_m, z_m in the OpenCV camera frame (x right, y down, z forward)."""
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        data = json.loads(r.read().decode())
+    return data
+
+
+def camera_check(data, dist: float, dz: float, tol: float, max_age_s: float = 2.0):
+    """Compare the camera's newest gate estimate with the gate `dist` m ahead, `dz` m up.
+    Returns (ok, message). Uses corner fixes (yolo+color) only: box-only fixes assume a facing
+    gate and give no angle. Expected in the camera: x ~ 0, y ~ -dz (y is down), z ~ dist - lens offset.
+    The age comes from the server (age_s, the drone's own clock): the laptop's clock may differ."""
+    age = data.get("age_s")
+    if age is None or age > max_age_s:
+        return False, ("camera has no frame yet" if age is None else
+                       f"camera data is {age:.1f} s old (is live_gate_test.py still running?)")
+    dets = [d for d in data.get("detections", []) if d.get("src") == "yolo+color" and d.get("z_m") is not None]
+    if not dets:
+        return False, "the camera has no corner fix of a gate in its newest frame"
+    d = min(dets, key=lambda g: abs(g["z_m"] - dist))
+    exp = np.array([0.0, -dz, dist - CAMERA_AHEAD_OF_BODY_M])
+    got = np.array([d["x_m"], d["y_m"], d["z_m"]])
+    err = got - exp
+    msg = (f"camera sees the gate at x {got[0]:+.2f} (right), y {got[1]:+.2f} (down), z {got[2]:.2f} m "
+           f"(forward); expected {exp[0]:+.2f}, {exp[1]:+.2f}, {exp[2]:.2f}; difference "
+           f"{err[0]:+.2f} / {err[1]:+.2f} / {err[2]:+.2f} m (tolerance {tol} m)")
+    return bool(np.all(np.abs(err) <= tol)), msg
+
+
 def plan_course(gates, start_enu, heading_enu: float, v_max: float, a_max: float, verbose: bool = False,
-                yaw_mode: str = "velocity"):
+                yaw_mode: str = "velocity", standoff: float = 1.0, finish_dist: float = 4.0):
     """Min-snap plan from start_enu through gates (ENU). Returns (traj, waypoints, ref).
     yaw_mode "next_gate" looks at the next gate (Trajectory/min_snap_planner.look_at_yaw_profile),
-    which keeps the gates in the camera for the VIO."""
+    which keeps the gates in the camera for the VIO. standoff: the pre/post points' distance from
+    each gate; finish_dist: where the plan stops past the last gate."""
     traj, wps = plan_gate_trajectory(gates, np.asarray(start_enu, dtype=float),
-                                     v_max=v_max, a_max=a_max, verbose=verbose)
+                                     v_max=v_max, a_max=a_max, verbose=verbose,
+                                     standoff=standoff, finish_dist=finish_dist)
     if yaw_mode == "next_gate":
         from min_snap_planner import look_at_yaw_profile
         return traj, wps, TrajectoryReference(traj, start_yaw=heading_enu,
@@ -582,10 +644,18 @@ def wait_for_pose(link, timeout=10.0, clock=time.monotonic, sleep=time.sleep):
 
 
 def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> int:
-    with open(args.gates) as f:
-        manifest_raw = json.load(f)
-    gates = gates_from_manifest(args.gates)
-    print(f"[gates] {len(gates)} true gates from {args.gates}")
+    if args.gate_ahead is None:
+        with open(args.gates) as f:
+            manifest_raw = json.load(f)
+        gates = gates_from_manifest(args.gates)
+        print(f"[gates] {len(gates)} true gates from {args.gates}")
+    else:
+        if args.reposition:
+            print("REFUSING: --gate-ahead places the gate relative to the drone; it has no --reposition.")
+            return 2
+        manifest_raw, gates = {}, None      # built from the start pose below
+        print(f"[gates] one real gate {args.gate_ahead:.2f} m straight ahead of the start pose, "
+              f"{args.gate_dz:+.2f} m up (opening {args.gate_side} m)")
 
     # ---- live pose ----
     live_enu = None
@@ -638,6 +708,32 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
         heading_enu = math.radians(args.heading)
     else:
         start_enu, heading_enu = live_enu, live_heading
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    gates_path = args.gates
+    if args.gate_ahead is not None:
+        spec = gate_ahead(start_enu, heading_enu, args.gate_ahead, args.gate_dz, args.gate_side)
+        gates_path = os.path.join(args.out_dir, "test_gates.json")
+        with open(gates_path, "w") as f:
+            json.dump({"yaw_convention": "yaw_deg=0: gate flight direction (+Z) is world +X (ENU); "
+                                         "built by --gate-ahead from the start pose", "gates": [spec]}, f, indent=2)
+        gates = gates_from_manifest(gates_path)
+        print(f"[gates] gate_0 at ENU ({spec['x']:.2f}, {spec['y']:.2f}, {spec['z']:.2f}), "
+              f"facing {spec['yaw_deg']:+.1f} deg")
+        if args.camera_url:
+            try:
+                ok, msg = camera_check(fetch_camera_gate(args.camera_url), args.gate_ahead, args.gate_dz,
+                                       args.camera_tol)
+            except Exception as e:      # noqa: BLE001 -- any fetch / parse failure refuses
+                ok, msg = False, f"could not read {args.camera_url}: {e}"
+            print(f"[camera] {msg}")
+            if not ok:
+                print("REFUSING: the camera does not confirm the gate where --gate-ahead puts it. Check the "
+                      "taped distance, the drone's heading and height, then try again.")
+                return 2
+        elif not args.plan_only:
+            print("WARNING: no --camera-url, so nothing checks that the gate really is where --gate-ahead "
+                  "puts it.")
     cam = manifest_raw.get("camera_pose_usd", {}) if isinstance(manifest_raw, dict) else {}
     if cam.get("position") is not None:
         drift = float(np.linalg.norm(np.asarray(cam["position"])[:2] - start_enu[:2]))
@@ -646,7 +742,8 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
                   f"the gates were spawned; check the plan below before flying.")
 
     # ---- plan ----
-    traj, wps, ref = plan_course(gates, start_enu, heading_enu, args.v_max, args.a_max, yaw_mode=args.yaw_mode)
+    traj, wps, ref = plan_course(gates, start_enu, heading_enu, args.v_max, args.a_max, yaw_mode=args.yaw_mode,
+                                 standoff=args.standoff, finish_dist=args.finish_dist)
     sp = Setpoints(traj, ref)
     v_pk, a_pk = plan_peaks(traj)
     print(f"[plan] {len(wps)} waypoints, {traj.n_seg} segments, {traj.duration:.2f} s, "
@@ -659,9 +756,9 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
         print("REFUSING: the plan does not pass every gate.")
         return 2
 
-    os.makedirs(args.out_dir, exist_ok=True)
     write_plan_csv(os.path.join(args.out_dir, "plan_reference.csv"), sp)
-    shutil.copyfile(args.gates, os.path.join(args.out_dir, "test_gates.json"))
+    if os.path.abspath(gates_path) != os.path.abspath(os.path.join(args.out_dir, "test_gates.json")):
+        shutil.copyfile(gates_path, os.path.join(args.out_dir, "test_gates.json"))
     print(f"[plan] wrote {args.out_dir}/plan_reference.csv")
     if args.plan_only:
         return 0
@@ -711,6 +808,22 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument("--gates", default=DEFAULT_MANIFEST, help=f"test_gates.json (default {DEFAULT_MANIFEST})")
+    ap.add_argument("--gate-ahead", type=float, default=None, metavar="M",
+                    help="REAL DRONE: instead of --gates, one gate M metres straight ahead of where the drone "
+                         "hovers (hover on the taped start spot, facing the gate, at its center height)")
+    ap.add_argument("--gate-dz", type=float, default=0.0,
+                    help="--gate-ahead: gate center height above the hover height, m (default 0)")
+    ap.add_argument("--gate-side", type=float, default=0.8636,
+                    help="--gate-ahead: inner opening side, m (default 0.8636, the lab's pink gate)")
+    ap.add_argument("--camera-url", default=None,
+                    help="--gate-ahead: live_gate_test.py --serve-port's /latest.json, e.g. "
+                         "http://192.168.8.1:8091/latest.json; refuse unless the camera sees the gate there")
+    ap.add_argument("--camera-tol", type=float, default=0.15,
+                    help="--camera-url: allowed difference per axis, m (default 0.15)")
+    ap.add_argument("--standoff", type=float, default=1.0,
+                    help="pre/post points' distance from each gate, m (default 1)")
+    ap.add_argument("--finish-dist", type=float, default=4.0,
+                    help="where the plan stops past the last gate, m (default 4; shorter needs more braking)")
     ap.add_argument("--connection", default="udpin:0.0.0.0:14540")
     ap.add_argument("--v-max", type=float, default=2.0, help="planner speed limit, m/s (default 2)")
     ap.add_argument("--a-max", type=float, default=2.0, help="planner accel limit, m/s^2 (default 2)")

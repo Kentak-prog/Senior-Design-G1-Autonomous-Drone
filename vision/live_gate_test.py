@@ -20,7 +20,8 @@ overlay video + per-frame CSV.
         --url http://localhost/video_raw/hires_front_small_color --gate-side 0.8636 \
         --calib vision/calib/hires_front_1024x768.yml --duration 120 --out-dir vision/live_runs/onboard_hybrid_01
     # add --serve-port 8091 to watch the overlay live: http://<drone-ip>:8091/ (e.g. http://192.168.8.1:8091/
-    # on the drone's softAP Wi-Fi); /stream is the MJPEG, /snapshot.jpg one frame
+    # on the drone's softAP Wi-Fi); /stream is the MJPEG, /snapshot.jpg one frame, /latest.json the
+    # newest frame's gate poses (camera frame), read by px4/fly_min_snap_offboard.py --camera-url
 
 (Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas. Only a .pt needs it;
 an .onnx / .tflite runs through yolo_gate/bench_yolo.py's backends, and stops at the first frame if
@@ -81,7 +82,7 @@ from gate_pose import estimate_gate_pose, project_gate, order_corners  # noqa: E
 class OverlayServer:
     """Serves the newest annotated frame over HTTP (--serve-port), for watching the detector live
     from a browser on the drone's network: http://<drone-ip>:<port>/ (page), /stream (MJPEG),
-    /snapshot.jpg. The drone container runs with --network host, so the port is the drone's.
+    /snapshot.jpg, /latest.json (the newest frame's detections, camera frame). The drone container runs with --network host, so the port is the drone's.
     Each viewer gets only the newest frame (a slow viewer skips frames, never slows the test)."""
 
     PAGE = (b"<!doctype html><html><head><title>gate test overlay</title>"
@@ -102,6 +103,8 @@ class OverlayServer:
             def do_GET(self):
                 if self.path in ("/", "/index.html"):
                     self._send(200, "text/html", srv.PAGE)
+                elif self.path.startswith("/latest.json"):
+                    self._send(200, "application/json", srv.latest_json())
                 elif self.path.startswith("/snapshot"):
                     jpg = srv.wait_frame(0, 5.0)[1]
                     if jpg is None:
@@ -136,6 +139,29 @@ class OverlayServer:
         self.httpd = http.server.ThreadingHTTPServer((host, port), Handler)
         self.httpd.daemon_threads = True
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def publish_dets(self, t_wall, frame, dets):
+        """Newest frame's detections for /latest.json (px4/fly_min_snap_offboard.py --camera-url)."""
+        import json
+        out = []
+        for d in dets:
+            g = d["det"]
+            row = {"src": d["src"], "score": round(float(d["score"]), 3)}
+            if g is not None:
+                x, y, z = (float(v) for v in g.T_cam_gate[:3, 3])
+                row.update(range_m=round(float(g.range_m), 3), x_m=round(x, 3), y_m=round(y, 3), z_m=round(z, 3),
+                           reproj_px=round(float(g.reprojection_error_px), 2))
+            out.append(row)
+        with self._cond:
+            self._dets = {"t_wall": t_wall, "frame": frame, "detections": out}
+
+    def latest_json(self):
+        """age_s is computed here, on the drone's clock: the drone's and a laptop's clocks differ."""
+        import json
+        with self._cond:
+            d = dict(getattr(self, "_dets", None) or {"t_wall": 0.0, "frame": -1, "detections": []})
+        d["age_s"] = round(time.time() - d["t_wall"], 3) if d["t_wall"] else None
+        return json.dumps(d).encode()
 
     def publish(self, jpg_bytes):
         with self._cond:
@@ -686,6 +712,7 @@ def main(argv=None):
             frames.append((tf, cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 90])[1]))
             if server:
                 server.publish(frames[-1][1])
+                server.publish_dets(tf, n, dets)
             cv2.imwrite(os.path.join(raw_dir, f"{n:05d}.jpg"), raw)   # every frame: re-run offline
             if a.show:
                 cv2.imshow("gate test", out)
