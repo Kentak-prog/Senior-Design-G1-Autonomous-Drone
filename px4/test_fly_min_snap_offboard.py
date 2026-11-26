@@ -74,7 +74,8 @@ class FakePX4:
     target_component = 1
 
     def __init__(self, start_enu=START_ENU, heading_enu_deg=HEADING_ENU_DEG, gain=4.0,
-                 freeze_after=None, mode_switch_after=None, other_component=False, rtf=1.0):
+                 freeze_after=None, mode_switch_after=None, other_component=False, rtf=1.0,
+                 drop_mode_requests=0, offboard_loss_s=1.0, offboard_loss_mode=2):
         self.now = 1000.0
         self.pos = fms.enu_to_ned(start_enu)
         self.vel = np.zeros(3)
@@ -94,6 +95,36 @@ class FakePX4:
         self.rtf = rtf
         self.loiter_commands = 0
         self.offboard_commands = 0
+        self.sub = 0
+        # Mode requests (Hold / Land) the "link" loses before one gets through (2026-11-24: one was lost)
+        self.drop_mode_requests = drop_mode_requests
+        self.mode_requests = 0
+        # PX4's offboard-loss failsafe: in OFFBOARD with no setpoint for COM_OF_LOSS_T s -> this mode
+        self.offboard_loss_s, self.offboard_loss_mode = offboard_loss_s, offboard_loss_mode
+        self.offboard_loss_failsafe = False
+        # What px4/preflight.py reads, all healthy by default (the 2026-11-25 optical-flow setup with the
+        # VIO switched off); tests break one thing at a time.
+        self.params = {"EKF2_HGT_REF": 0, "EKF2_EV_CTRL": 0, "EKF2_OF_CTRL": 1, "EKF2_OF_QMIN": 30,
+                       "EKF2_RNG_CTRL": 1}
+        self.est_flags = 0x033e                      # what the real PX4 reports (no attitude bit)
+        self.est_ratios = (0.03, 0.10, 0.01)         # vel, pos xy, pos z
+        self.sys_health = 0x200000 | 0x8             # AHRS + barometer healthy
+        self.flow_quality = 70                       # None: no OPTICAL_FLOW_RAD
+        self.rangefinder = True
+        self.ground_z_enu = 0.0                      # floor height in the local frame
+        self.z_drift = 0.0                           # m/s of estimated-height drift while not in OFFBOARD
+        self.next_status = self.now
+        # Barometer (SCALED_PRESSURE) reads the TRUE height = the estimate + true_offset. runaway_rate
+        # makes the truth climb away from the estimate in OFFBOARD (2026-11-24: a stale VIO height).
+        self.baro = True
+        self.baro_noise = 0.0                        # m, std
+        self.runaway_rate = 0.0                      # m/s
+        self.true_offset = 0.0
+        self.next_baro = self.now
+        self._rng = np.random.RandomState(1)
+        # A real, sudden velocity change (hit, motor problem): kick_at s into OFFBOARD the drone stops
+        # following PX4 and accelerates at kick_accel m/s^2 along north for kick_s; then control resumes.
+        self.kick_at, self.kick_accel, self.kick_s = None, 0.0, 0.5
         self.queue = []
         self.next_pos_msg = self.now
         self.next_hb = self.now
@@ -116,14 +147,24 @@ class FakePX4:
         if in_off and self.mode_switch_after is not None and t_off > self.mode_switch_after:
             self.mode = POSCTL
             in_off = False
+        if in_off and self.sp_times and self.now - self.sp_times[-1] > self.offboard_loss_s:
+            self.mode, self.sub, in_off = self.offboard_loss_mode, 0, False
+            self.offboard_loss_failsafe = True
         frozen = self.freeze_after is not None and t_off is not None and t_off > self.freeze_after
-        if in_off and self.sp is not None and not frozen:
+        kicked = in_off and self.kick_at is not None and self.kick_at <= t_off < self.kick_at + self.kick_s
+        if kicked:
+            self.vel = self.vel + np.array([self.kick_accel * h, 0.0, 0.0])
+        elif in_off and self.sp is not None and not frozen:
             p_sp, v_ff, yaw = self.sp
             self.vel = v_ff + self.gain * (p_sp - self.pos)
             self.yaw = yaw
         else:
             self.vel = np.zeros(3)
         self.pos = self.pos + self.vel * h * self.rtf
+        if not in_off and self.z_drift:
+            self.pos[2] -= self.z_drift * h            # NED: the estimate creeps "up" (barometer warm-up)
+        if in_off and self.runaway_rate:
+            self.true_offset += self.runaway_rate * h  # truth climbs away from what PX4 believes
 
     # pymavlink master API ----------------------------------------------
     def recv_match(self, blocking=False):
@@ -135,10 +176,31 @@ class FakePX4:
                 self.next_pos_msg = self.now + 0.02
             if self.now >= self.next_hb:
                 self.queue.append(_Msg("HEARTBEAT", autopilot=fms.MAV_AUTOPILOT_PX4,
-                                       base_mode=128 if self.armed else 0, custom_mode=self.mode << 16))
+                                       base_mode=128 if self.armed else 0,
+                                       custom_mode=(self.mode << 16) | (self.sub << 24)))
                 if self.other_component:   # after PX4's, so it is the one a naive reader keeps
                     self.queue.append(_Msg("HEARTBEAT", autopilot=8, base_mode=0, custom_mode=0))
                 self.next_hb = self.now + 0.5
+            if self.now >= self.next_status:
+                vx, vy, vz = self.est_ratios
+                self.queue.append(_Msg("ESTIMATOR_STATUS", flags=self.est_flags, vel_ratio=vx,
+                                       pos_horiz_ratio=vy, pos_vert_ratio=vz))
+                self.queue.append(_Msg("SYS_STATUS", onboard_control_sensors_present=0x200000 | 0x8,
+                                       onboard_control_sensors_enabled=0x200000 | 0x8,
+                                       onboard_control_sensors_health=self.sys_health))
+                if self.flow_quality is not None:
+                    self.queue.append(_Msg("OPTICAL_FLOW_RAD", quality=self.flow_quality))
+                if self.rangefinder:
+                    above = float(fms.ned_to_enu(self.pos)[2] - self.ground_z_enu) + 0.02
+                    self.queue.append(_Msg("DISTANCE_SENSOR", current_distance=int(round(above * 100)),
+                                           min_distance=2, max_distance=600))
+                self.next_status = self.now + 0.1
+            if self.baro and self.now >= self.next_baro:
+                h_true = float(fms.ned_to_enu(self.pos)[2]) + self.true_offset + 100.0
+                h_true += float(self._rng.normal(0, self.baro_noise)) if self.baro_noise else 0.0
+                press = 1013.25 * (1 - h_true / 44330.77) ** (1 / 0.190263)
+                self.queue.append(_Msg("SCALED_PRESSURE", press_abs=press))
+                self.next_baro = self.now + 0.05
         return self.queue.pop(0) if self.queue else None
 
     # mav.* senders
@@ -151,6 +213,17 @@ class FakePX4:
             self.sp_first_pos = np.array([x, y, z])
         self.sp_times.append(self.now)
 
+    def param_request_read_send(self, ts, tc, param_id, index):
+        name = param_id.decode() if isinstance(param_id, bytes) else param_id
+        if name in self.params and self.params[name] is not None:
+            v = self.params[name]
+            if isinstance(v, int):          # MAVLink bytewise int encoding, as PX4 sends it
+                import struct
+                value, ptype = struct.unpack("<f", struct.pack("<i", v))[0], 6
+            else:
+                value, ptype = float(v), 9
+            self.queue.append(_Msg("PARAM_VALUE", param_id=name, param_value=value, param_type=ptype))
+
     def command_long_send(self, ts, tc, cmd, conf, p1, p2, p3, *rest):
         if cmd == 176 and int(p2) == OFFBOARD:
             self.offboard_commands += 1
@@ -159,8 +232,12 @@ class FakePX4:
                 self.mode = OFFBOARD
                 self.offboard_since = self.now
         elif cmd == 176 and int(p2) == AUTO:
+            self.mode_requests += 1
+            if self.drop_mode_requests > 0:              # lost on the way
+                self.drop_mode_requests -= 1
+                return
             self.loiter_commands += 1
-            self.mode = AUTO
+            self.mode, self.sub = AUTO, int(p3)
 
 
 def _args(tmp, extra=()):
@@ -311,7 +388,44 @@ def test_abort_when_px4_leaves_offboard():
     with open(os.path.join(out_dir, "summary.json")) as f:
         s = json.load(f)
     assert rc == 1 and s["status"].startswith("aborted: PX4 left OFFBOARD"), s["status"]
-    print("  mode switched away mid-flight -> abort + LOITER  OK")
+    # The pilot took over: the script must NOT pull PX4 back into Hold (it used to send Hold 5x here)
+    assert fake.mode_requests == 0 and fake.mode == POSCTL, (fake.mode_requests, fake.mode)
+    assert s["handoff"]["confirmed"] is False and "nothing to hand off" in s["handoff"]["message"]
+    print("  pilot switched mode mid-flight -> abort, and NO Hold request (pilot keeps control)  OK")
+
+
+def test_baro_runaway_aborts_the_course():
+    fake = FakePX4()
+    fake.runaway_rate, fake.baro_noise = 0.4, 0.2
+    (rc, out_dir), log = _quiet(_fly, fake)
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 1 and "barometer" in s["status"] and "PILOT: PX4's height may be WRONG" in log, s["status"]
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO
+    print(f"  truth drifts 0.4 m/s from PX4's height mid-course: aborted ({s['status'][9:60]}...), "
+          f"pilot alarm, Hold confirmed  OK")
+
+
+def test_baro_noise_is_quiet_on_the_course():
+    fake = FakePX4()
+    fake.baro_noise = 0.3
+    (rc, out_dir), log = _quiet(_fly, fake)
+    assert rc == 0, log[-800:]
+    (rc, _), log = _quiet(_fly, FakePX4(), extra=("--yes", "--no-baro-check"))
+    assert rc == 0 and "--no-baro-check" in log
+    print("  noisy (0.3 m) barometer over the 3-gate course: no false alarm; --no-baro-check warns  OK")
+
+
+def test_velocity_jump_cancels_and_lands():
+    fake = FakePX4()
+    fake.kick_at, fake.kick_accel = 3.0, 10.0            # mid-trajectory: 10 m/s^2 for 0.5 s
+    (rc, out_dir), log = _quiet(_fly, fake)
+    with open(os.path.join(out_dir, "summary.json")) as f:
+        s = json.load(f)
+    assert rc == 1 and "velocity changing" in s["status"] and "flight CANCELLED" in log, s["status"]
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == fms.PX4_SUB_AUTO_LAND, s["handoff"]
+    assert "[failsafe] cancel and LAND" in log and "5.0 m/s^2" in log        # --a-max 2 + 3
+    print(f"  10 m/s^2 kick mid-course: cancelled ({s['status'][9:58]}...), LAND confirmed  OK")
 
 
 def test_ignores_other_components_heartbeats():
@@ -478,6 +592,60 @@ def test_plan_only_needs_no_px4():
     assert rc == 0 and os.path.exists(os.path.join(args.out_dir, "plan_reference.csv"))
     assert "pymavlink" not in sys.modules
     print("  --plan-only writes the plan without pymavlink  OK")
+
+
+# --------------------------------------------------------------------------
+# Confirmed hand-off out of OFFBOARD (2026-11-24: one Hold request was lost)
+# --------------------------------------------------------------------------
+
+def test_hand_off_confirms_hold():
+    fake = FakePX4()
+    (rc, out_dir), _ = _quiet(_fly, fake)
+    s = json.load(open(os.path.join(out_dir, "summary.json")))
+    assert rc == 0 and s["handoff"]["confirmed"], s["handoff"]
+    assert fake.mode == AUTO and fake.sub == fms.PX4_SUB_AUTO_LOITER and not fake.offboard_loss_failsafe
+    print(f"  completed run: Hold requested and confirmed ({s['handoff']['message']})  OK")
+
+
+def test_hand_off_retries_lost_requests():
+    fake = FakePX4(drop_mode_requests=3)
+    (rc, out_dir), _ = _quiet(_fly, fake)
+    s = json.load(open(os.path.join(out_dir, "summary.json")))
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == fms.PX4_SUB_AUTO_LOITER, s["handoff"]
+    assert fake.mode_requests == 4 and not fake.offboard_loss_failsafe
+    print("  3 Hold requests lost: kept holding and re-asking; the 4th got through, no failsafe  OK")
+
+
+def test_hand_off_gives_up_to_px4_failsafe():
+    fake = FakePX4(drop_mode_requests=10 ** 6)
+    (rc, out_dir), log = _quiet(_fly, fake)
+    s = json.load(open(os.path.join(out_dir, "summary.json")))
+    assert s["handoff"]["confirmed"] is False and "did not confirm" in s["handoff"]["message"], s["handoff"]
+    assert "WARNING" in log and fake.mode_requests >= 10        # ~every 0.25 s for 3 s
+    fake.sleep(1.5)                                              # script stopped: PX4's own failsafe acts
+    assert fake.offboard_loss_failsafe and fake.mode == fake.offboard_loss_mode
+    print(f"  every Hold request lost: re-asked {fake.mode_requests}x for 3 s, then stopped and said so; "
+          f"PX4's offboard-loss failsafe took over  OK")
+
+
+def test_preflight_in_the_air():
+    fake = FakePX4()
+    (rc, _), log = _quiet(_fly, fake)
+    assert rc == 0 and "[preflight] PASS" in log
+    fake = FakePX4()
+    fake.params["EKF2_EV_CTRL"] = 13
+    (rc, _), log = _quiet(_fly, fake)
+    assert rc == 1 and "REFUSING: preflight" in log and fake.offboard_commands == 0 and not fake.sp_times
+    print("  hovering: preflight PASS on the healthy setup; VIO still a source -> refused before OFFBOARD  OK")
+
+
+def test_hand_off_unit_sends_nothing_outside_offboard():
+    fake = FakePX4()                      # hovering in Position mode, not OFFBOARD
+    link = fms.PX4Link(fake, clock=fake.clock)
+    fms.wait_for_pose(link, clock=fake.clock, sleep=fake.sleep)
+    ok, msg = fms.hand_off(link, lambda: None, clock=fake.clock, sleep=fake.sleep)
+    assert not ok and "nothing to hand off" in msg and fake.mode_requests == 0 and fake.mode == POSCTL
+    print("  hand_off outside OFFBOARD sends nothing  OK")
 
 
 # --------------------------------------------------------------------------

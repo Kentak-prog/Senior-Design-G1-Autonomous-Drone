@@ -38,3 +38,9 @@ graphics/images/diagram_*.svg
 graphics/images/isaac_starling2max-c29-model_drone-camera-view.png
 graphics/images/*_gate-cnn_contact-sheet.png
 graphics/images/*_gate-cnn_no-crop-check.png
+
+# Raw camera frames copied off the drone with flight logs (hundreds of MB; keep detections.csv and logs)
+flight_logs/**/raw_jpg/
+flight_logs/**/*.mp4
+# 2026-11-03 hover PX4 logs (57 MB): kept locally for px4/test_baro_check.py, not committed
+flight_logs/2026-11-03/px4_logs/*.ulg

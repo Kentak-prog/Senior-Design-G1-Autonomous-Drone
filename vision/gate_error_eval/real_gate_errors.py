@@ -19,6 +19,12 @@ Two kinds of truth, and the figure titles say which:
           would not show). in_view = the reference gate's center projects into the image.
               python real_gate_errors.py vio ../live_runs/onboard_hybrid_handheld_motion_03
 
+  px4     A moving run recorded with live_gate_test.py --mavlink (px4_pose.csv): each frame's camera pose
+          comes from PX4's own estimate (LOCAL_POSITION_NED + ATTITUDE_QUATERNION over MAVLink), so the
+          gates land in PX4's local NED frame, the frame PX4 flies in. Same "median estimate" reference
+          as vio. No clock stamp needed: the poses and the frames share the camera test's clock.
+              python real_gate_errors.py px4 ../live_runs/<run>
+
 The VIO's Euler convention and the image latency (Portal receive time minus capture time) are not
 documented for this setup, so both are picked from the data: the pair that gives the tightest
 cluster of world estimates of the (fixed) gate. The choice is printed and written to the summary.
@@ -76,6 +82,10 @@ def _rz(a):
 
 
 R_IMU_CAM = _rx(0.0) @ _ry(math.radians(90)) @ _rz(math.radians(90))   # camera axes in the imu frame
+# imu_apps with respect to body: T [0.0303, -0.0057, -0.0116] m, no rotation (same extrinsics file). PX4's
+# position and attitude are the body's (FRD), so the camera is R_IMU_CAM / this offset from it.
+R_BODY_CAM = R_IMU_CAM
+T_BODY_CAM = np.array([0.0303, -0.0057, -0.0116]) + T_IMU_CAM_T
 
 EULER = {
     "zyx": lambda r, p, y: _rz(y) @ _ry(p) @ _rx(r),     # aerospace yaw-pitch-roll
@@ -159,48 +169,94 @@ def still_rows(runs=STILL_RUNS):
     return rows
 
 
-# -------------------------------------------------------------------------------------- vio
+# --------------------------------------------------------------------------- moving runs: pose sources
+#
+# A pose source gives, for a camera frame's receive time t (detections.csv t_wall) and an assumed
+# image latency, the camera's rotation and position in a fixed world frame plus the drone's speed.
+# Several "variants" can be tried (the VIO's unknown Euler convention); fit_sync keeps the variant and
+# latency with the tightest gate clusters.
 
-def load_vio(run_dir):
-    q = list(csv.DictReader(open(os.path.join(run_dir, "qvio.csv"))))
-    t = np.array([int(r["timestamp(ns)"]) * 1e-9 for r in q])
-    p = np.array([[float(r[f"T_imu_wrt_vio_{a}(m)"]) for a in "xyz"] for r in q])
-    rpy = np.array([[float(r["roll(rad)"]), float(r["pitch(rad)"]), float(r["yaw(rad)"])] for r in q])
-    v = np.array([[float(r[f"vel_imu_wrt_vio_{a}(m/s)"]) for a in "xyz"] for r in q])
-    return t, p, rpy, v
+class VioSource:
+    """The drone's own VIO, logged with voxl-logger -v qvio (qvio.csv) and a clock stamp (clock.txt).
+    World frame: the VIO's (gravity-aligned, z down)."""
+
+    frame_label = "VIO world"
+
+    def __init__(self, run_dir):
+        q = list(csv.DictReader(open(os.path.join(run_dir, "qvio.csv"))))
+        self.t = np.array([int(r["timestamp(ns)"]) * 1e-9 for r in q])
+        self.p = np.array([[float(r[f"T_imu_wrt_vio_{a}(m)"]) for a in "xyz"] for r in q])
+        self.rpy = np.array([[float(r["roll(rad)"]), float(r["pitch(rad)"]), float(r["yaw(rad)"])] for r in q])
+        self.v = np.array([[float(r[f"vel_imu_wrt_vio_{a}(m/s)"]) for a in "xyz"] for r in q])
+        wall0, mono0 = map(float, open(os.path.join(run_dir, "clock.txt")).read().split())
+        self.offset = wall0 - mono0              # frames are on time.time(), the VIO on CLOCK_MONOTONIC
+        self.variants = {e: (lambda t, lat, e=e: self.pose(t, lat, e)) for e in EULER}
+        self.n = len(self.t)
+
+    def pose(self, t_frame, lat, euler):
+        tm = t_frame - self.offset - lat
+        i = int(np.searchsorted(self.t, tm))
+        if i <= 0 or i >= len(self.t):
+            return None
+        a = (tm - self.t[i - 1]) / (self.t[i] - self.t[i - 1])
+        pos = self.p[i - 1] + a * (self.p[i] - self.p[i - 1])
+        j = i - 1 if a < 0.5 else i
+        R_w_imu = EULER[euler](*self.rpy[j])
+        return R_w_imu @ R_IMU_CAM, pos + R_w_imu @ T_IMU_CAM_T, float(np.linalg.norm(self.v[j]))
 
 
-def _interp_pose(t_vio, p, rpy, t, euler):
-    """Pose at time t: position linear, rotation of the nearer sample (VIO at ~30 Hz)."""
-    i = int(np.searchsorted(t_vio, t))
-    if i <= 0 or i >= len(t_vio):
-        return None
-    a = (t - t_vio[i - 1]) / (t_vio[i] - t_vio[i - 1])
-    pos = p[i - 1] + a * (p[i] - p[i - 1])
-    j = i - 1 if a < 0.5 else i
-    R = EULER[euler](*rpy[j])
-    return pos, R
+def quat_to_R(qw, qx, qy, qz):
+    """Rotation matrix of a unit quaternion (w, x, y, z): body -> world (MAVLink ATTITUDE_QUATERNION)."""
+    n = math.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+    qw, qx, qy, qz = qw / n, qx / n, qy / n, qz / n
+    return np.array([
+        [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qw * qz), 2 * (qx * qz + qw * qy)],
+        [2 * (qx * qy + qw * qz), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qw * qx)],
+        [2 * (qx * qz - qw * qy), 2 * (qy * qz + qw * qx), 1 - 2 * (qx * qx + qy * qy)]])
 
 
-def cam_pose(t_vio, p, rpy, t, euler):
-    ip = _interp_pose(t_vio, p, rpy, t, euler)
-    if ip is None:
-        return None
-    pos, R_w_imu = ip
-    return R_w_imu @ R_IMU_CAM, pos + R_w_imu @ T_IMU_CAM_T            # R_w_cam, camera center
+class Px4Source:
+    """PX4's own estimate over MAVLink, recorded by live_gate_test.py --mavlink (px4_pose.csv:
+    LOCAL_POSITION_NED + ATTITUDE_QUATERNION, on the same time.time() clock as the camera frames).
+    World frame: PX4's local NED (x north, y east, z down), the frame PX4 flies in. Whatever PX4 fuses
+    (optical flow + barometer since 2026-11-25, VIO before) is what this frame is."""
+
+    frame_label = "PX4 local NED"
+
+    def __init__(self, run_dir):
+        rows = [r for r in csv.DictReader(open(os.path.join(run_dir, "px4_pose.csv"))) if r["qw"] not in ("", "nan")]
+        if len(rows) < 10:
+            raise SystemExit(f"{run_dir}/px4_pose.csv has {len(rows)} usable poses: was the run recorded with "
+                             f"--mavlink and mavlink_tee.py running?")
+        self.t = np.array([float(r["t_wall"]) for r in rows])
+        self.p = np.array([[float(r[k]) for k in ("x", "y", "z")] for r in rows])
+        self.v = np.array([[float(r[k]) for k in ("vx", "vy", "vz")] for r in rows])
+        self.R = [quat_to_R(*(float(r[k]) for k in ("qw", "qx", "qy", "qz"))) for r in rows]
+        self.variants = {"px4": self.pose}
+        self.n = len(self.t)
+
+    def pose(self, t_frame, lat):
+        tm = t_frame - lat                       # same clock: only the image latency
+        i = int(np.searchsorted(self.t, tm))
+        if i <= 0 or i >= len(self.t):
+            return None
+        a = (tm - self.t[i - 1]) / (self.t[i] - self.t[i - 1])
+        pos = self.p[i - 1] + a * (self.p[i] - self.p[i - 1])
+        j = i - 1 if a < 0.5 else i
+        R_w_body = self.R[j]
+        return R_w_body @ R_BODY_CAM, pos + R_w_body @ T_BODY_CAM, float(np.linalg.norm(self.v[j]))
 
 
-def world_estimates(frames, alldet, vio, offset, latency, euler, corners_only=True):
+def world_estimates(frames, alldet, pose_fn, latency, corners_only=True):
     """(frame, world xyz) of every detection (all det_idx) of the run."""
-    t_vio, p, rpy, _ = vio
     out = []
     for f in sorted(alldet):
         if f not in frames:
             continue
-        cp = cam_pose(t_vio, p, rpy, frames[f][0] - offset - latency, euler)
+        cp = pose_fn(frames[f][0], latency)
         if cp is None:
             continue
-        R, c = cp
+        R, c, _ = cp
         for r in alldet[f]:
             if corners_only and r["src"] != "yolo+color":
                 continue
@@ -233,24 +289,27 @@ def cluster_gates(points, sep=1.0, min_pts=30):
             mine = P[(lab == k) & (np.linalg.norm(P - r, axis=1) < sep)]
             if len(mine) >= min_pts:
                 new.append(np.median(mine, axis=0))
-        refs = new
+        refs = new or refs[:1]
     lab = np.argmin([np.linalg.norm(P - r, axis=1) for r in refs], axis=0)
     counts = [int(np.sum(lab == k)) for k in range(len(refs))]
     order = np.argsort(counts)[::-1]                      # gate_A = the most-seen gate
     return [refs[k] for k in order], [counts[k] for k in order]
 
 
-def fit_sync(frames, alldet, vio, offset):
+def fit_sync(frames, alldet, source):
+    """Variant (VIO Euler convention, or PX4's single one) and image latency with the tightest gate clusters."""
     best, table = None, []
-    for euler in EULER:
+    for name, fn in source.variants.items():
         for lat in np.arange(0.0, 0.801, 0.05):
-            pts = world_estimates(frames, alldet, vio, offset, lat, euler)
+            pts = world_estimates(frames, alldet, fn, lat)
             if len(pts) < 20:
                 continue
             s, refs = _spread(pts)
-            table.append((euler, round(float(lat), 2), round(s, 4)))
+            table.append((name, round(float(lat), 2), round(s, 4)))
             if best is None or s < best[0]:
-                best = (s, euler, float(lat), refs)
+                best = (s, name, float(lat), refs)
+    if best is None:
+        raise SystemExit("fewer than 20 corner fixes with a pose: nothing to place the gates from")
     return best, table
 
 
@@ -264,31 +323,27 @@ def _project(lens_K, lens_D, fisheye, Xc):
     return uv.reshape(2)
 
 
-def vio_rows(run_dir, calib):
+def moving_rows(run_dir, calib, source):
+    """gate_errors rows for a moving run, every detection placed in the source's world frame."""
     from live_gate_test import load_calib
     K, D, fisheye, csize = load_calib(calib)
     if csize and tuple(csize) != IMAGE_WH and csize[0]:
         s = IMAGE_WH[0] / csize[0]
         K = K.copy()
         K[:2] *= s
-    wall0, mono0 = map(float, open(os.path.join(run_dir, "clock.txt")).read().split())
-    offset = wall0 - mono0
     frames = read_detections(run_dir)
     alldet = read_all_detections(run_dir)
-    vio = load_vio(run_dir)
-    (spread, euler, lat, refs), table = fit_sync(frames, alldet, vio, offset)
+    (spread, variant, lat, refs), table = fit_sync(frames, alldet, source)
+    pose_fn = source.variants[variant]
     names = [f"gate_{chr(ord('A') + k)}" for k in range(len(refs))]
-    t_vio, p, rpy, v = vio
     t0 = min(t for t, _ in frames.values())
     rows, n_unmatched, n_dets = [], 0, 0
     for f in sorted(frames):
         t = frames[f][0]
-        tm = t - offset - lat
-        cp = cam_pose(t_vio, p, rpy, tm, euler)
+        cp = pose_fn(t, lat)
         if cp is None:
             continue
-        R, c = cp
-        i = min(max(int(np.searchsorted(t_vio, tm)), 0), len(t_vio) - 1)
+        R, c, speed = cp
         # each detection to its nearest gate (world distance under 0.5 m + 10 % of range), else unmatched
         best = {}
         for r in alldet.get(f, []):
@@ -311,7 +366,7 @@ def vio_rows(run_dir, calib):
                 in_view = bool(0 <= u < IMAGE_WH[0] and 0 <= w_ < IMAGE_WH[1])
             base = dict(t_s=t - t0, frame=f, gate=names[k], true_x=float(ref[0]), true_y=float(ref[1]),
                         true_z=float(ref[2]), drone_x=float(c[0]), drone_y=float(c[1]), drone_z=float(c[2]),
-                        drone_speed_mps=float(np.linalg.norm(v[i])), range_true_m=rng_true,
+                        drone_speed_mps=speed, range_true_m=rng_true,
                         off_axis_deg=float(math.degrees(math.atan2(math.hypot(ref_c[0], ref_c[1]), ref_c[2]))),
                         in_view=in_view, normal_err_deg=None)
             if k not in best:
@@ -334,12 +389,21 @@ def vio_rows(run_dir, calib):
         for r in rows:
             if r["gate"] == n and not (windows[n][0] <= r["t_s"] <= windows[n][1]):
                 r["in_view"] = False
-    info = dict(euler=euler, latency_s=lat, median_scatter_to_nearest_gate_m=spread,
+    info = dict(pose_source=source.frame_label, variant=variant, latency_s=lat,
+                median_scatter_to_nearest_gate_m=spread,
                 gate_windows_s={n: list(w) for n, w in windows.items()},
                 gates={n: ref.tolist() for n, ref in zip(names, refs)}, detections=n_dets,
-                unmatched_detections=n_unmatched, clock_offset_s=offset, n_vio=len(t_vio),
-                sync_search=[dict(euler=e, latency_s=l, scatter_m=s) for e, l, s in table])
+                unmatched_detections=n_unmatched, n_poses=source.n,
+                sync_search=[dict(variant=e, latency_s=l, scatter_m=s) for e, l, s in table])
     return rows, info
+
+
+def vio_rows(run_dir, calib):
+    return moving_rows(run_dir, calib, VioSource(run_dir))
+
+
+def px4_rows(run_dir, calib):
+    return moving_rows(run_dir, calib, Px4Source(run_dir))
 
 
 # ------------------------------------------------------------------------------------- main
@@ -349,11 +413,12 @@ def main():
     sub = ap.add_subparsers(dest="mode", required=True)
     s = sub.add_parser("still")
     s.add_argument("--out-dir", default=os.path.join(LIVE_RUNS, "figs_still_tape"))
-    v = sub.add_parser("vio")
-    v.add_argument("run_dir")
-    v.add_argument("--calib", default=os.path.join(_VISION, "calib", "hires_front_1024x768.yml"))
-    v.add_argument("--out-dir", default=None, help="default: <run_dir>/figs")
-    v.add_argument("--title", default=None)
+    for mode in ("vio", "px4"):
+        v = sub.add_parser(mode)
+        v.add_argument("run_dir")
+        v.add_argument("--calib", default=os.path.join(_VISION, "calib", "hires_front_1024x768.yml"))
+        v.add_argument("--out-dir", default=None, help="default: <run_dir>/figs")
+        v.add_argument("--title", default=None)
     a = ap.parse_args()
 
     if a.mode == "still":
@@ -362,11 +427,13 @@ def main():
         out = a.out_dir
         info = {"runs": [dict(run=n, taped_m=d, kind=k) for n, d, k in STILL_RUNS]}
     else:
-        rows, info = vio_rows(a.run_dir, a.calib)
+        rows, info = (vio_rows if a.mode == "vio" else px4_rows)(a.run_dir, a.calib)
         name = os.path.basename(os.path.normpath(a.run_dir))
-        suffix = a.title or "(real drone, hand-held, ref = median est.)"
-        out = a.out_dir or os.path.join(a.run_dir, "figs")
-        print(f"[{name}] VIO Euler {info['euler']}, image latency {info['latency_s']:.2f} s, "
+        suffix = a.title or ("(real drone, hand-held, ref = median est.)" if a.mode == "vio"
+                             else "(real drone, PX4 frame, ref = median est.)")
+        out = a.out_dir or os.path.join(a.run_dir, "figs" if a.mode == "vio" else "figs_px4")
+        print(f"[{name}] poses: {info['pose_source']} ({info['n_poses']}), variant {info['variant']}, "
+              f"image latency {info['latency_s']:.2f} s, "
               f"median scatter {info['median_scatter_to_nearest_gate_m']:.3f} m, gates "
               + ", ".join(f"{n} {np.round(x, 2).tolist()}" for n, x in info["gates"].items())
               + f"; {info['unmatched_detections']} of {info['detections']} detections matched no gate")

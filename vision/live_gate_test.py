@@ -22,6 +22,9 @@ overlay video + per-frame CSV.
     # add --serve-port 8091 to watch the overlay live: http://<drone-ip>:8091/ (e.g. http://192.168.8.1:8091/
     # on the drone's softAP Wi-Fi); /stream is the MJPEG, /snapshot.jpg one frame, /latest.json the
     # newest frame's gate poses (camera frame), read by px4/fly_min_snap_offboard.py --camera-url
+    # add --mavlink udpin:127.0.0.1:14602 (with vision/mavlink_tee.py running, PYTHONPATH=/repo/.pylibs) to
+    # record PX4's pose with every run (px4_pose.csv): gate_error_eval/real_gate_errors.py px4 <run>
+    # places the gates in PX4's frame from it
 
 (Ultralytics lives in its own venv, ~/venvs/yolo: pip install ultralytics pandas. Only a .pt needs it;
 an .onnx / .tflite runs through yolo_gate/bench_yolo.py's backends, and stops at the first frame if
@@ -78,6 +81,72 @@ from gate_pose import estimate_gate_pose, project_gate, order_corners  # noqa: E
 
 
 # --------------------------------------------------------------------------- feed
+
+class Px4PoseLogger:
+    """PX4's pose over MAVLink (--mavlink), written to px4_pose.csv in the run folder on the same clock
+    (time.time()) as detections.csv's t_wall, so every camera frame can be put in PX4's local frame
+    (NED, the frame PX4 flies in) afterwards: gate_error_eval/real_gate_errors.py px4 <run>.
+
+    One row per LOCAL_POSITION_NED, with the newest ATTITUDE_QUATERNION (body FRD -> NED, w x y z) and
+    its age. On the VOXL 2 run mavlink_tee.py and connect to one of its ports, e.g.
+    udpin:127.0.0.1:14602, so a flight script can use PX4's link at the same time."""
+
+    FIELDS = ["t_wall", "time_boot_ms", "x", "y", "z", "vx", "vy", "vz", "qw", "qx", "qy", "qz", "att_age_s"]
+
+    def __init__(self, connection, path, rate_hz=30.0):
+        from pymavlink import mavutil      # only needed with --mavlink (PYTHONPATH=/repo/.pylibs in the container)
+        self.m = mavutil.mavlink_connection(connection, source_system=246, source_component=191)
+        self.mavutil = mavutil
+        self.rate_hz = rate_hz
+        self.f = open(path, "w", newline="")
+        self.w = csv.writer(self.f)
+        self.w.writerow(self.FIELDS)
+        self.n, self.q, self.t_q = 0, None, None
+        self.latest = None                 # (t_wall, x, y, z) for the overlay / status line
+        self.error = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _request_rates(self):
+        mav = self.mavutil.mavlink
+        for msg_id in (mav.MAVLINK_MSG_ID_LOCAL_POSITION_NED, mav.MAVLINK_MSG_ID_ATTITUDE_QUATERNION):
+            self.m.mav.command_long_send(1, 1, mav.MAV_CMD_SET_MESSAGE_INTERVAL, 0, msg_id,
+                                         1e6 / self.rate_hz, 0, 0, 0, 0, 0)
+
+    def _run(self):
+        requested = False
+        try:
+            while not self._stop.is_set():
+                msg = self.m.recv_match(type=["LOCAL_POSITION_NED", "ATTITUDE_QUATERNION", "HEARTBEAT"],
+                                        blocking=True, timeout=0.5)
+                if msg is None or msg.get_srcSystem() != 1:
+                    continue
+                t = time.time()
+                kind = msg.get_type()
+                if kind == "HEARTBEAT" and not requested:
+                    self._request_rates()            # once PX4 is heard, so the request has a reply path
+                    requested = True
+                elif kind == "ATTITUDE_QUATERNION":
+                    self.q, self.t_q = (msg.q1, msg.q2, msg.q3, msg.q4), t
+                elif kind == "LOCAL_POSITION_NED":
+                    q = self.q or (float("nan"),) * 4
+                    age = (t - self.t_q) if self.t_q else float("nan")
+                    self.w.writerow([f"{t:.4f}", msg.time_boot_ms, *(f"{v:.4f}" for v in
+                                     (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)),
+                                     *(f"{v:.6f}" for v in q), f"{age:.3f}"])
+                    self.n += 1
+                    self.latest = (t, msg.x, msg.y, msg.z)
+                    if self.n % 30 == 0:
+                        self.f.flush()
+        except Exception as e:                     # noqa: BLE001 -- report, never kill the camera test
+            self.error = repr(e)
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=2)
+        self.f.close()
+
 
 class OverlayServer:
     """Serves the newest annotated frame over HTTP (--serve-port), for watching the detector live
@@ -606,6 +675,10 @@ def main(argv=None):
     ap.add_argument("--duration", type=float, default=60.0, help="seconds; 0 = until Ctrl-C")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--show", action="store_true", help="also open a live preview window")
+    ap.add_argument("--mavlink", default=None,
+                    help="also record PX4's pose (LOCAL_POSITION_NED + ATTITUDE_QUATERNION) to px4_pose.csv, "
+                         "e.g. udpin:127.0.0.1:14602 behind vision/mavlink_tee.py (needs pymavlink: "
+                         "PYTHONPATH=/repo/.pylibs in the drone's container)")
     ap.add_argument("--serve-port", type=int, default=0,
                     help="also serve the live overlay over HTTP on this port (0 = off): open "
                          "http://<drone-ip>:<port>/ in a browser on the drone's network")
@@ -670,6 +743,11 @@ def main(argv=None):
     wr.writerow(["frame", "t_wall", "det_idx", "src", "score", "range_m", "x_m", "y_m", "z_m",
                  "nx", "ny", "nz", "reproj_px", "c0x", "c0y", "c1x", "c1y", "c2x", "c2y", "c3x", "c3y"])
 
+    pose_log = None
+    if a.mavlink:
+        pose_log = Px4PoseLogger(a.mavlink, os.path.join(a.out_dir, "px4_pose.csv"))
+        print(f"[px4] recording PX4's pose from {a.mavlink} to {a.out_dir}/px4_pose.csv", flush=True)
+
     server = None
     if a.serve_port:
         server = OverlayServer(a.serve_port)
@@ -721,14 +799,26 @@ def main(argv=None):
             n += 1
             if n % 30 == 0:
                 best = min((d["det"].range_m for d in dets if d["det"]), default=None)
+                px4 = ""
+                if pose_log is not None:
+                    if pose_log.error:
+                        px4 = f"  px4: ERROR {pose_log.error}"
+                    elif pose_log.latest is None or time.time() - pose_log.latest[0] > 1.0:
+                        px4 = "  px4: NO POSE (is mavlink_tee.py running?)"
+                    else:
+                        _, px, py, pz = pose_log.latest
+                        px4 = f"  px4 NED ({px:+.2f}, {py:+.2f}, {pz:+.2f})"
                 print(f"[run] {n} frames  {fps:.1f} fps  with-gate {n_det}"
-                      + (f"  nearest {best:.2f} m" if best else ""), flush=True)
+                      + (f"  nearest {best:.2f} m" if best else "") + px4, flush=True)
     except KeyboardInterrupt:
         pass
     finally:
         reader.stop()
         if server:
             server.stop()
+        if pose_log is not None:
+            pose_log.stop()
+            print(f"[px4] {pose_log.n} PX4 poses -> {a.out_dir}/px4_pose.csv", flush=True)
         csv_f.close()
         if frames:
             span = frames[-1][0] - frames[0][0]

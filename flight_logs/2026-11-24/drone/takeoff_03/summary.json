@@ -1,0 +1,17 @@
+{
+  "status": "aborted: 0.50 m from the setpoint -> Hold (AUTO.LOITER)",
+  "height_m": 1.0,
+  "climb_rate": 0.3,
+  "start_ned": [
+    -0.0008697314187884331,
+    -0.0010761185549199581,
+    -0.076055146753788
+  ],
+  "target_ned": [
+    -0.0008697314187884331,
+    -0.0010761185549199581,
+    -1.076055146753788
+  ],
+  "hover_err_mean_m": null,
+  "hover_err_max_m": null
+}

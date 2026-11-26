@@ -336,7 +336,8 @@ def main():
              "drone sinking while it climbed ~5.5 m,\nso its height controller held thrust above weight (panel d). The commanded climb "
              "(panel a, dashed) was correct. ESC 1 ran ~2,100 RPM above the others from 4 s (panel e).\nThe kill switch (ch 5) stayed off "
              "for the whole flight; the mode switch only offers Altitude/Position, which use the same estimate. Telemetry ends at the "
-             "crash (11.4 s).\nCause of the bad estimate: not yet identified (PX4 logs and parameters on the drone).",
+             "crash (11.4 s).\nCause (PX4 onboard log + VIO log): the VIO lost tracking 1 s after arming, and PX4 took its height from "
+             "the VIO (EKF2_HGT_REF = 3); see px4/INCIDENT_2026-11-24_TAKEOFF_FLYAWAY.md.",
              ha="left", color=INK2, fontsize=8.5)
     fig.savefig(a.out, dpi=160, facecolor=SURFACE)
     print(f"saved {a.out}")

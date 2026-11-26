@@ -1,5 +1,6 @@
 {
-  "euler": "xyz",
+  "pose_source": "VIO world",
+  "variant": "xyz",
   "latency_s": 0.45,
   "median_scatter_to_nearest_gate_m": 0.05197409907241671,
   "gate_windows_s": {
@@ -26,176 +27,175 @@
   },
   "detections": 960,
   "unmatched_detections": 17,
-  "clock_offset_s": 1793742420.8196192,
-  "n_vio": 9802,
+  "n_poses": 9802,
   "sync_search": [
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.0,
       "scatter_m": 0.0584
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.05,
       "scatter_m": 0.0551
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.1,
       "scatter_m": 0.0533
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.15,
       "scatter_m": 0.0536
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.2,
       "scatter_m": 0.0533
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.25,
       "scatter_m": 0.0524
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.3,
       "scatter_m": 0.0525
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.35,
       "scatter_m": 0.0531
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.4,
       "scatter_m": 0.0528
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.45,
       "scatter_m": 0.0525
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.5,
       "scatter_m": 0.0522
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.55,
       "scatter_m": 0.0527
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.6,
       "scatter_m": 0.0534
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.65,
       "scatter_m": 0.0539
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.7,
       "scatter_m": 0.0554
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.75,
       "scatter_m": 0.0571
     },
     {
-      "euler": "zyx",
+      "variant": "zyx",
       "latency_s": 0.8,
       "scatter_m": 0.0585
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.0,
       "scatter_m": 0.0579
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.05,
       "scatter_m": 0.0565
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.1,
       "scatter_m": 0.0551
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.15,
       "scatter_m": 0.0533
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.2,
       "scatter_m": 0.0528
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.25,
       "scatter_m": 0.0523
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.3,
       "scatter_m": 0.0525
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.35,
       "scatter_m": 0.0524
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.4,
       "scatter_m": 0.0523
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.45,
       "scatter_m": 0.052
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.5,
       "scatter_m": 0.0526
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.55,
       "scatter_m": 0.0535
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.6,
       "scatter_m": 0.0538
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.65,
       "scatter_m": 0.0545
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.7,
       "scatter_m": 0.0561
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.75,
       "scatter_m": 0.0588
     },
     {
-      "euler": "xyz",
+      "variant": "xyz",
       "latency_s": 0.8,
       "scatter_m": 0.0571
     }

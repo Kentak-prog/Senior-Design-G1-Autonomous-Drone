@@ -19,10 +19,27 @@ WHAT IT DOES:
     so fly_min_snap_offboard.py (e.g. --gate-ahead) can start from there, or the pilot can
     take over and fly it.
 
+PREFLIGHT (px4/preflight.py, before the confirm prompt): refuses unless the VIO is not an estimate source,
+PX4's estimator reports valid velocity and position with sane innovations, attitude and barometer are
+healthy, optical flow and the rangefinder are streaming sensibly, and the height reading is steady.
+
+IN FLIGHT (px4/baro_check.py): PX4's height change is compared with the barometer's; if they keep
+diverging (0.7 m for 1 s after step offsets fade), the script aborts, prints a pilot alarm, and hands off.
+On the 2026-11-24 crash log it fires at 7.1 s; on normal hovers it stays quiet.
+IN FLIGHT (px4/accel_check.py): if PX4's velocity changes faster than 3 m/s^2 beyond the climb's own
+acceleration (--max-accel) for 0.3 s, the flight is cancelled and handed to LAND, with a pilot alarm.
+
 ABORTS:
     - PX4 leaves OFFBOARD (the pilot switched mode): stop sending at once, the pilot has it.
     - Arming or OFFBOARD refused / not confirmed in time: disarm (still on the ground), exit.
-    - Tracking error above --max-error, no position for --stale-s, or Ctrl-C: Hold.
+    - Tracking error above --max-error, no position for --stale-s, barometer disagreement, or Ctrl-C: Hold.
+    - Velocity changing too fast (accel_check.py): LAND.
+
+HAND-OFF (every way out of OFFBOARD except a pilot takeover): the script keeps streaming a hold setpoint
+at the measured position and repeats the Hold/Land request until PX4's heartbeat confirms it
+(fly_min_snap_offboard.hand_off). If PX4 doesn't confirm within 3 s, it stops and says so, leaving
+PX4's offboard-loss failsafe (COM_OBL_RC_ACT) to act. On 2026-11-24 a single unconfirmed Hold request
+was ignored and that failsafe chose Altitude mode.
 
 ON THE DRONE (docker/voxl2-tflite-gpu container, pymavlink in /repo/.pylibs; voxl-vision-hub
 relays PX4's MAVLink to localhost:14551, and its own offboard_mode must be "off"):
@@ -43,6 +60,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fly_min_snap_offboard as fms  # noqa: E402  (PX4Link, connect, wait_for_pose, constants)
+import preflight  # noqa: E402
+import baro_check  # noqa: E402
+import accel_check  # noqa: E402
 
 MAV_CMD_COMPONENT_ARM_DISARM = 400
 PX4_MAIN_AUTO = 4
@@ -76,14 +96,20 @@ class Takeoff:
     """The ARM -> OFFBOARD -> climb -> hover -> Hold/Land sequence on a PX4Link."""
 
     def __init__(self, link, height, climb_rate=0.3, hold_s=5.0, end="hold", max_error=0.5,
-                 stale_s=0.5, rate_hz=50.0, arm_timeout=3.0, mode_timeout=2.0,
-                 clock=time.monotonic, sleep=time.sleep):
+                 stale_s=0.5, rate_hz=50.0, arm_timeout=3.0, mode_timeout=2.0, baro=True,
+                 max_accel=None, clock=time.monotonic, sleep=time.sleep):
+        if max_accel is None:
+            max_accel = accel_check.DEFAULT_MARGIN + accel_check.quintic_peak_accel(
+                height, climb_duration(height, climb_rate))
+        self.accel = accel_check.VelocityJumpCheck(max_accel)
+        self.baro = baro_check.BaroCrossCheck() if baro else None
         self.link, self.height, self.climb_rate = link, height, climb_rate
         self.hold_s, self.end, self.max_error, self.stale_s = hold_s, end, max_error, stale_s
         self.dt = 1.0 / rate_hz
         self.arm_timeout, self.mode_timeout = arm_timeout, mode_timeout
         self.clock, self.sleep = clock, sleep
         self.rows = []
+        self.handoff = None
         self.start_ned = np.array(link.pos_ned, dtype=float)
         self.yaw = float(link.yaw)
         self.target_ned = self.start_ned + np.array([0.0, 0.0, -height])
@@ -119,17 +145,26 @@ class Takeoff:
     def _disarm(self):
         self.link.command(MAV_CMD_COMPONENT_ARM_DISARM, 0)
 
-    def _finish(self):
-        if self.end == "land":
-            self._set_mode(PX4_MAIN_AUTO, PX4_SUB_AUTO_LAND)
-            return "AUTO.LAND"
-        self.link.set_loiter()
-        return "Hold (AUTO.LOITER)"
+    def _finish(self, land=False):
+        """Hand PX4 to Hold (or Land) and CONFIRM it, holding the measured position meanwhile
+        (fms.hand_off). 2026-11-24 the single unconfirmed Hold request was never taken."""
+        self.link.poll()
+        hold = np.array(self.link.pos_ned if self.link.pos_ned is not None else self.target_ned, dtype=float)
+        sub = PX4_SUB_AUTO_LAND if (land or self.end == "land") else PX4_SUB_AUTO_LOITER
+        try:
+            ok, msg = fms.hand_off(self.link, lambda: self._send(hold), main=PX4_MAIN_AUTO, sub=sub,
+                                   rate_hz=1.0 / self.dt, clock=self.clock, sleep=self.sleep)
+        except KeyboardInterrupt:
+            ok, msg = False, "Ctrl-C during the hand-off; left to PX4's offboard-loss failsafe"
+        self.handoff = {"confirmed": ok, "message": msg}
+        return msg
 
     # -- the sequence ------------------------------------------------------------
     def execute(self) -> str:
         start = self.start_ned
         try:
+            if self.baro is not None:
+                baro_check.request_baro(self.link)
             # PX4 wants setpoints streaming before it accepts OFFBOARD.
             self._wait("prestream", lambda: False, 1.0, start)
             self.link.arm()
@@ -142,6 +177,7 @@ class Takeoff:
                 return "aborted: PX4 did not enter OFFBOARD; disarmed (still on the ground)"
 
             T = climb_duration(self.height, self.climb_rate)
+            self.accel.reset()
             t0 = self.clock()
             while True:
                 t = self.clock() - t0
@@ -156,9 +192,23 @@ class Takeoff:
                     return "pilot took over (PX4 left OFFBOARD); stopped sending"
                 if self.link.last_pos_time is None or self.clock() - self.link.last_pos_time > self.stale_s:
                     return f"aborted: no position for {self.stale_s} s -> {self._finish()}"
+                reason = self.accel.update(self.clock(), self.link.vel_ned, self.link.last_pos_time)
+                if reason:              # before the tracking check: violent motion always goes to LAND
+                    print(accel_check.PILOT_ALARM, flush=True)
+                    return f"aborted: {reason} -> {self._finish(land=True)}"
                 err = float(np.linalg.norm(self.link.pos_ned - sp))
                 if err > self.max_error:
+                    if self.accel.violent:
+                        print(accel_check.PILOT_ALARM, flush=True)
+                        return (f"aborted: {err:.2f} m from the setpoint while the velocity changes at "
+                                f"{self.accel.accel:.1f} m/s^2 -> {self._finish(land=True)}")
                     return f"aborted: {err:.2f} m from the setpoint -> {self._finish()}"
+                if self.baro is not None:
+                    alt, t_alt = baro_check.baro_from_link(self.link)
+                    reason = self.baro.update(self.clock(), self.link.pos_ned[2], alt, t_alt)
+                    if reason:
+                        print(baro_check.PILOT_ALARM, flush=True)
+                        return f"aborted: {reason} -> {self._finish()}"
                 self.sleep(self.dt)
             return f"completed -> {self._finish()}"
         except KeyboardInterrupt:
@@ -191,6 +241,14 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
         print(f"REFUSING: PX4 says the drone is moving ({np.linalg.norm(link.vel_ned):.2f} m/s). "
               f"It must sit still on the ground (and the VIO must have settled).")
         return 1
+    if args.skip_preflight:
+        print("WARNING: --skip-preflight: PX4's estimate sources and health were NOT checked (simulator only).")
+    else:
+        ok, results, warnings = preflight.run_checks(link, on_ground=True, clock=clock, sleep=sleep)
+        preflight.report(ok, results, warnings)
+        if not ok:
+            print("REFUSING: preflight checks failed (see px4/preflight.py for what each one means).")
+            return 1
     T = climb_duration(args.height, args.climb_rate)
     print(f"[plan] arm, OFFBOARD, climb {args.height:.2f} m straight up in {T:.1f} s "
           f"(peak {args.climb_rate:.2f} m/s) to PX4 local z {p[2] - args.height:+.2f} (NED), "
@@ -200,8 +258,13 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
         if reply not in ("y", "yes"):
             print("not flying.")
             return 0
+    if args.no_baro_check:
+        print("WARNING: --no-baro-check: PX4's height is NOT cross-checked against the barometer in flight.")
     run_ = Takeoff(link, args.height, args.climb_rate, args.hold_s, args.end, args.max_error,
-                   args.stale_s, args.rate, clock=clock, sleep=sleep)
+                   args.stale_s, args.rate, baro=not args.no_baro_check, max_accel=args.max_accel,
+                   clock=clock, sleep=sleep)
+    print(f"[failsafe] cancel and LAND if the velocity changes faster than {run_.accel.max_accel:.1f} m/s^2 "
+          f"for {run_.accel.sustain:.1f} s")
     status = run_.execute()
     print(f"[takeoff] {status}")
 
@@ -213,7 +276,7 @@ def run(args, link=None, clock=time.monotonic, sleep=time.sleep, ask=input) -> i
             w.writerows(run_.rows)
     hover = [r for r in run_.rows if r["phase"] == "hover" and r["d"] is not None]
     err = [math.dist((r["n"], r["e"], r["d"]), (r["sp_n"], r["sp_e"], r["sp_d"])) for r in hover]
-    summary = {"status": status, "height_m": args.height, "climb_rate": args.climb_rate,
+    summary = {"status": status, "handoff": run_.handoff, "height_m": args.height, "climb_rate": args.climb_rate,
                "start_ned": run_.start_ned.tolist(), "target_ned": run_.target_ned.tolist(),
                "hover_err_mean_m": float(np.mean(err)) if err else None,
                "hover_err_max_m": float(np.max(err)) if err else None}
@@ -241,6 +304,13 @@ def build_parser():
                     help="default: voxl-vision-hub's localhost MAVLink relay on the VOXL 2")
     ap.add_argument("--out-dir", default=None, help="default px4_runs/takeoff_<time>")
     ap.add_argument("--yes", action="store_true", help="do not ask before flying")
+    ap.add_argument("--no-baro-check", action="store_true",
+                    help="turn off the in-flight height-vs-barometer cross-check (px4/baro_check.py)")
+    ap.add_argument("--max-accel", type=float, default=None,
+                    help="cancel and LAND if PX4's velocity changes faster than this, m/s^2, for 0.3 s "
+                         "(default 3 + the climb's own peak acceleration)")
+    ap.add_argument("--skip-preflight", action="store_true",
+                    help="skip px4/preflight.py's estimator checks (simulators without optical flow only)")
     return ap
 
 

@@ -32,6 +32,7 @@ class GroundPX4(FakePX4):
     def __init__(self, refuse_arm=False, refuse_offboard=False, drop_pos_after=None, moving=False, **kw):
         super().__init__(start_enu=kw.pop("start_enu", GROUND), heading_enu_deg=HEADING, **kw)
         self.mode, self.armed = POSCTL, False
+        self.ground_z_enu = float(kw.get("start_enu", GROUND)[2]) if "start_enu" in kw else float(GROUND[2])
         self.refuse_arm, self.refuse_offboard = refuse_arm, refuse_offboard
         self.drop_pos_after = drop_pos_after
         self.moving = moving
@@ -118,8 +119,9 @@ def test_takeoff_climbs_hovers_and_holds():
 def test_end_land():
     fake = GroundPX4()
     rc, log, s = _run(fake, extra=("--yes", "--end", "land"))
-    assert rc == 0 and (AUTO, th.PX4_SUB_AUTO_LAND) in fake.mode_params and "AUTO.LAND" in s["status"]
-    print("  --end land hands PX4 to AUTO.LAND  OK")
+    assert rc == 0 and (AUTO, th.PX4_SUB_AUTO_LAND) in fake.mode_params, s
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == th.PX4_SUB_AUTO_LAND
+    print(f"  --end land hands PX4 to Land, confirmed ({s['handoff']['message']})  OK")
 
 
 def test_refuses_when_already_armed():
@@ -185,6 +187,151 @@ def test_tracking_error_aborts_to_hold():
     rc, log, s = _run(fake)
     assert rc == 1 and "from the setpoint" in s["status"] and fake.mode == AUTO
     print("  drone stops following the climb: aborts to Hold  OK")
+
+
+def test_abort_hand_off_survives_lost_requests():
+    """2026-11-24 replay: the climb doesn't follow (estimate stuck), the script aborts, and the first
+    Hold requests are lost. The script must keep holding and re-asking until PX4 confirms Hold, instead
+    of stopping and leaving PX4's offboard-loss failsafe (Altitude mode) to decide."""
+    fake = GroundPX4(freeze_after=1.5, drop_mode_requests=2)
+    rc, log, s = _run(fake)
+    assert rc == 1 and "from the setpoint" in s["status"]
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == th.PX4_SUB_AUTO_LOITER
+    # >= 3: the 3rd request gets through; a 4th may go out before PX4's next heartbeat confirms (harmless)
+    assert not fake.offboard_loss_failsafe and fake.mode_requests >= 3
+    print("  abort with 2 lost Hold requests: re-asked until Hold confirmed, no failsafe  OK")
+
+
+def _refused_by_preflight(setup, expect):
+    fake = GroundPX4()
+    setup(fake)
+    rc, log, _ = _run(fake)
+    assert rc == 1 and "REFUSING: preflight" in log and expect in log, log[-1500:]
+    assert not fake.sp_times and not fake.armed and fake.offboard_commands == 0
+    return log
+
+
+def test_preflight_passes_on_the_healthy_setup():
+    fake = GroundPX4()
+    rc, log, s = _run(fake)
+    assert rc == 0 and "[preflight] PASS" in log and "WARN" not in log.split("[plan]")[0], log[:1500]
+    print("  healthy optical-flow + barometer setup: preflight PASS, then flies  OK")
+
+
+def test_preflight_refuses_vision_sources():
+    _refused_by_preflight(lambda f: f.params.update(EKF2_EV_CTRL=13), "EKF2_EV_CTRL=13")
+    _refused_by_preflight(lambda f: f.params.update(EKF2_HGT_REF=3, EKF2_EV_CTRL=0), "(vision)")
+    print("  VIO still a source (EKF2_EV_CTRL 13, or EKF2_HGT_REF 3 as on 2026-11-24): refused, nothing sent  OK")
+
+
+def test_preflight_refuses_bad_estimator():
+    _refused_by_preflight(lambda f: setattr(f, "est_flags", 0x033e & ~0x8), "invalid: position xy")
+    _refused_by_preflight(lambda f: setattr(f, "est_ratios", (0.03, 1.4, 0.01)), "PX4 rejecting")
+    _refused_by_preflight(lambda f: setattr(f, "sys_health", 0x8), "attitude")
+    _refused_by_preflight(lambda f: setattr(f, "sys_health", 0x200000), "barometer")
+    print("  estimator position invalid / innovations rejected / AHRS or barometer unhealthy: refused  OK")
+
+
+def test_preflight_refuses_bad_sensors():
+    _refused_by_preflight(lambda f: setattr(f, "flow_quality", 12), "quality 12")
+    _refused_by_preflight(lambda f: setattr(f, "flow_quality", None), "no OPTICAL_FLOW_RAD")
+    _refused_by_preflight(lambda f: setattr(f, "rangefinder", False), "no DISTANCE_SENSOR")
+    _refused_by_preflight(lambda f: f.params.pop("EKF2_OF_QMIN"), "did not answer")
+    print("  low flow quality / no flow / no rangefinder / unanswered parameter: refused  OK")
+
+
+def test_preflight_refuses_drifting_height():
+    _refused_by_preflight(lambda f: setattr(f, "z_drift", 0.05), "warm up")
+    print("  PX4 height creeping 5 cm/s on the ground (barometer warm-up): refused  OK")
+
+
+def test_preflight_warns_on_rangefinder_height():
+    fake = GroundPX4()
+    fake.params["EKF2_HGT_REF"] = 2
+    rc, log, _ = _run(fake)
+    assert rc == 0 and "WARN" in log and "EKF2_HGT_REF=2" in log
+    print("  EKF2_HGT_REF 2 (rangefinder): passes with a gate-bar warning  OK")
+
+
+def test_skip_preflight_flies_with_a_warning():
+    fake = GroundPX4()
+    fake.params["EKF2_EV_CTRL"] = 13
+    rc, log, _ = _run(fake, extra=("--yes", "--skip-preflight"))
+    assert rc == 0 and "--skip-preflight" in log and "[preflight]" not in log
+    print("  --skip-preflight bypasses the checks, loudly  OK")
+
+
+def test_baro_runaway_aborts_with_pilot_alarm():
+    """2026-11-24 replay: PX4's height tracks the climb, but the real drone keeps climbing away (stale
+    height source). Only the barometer sees it: the script must abort, hand off to Hold, and tell the
+    pilot that Hold uses the same wrong height."""
+    fake = GroundPX4()
+    fake.runaway_rate, fake.baro_noise = 0.4, 0.2
+    rc, log, s = _run(fake)
+    assert rc == 1 and "barometer" in s["status"] and "PILOT: PX4's height may be WRONG" in log, s
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == th.PX4_SUB_AUTO_LOITER
+    print(f"  truth climbs 0.4 m/s away from PX4's height: aborted at {fake.true_offset:.2f} m divergence, "
+          f"pilot alarm, Hold confirmed  OK")
+
+
+def test_baro_noise_and_step_stay_quiet():
+    fake = GroundPX4()
+    fake.baro_noise = 0.3
+    rc, log, s = _run(fake, extra=("--yes", "--hold-s", "10"))
+    assert rc == 0 and s["status"].startswith("completed"), s["status"]
+    print("  noisy (0.3 m) barometer over a normal takeoff and 10 s hover: no false alarm  OK")
+
+
+def test_no_barometer_refused_or_aborts():
+    fake = GroundPX4()
+    fake.baro = False
+    rc, log, _ = _run(fake)
+    assert rc == 1 and "no SCALED_PRESSURE" in log and not fake.sp_times
+    fake = GroundPX4()
+    fake.baro = False
+    rc, log, s = _run(fake, extra=("--yes", "--skip-preflight"))
+    assert rc == 1 and "no barometer data" in s["status"] and fake.mode == AUTO, s["status"]
+    print("  no SCALED_PRESSURE: refused by preflight; with --skip-preflight, aborts to Hold in flight  OK")
+
+
+def test_no_baro_check_flag():
+    fake = GroundPX4()
+    fake.runaway_rate = 0.4
+    rc, log, s = _run(fake, extra=("--yes", "--no-baro-check"))
+    assert rc == 0 and "--no-baro-check" in log
+    print("  --no-baro-check disables it, loudly (the runaway goes unseen: why it is on by default)  OK")
+
+
+def test_velocity_jump_cancels_and_lands():
+    fake = GroundPX4()
+    fake.kick_at, fake.kick_accel = 3.0, 8.0               # mid-climb: 8 m/s^2 for 0.5 s
+    rc, log, s = _run(fake)
+    assert rc == 1 and "velocity chang" in s["status"] and "flight CANCELLED" in log, s["status"]
+    assert s["handoff"]["confirmed"] and fake.mode == AUTO and fake.sub == th.PX4_SUB_AUTO_LAND
+    assert (AUTO, th.PX4_SUB_AUTO_LOITER) not in fake.mode_params
+    # a slower 4 m/s^2 shove for 1 s: the velocity failsafe itself fires first
+    fake = GroundPX4()
+    fake.kick_at, fake.kick_accel, fake.kick_s = 3.0, 4.0, 1.0
+    rc, log, s = _run(fake)
+    assert rc == 1 and "velocity changing" in s["status"] and fake.sub == th.PX4_SUB_AUTO_LAND, s["status"]
+    print("  8 m/s^2 kick (thrown 0.5 m off before 0.3 s) and 4 m/s^2 shove mid-climb: cancelled, "
+          "LAND (not Hold) confirmed  OK")
+
+
+def test_velocity_failsafe_quiet_on_fast_climb_and_settable():
+    fake = GroundPX4()
+    rc, log, s = _run(fake, extra=("--yes", "--height", "0.3", "--climb-rate", "1.0"))
+    assert rc == 0 and s["status"].startswith("completed"), s["status"]   # planned peak 5.5 m/s^2
+    assert "faster than 8.5 m/s^2" in log, log[-600:]
+    fake = GroundPX4()
+    fake.kick_at, fake.kick_accel = 3.0, 2.5                 # gentle push: under the 3 m/s^2 default
+    rc, _, s = _run(fake)
+    assert rc == 0, s["status"]
+    fake = GroundPX4()
+    fake.kick_at, fake.kick_accel = 3.0, 2.5
+    rc, _, s = _run(fake, extra=("--yes", "--max-accel", "1.5"))
+    assert rc == 1 and "velocity changing" in s["status"], s["status"]
+    print("  fastest allowed climb (0.3 m at 1 m/s) and a 2.5 m/s^2 push stay quiet; --max-accel 1.5 catches it  OK")
 
 
 def test_lost_position_aborts_to_hold():

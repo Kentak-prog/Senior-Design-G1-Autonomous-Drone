@@ -1,0 +1,100 @@
+nohup: ignoring input
+INFO: Created TensorFlow Lite delegate for GPU.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Loaded OpenCL library with dlopen.
+INFO: Initialized OpenCL-based API.
+INFO: Created 1 GPU delegate kernels.
+[feed] http://localhost/video_raw/hires_front_small_color  1024x768
+[calib] vision/calib/hires_front_1024x768.yml fisheye=True fx=505.4 D=[-0.0171, -0.0092, 0.0052, -0.0001]
+[cnn] vision/yolo_gate/weights/pink_det_v1_480x640_float16.tflite: TFLite GPU (OpenCL, fp16), whole graph on the GPU, input (1, 480, 640, 3), output (1, 5, 6300) (box model, no Ultralytics; --imgsz ignored)
+[serve] live overlay on port 8091: http://<drone-ip>:8091/
+[run] 30 frames  17.8 fps  with-gate 30  nearest 4.52 m
+[run] 60 frames  17.4 fps  with-gate 60  nearest 4.53 m
+[run] 90 frames  17.2 fps  with-gate 90  nearest 4.52 m
+[run] 120 frames  17.8 fps  with-gate 120  nearest 4.50 m
+[run] 150 frames  18.4 fps  with-gate 150  nearest 4.52 m
+[run] 180 frames  18.1 fps  with-gate 180  nearest 4.52 m
+[run] 210 frames  21.1 fps  with-gate 210  nearest 4.52 m
+[run] 240 frames  17.0 fps  with-gate 240  nearest 4.51 m
+[run] 270 frames  16.9 fps  with-gate 270  nearest 4.54 m
+[run] 300 frames  17.0 fps  with-gate 300  nearest 4.52 m
+[run] 330 frames  18.0 fps  with-gate 330  nearest 4.54 m
+[run] 360 frames  17.1 fps  with-gate 360  nearest 4.52 m
+[run] 390 frames  19.9 fps  with-gate 390  nearest 4.54 m
+[run] 420 frames  17.5 fps  with-gate 420  nearest 4.51 m
+[run] 450 frames  17.7 fps  with-gate 450  nearest 4.54 m
+[run] 480 frames  18.6 fps  with-gate 480  nearest 4.52 m
+[run] 510 frames  19.0 fps  with-gate 510  nearest 4.54 m
+[run] 540 frames  17.3 fps  with-gate 540  nearest 4.53 m
+[run] 570 frames  17.2 fps  with-gate 570  nearest 4.51 m
+[run] 600 frames  17.2 fps  with-gate 600  nearest 4.60 m
+[run] 630 frames  21.5 fps  with-gate 623
+[run] 660 frames  18.7 fps  with-gate 652  nearest 5.24 m
+[run] 690 frames  20.0 fps  with-gate 678  nearest 6.04 m
+[run] 720 frames  16.6 fps  with-gate 681
+[run] 750 frames  22.2 fps  with-gate 681
+[run] 780 frames  19.1 fps  with-gate 681
+[run] 810 frames  23.7 fps  with-gate 681
+[run] 840 frames  22.0 fps  with-gate 691  nearest 4.68 m
+[run] 870 frames  19.9 fps  with-gate 721  nearest 4.28 m
+[run] 900 frames  17.0 fps  with-gate 751  nearest 4.23 m
+[run] 930 frames  17.4 fps  with-gate 781  nearest 4.22 m
+[run] 960 frames  17.0 fps  with-gate 811  nearest 4.21 m
+[run] 990 frames  18.3 fps  with-gate 841  nearest 4.24 m
+[run] 1020 frames  15.8 fps  with-gate 871  nearest 4.19 m
+[run] 1050 frames  18.9 fps  with-gate 901  nearest 4.18 m
+[run] 1080 frames  18.6 fps  with-gate 931  nearest 4.19 m
+[run] 1110 frames  20.6 fps  with-gate 958
+[run] 1140 frames  20.6 fps  with-gate 960
+[run] 1170 frames  22.3 fps  with-gate 960
+[run] 1200 frames  28.1 fps  with-gate 972
+[run] 1230 frames  19.9 fps  with-gate 972
+[run] 1260 frames  20.5 fps  with-gate 981  nearest 5.29 m
+[run] 1290 frames  19.6 fps  with-gate 1001
+[run] 1320 frames  21.3 fps  with-gate 1001
+[run] 1350 frames  19.3 fps  with-gate 1001
+[run] 1380 frames  21.8 fps  with-gate 1001
+[run] 1410 frames  20.1 fps  with-gate 1001
+[run] 1440 frames  21.5 fps  with-gate 1001
+[run] 1470 frames  19.4 fps  with-gate 1001
+[run] 1500 frames  20.3 fps  with-gate 1001
+[run] 1530 frames  20.8 fps  with-gate 1001
+[run] 1560 frames  19.2 fps  with-gate 1001
+[run] 1590 frames  19.7 fps  with-gate 1001
+[run] 1620 frames  20.3 fps  with-gate 1004
+[run] 1650 frames  20.0 fps  with-gate 1008
+[run] 1680 frames  19.4 fps  with-gate 1036  nearest 5.45 m
+[run] 1710 frames  21.2 fps  with-gate 1066  nearest 5.51 m
+[run] 1740 frames  20.3 fps  with-gate 1096  nearest 5.41 m
+[run] 1770 frames  18.4 fps  with-gate 1126  nearest 4.73 m
+[run] 1800 frames  17.8 fps  with-gate 1156  nearest 5.40 m
+[run] 1830 frames  17.9 fps  with-gate 1186  nearest 5.43 m
+[run] 1860 frames  19.3 fps  with-gate 1207
+[run] 1890 frames  17.5 fps  with-gate 1235  nearest 5.55 m
+[run] 1920 frames  17.1 fps  with-gate 1265  nearest 5.56 m
+[run] 1950 frames  17.7 fps  with-gate 1295  nearest 5.41 m
+[run] 1980 frames  19.1 fps  with-gate 1299
+[run] 2010 frames  18.2 fps  with-gate 1299
+[run] 2040 frames  20.1 fps  with-gate 1299
+[run] 2070 frames  17.0 fps  with-gate 1299
+[run] 2100 frames  19.1 fps  with-gate 1299
+[run] 2130 frames  17.2 fps  with-gate 1299
+[run] 2160 frames  17.8 fps  with-gate 1299
+[run] 2190 frames  18.1 fps  with-gate 1299
+[run] 2220 frames  18.3 fps  with-gate 1299
+[run] 2250 frames  19.3 fps  with-gate 1299
+[run] 2280 frames  17.7 fps  with-gate 1299
+[run] 2310 frames  17.3 fps  with-gate 1299
+[run] 2340 frames  16.1 fps  with-gate 1299
+[run] 2370 frames  15.6 fps  with-gate 1299
+[run] 2400 frames  18.7 fps  with-gate 1299
+[run] 2430 frames  16.3 fps  with-gate 1326  nearest 5.38 m
+[run] 2460 frames  15.1 fps  with-gate 1356  nearest 5.28 m
+[run] 2490 frames  16.5 fps  with-gate 1386  nearest 5.34 m
+[run] 2520 frames  17.4 fps  with-gate 1416  nearest 5.36 m
+[run] 2550 frames  14.2 fps  with-gate 1446  nearest 5.34 m
+[run] 2580 frames  15.5 fps  with-gate 1476  nearest 5.33 m
+[run] 2610 frames  15.8 fps  with-gate 1506  nearest 5.36 m
+[run] 2640 frames  13.8 fps  with-gate 1536  nearest 5.41 m
+[run] 2670 frames  14.3 fps  with-gate 1540
+[run] 2700 frames  17.3 fps  with-gate 1541

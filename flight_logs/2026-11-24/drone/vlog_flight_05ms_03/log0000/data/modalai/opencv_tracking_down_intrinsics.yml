@@ -1,0 +1,19 @@
+%YAML:1.0
+---
+M: !!opencv-matrix
+   rows: 3
+   cols: 3
+   dt: d
+   data: [ 4.5563935715380194e+02, 0., 6.3746934029896374e+02, 0.,
+       4.5572166064734353e+02, 4.2816773568907229e+02, 0., 0., 1. ]
+D: !!opencv-matrix
+   rows: 4
+   cols: 1
+   dt: d
+   data: [ 6.6452578788270864e-02, 1.2093284053883237e-02,
+       -2.3399129339195558e-03, -9.7374183453127544e-04 ]
+reprojection_error: 1.7744712054437056e-01
+width: 1280
+height: 800
+distortion_model: fisheye
+calibration_time: "2023-03-02 13:09:30"
